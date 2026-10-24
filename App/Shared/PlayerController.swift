@@ -42,6 +42,8 @@ final class PlayerController: ObservableObject {
     @Published private(set) var nowPlaying: String?
     @Published private(set) var currentProgram: EPGProgram?
     @Published private(set) var nextProgram: EPGProgram?
+    /// Zählt hoch, sobald neue EPG-Daten eingetroffen sind (auch für andere Sender).
+    @Published private(set) var epgRevision = 0
     @Published private(set) var audioTrackName = "Standard"
     @Published private(set) var subtitleName = "Aus"
     @Published private(set) var hasSubtitles = false
@@ -59,10 +61,16 @@ final class PlayerController: ObservableObject {
         let parser = EITLogParser()
         self.epgParser = parser
 
+        // Der Speicher ist threadsicher; die Rückrufe kommen aus VLC-Threads (Wiedergabe und
+        // Hintergrund-Abruf teilen sich die Bibliothek und damit diesen Parser).
+        let store = epgStore
+        parser.onServiceName = { [weak self] serviceID, name in
+            store.setServiceName(name, for: serviceID)
+            Task { @MainActor in self?.scheduleEPGRefresh() }
+        }
         parser.onProgramParsed = { [weak self] program in
-            Task { @MainActor in
-                self?.handleParsedProgram(program)
-            }
+            store.add(program: program)
+            Task { @MainActor in self?.handleParsedProgram(program) }
         }
         let receiver = EPGLogReceiver(parser: parser)
         self.logReceiver = receiver
@@ -85,6 +93,7 @@ final class PlayerController: ObservableObject {
     private var failedCandidates = 0
     /// Fehlgeschlagene Varianten in der aktuellen Sitzung vor einem erfolgreichen Bild.
     private var failedInThisSessionForCurrent: [String] = []
+    private var retryTask: Task<Void, Never>?
     /// Variante, die in dieser Sitzung zuletzt Bild geliefert hat, je Sender.
     private var workingVariant: [String: String] = [:]
     private var currentVariantKey = ""
@@ -115,6 +124,7 @@ final class PlayerController: ObservableObject {
         failedInThisSessionForCurrent = []
         self.channel = ordered[0]
         self.options = options
+        retryTask?.cancel()
         reconnectTask?.cancel()
         reconnectTask = nil
         start()
@@ -122,6 +132,7 @@ final class PlayerController: ObservableObject {
 
     func stop() {
         monitorTask?.cancel()
+        retryTask?.cancel()
         reconnectTask?.cancel()
         reconnectTask = nil
         mediaPlayer.stop()
@@ -154,6 +165,7 @@ final class PlayerController: ObservableObject {
         behindLive = 0
         pausedSince = nil
         nowPlaying = nil
+        vlcTitle = nil
         currentProgram = nil
         nextProgram = nil
         wasPlaying = false
@@ -242,32 +254,62 @@ final class PlayerController: ObservableObject {
         }
 
         if let title = mediaPlayer.media?.metadata(forKey: VLCMetaInformationNowPlaying),
-           !title.isEmpty, title != nowPlaying {
+           !title.isEmpty, title != vlcTitle {
+            vlcTitle = title
             nowPlaying = title
             refreshEPGPrograms()
             DebugLog.log("Läuft jetzt: \(title)")
         }
+        // Jetzt/Danach wechseln auch ohne neue Daten, wenn eine Sendung endet.
+        if Date().timeIntervalSince(lastEPGRefresh) > 15 {
+            refreshEPGPrograms()
+        }
+    }
+
+    /// Titel der laufenden Sendung, wie VLC ihn für das ausgewählte Programm meldet.
+    /// Unabhängig vom EPG-Speicher, daher als Anker für das Lernen einer Zuordnung geeignet.
+    private var vlcTitle: String?
+    private var lastEPGRefresh = Date.distantPast
+    private var epgRefreshPending = false
+
+    /// Namen aller Varianten des aktuellen Senders (HD/SD, alte/neue Frequenz).
+    private var currentEPGNames: [String] {
+        let names = candidates.map(\.name)
+        return names.isEmpty ? (channel.map { [$0.name] } ?? []) : names
     }
 
     private func handleParsedProgram(_ program: EPGProgram) {
-        epgStore.add(program: program)
-        if let current = channel {
-            if program.isRunningStatus || (nowPlaying != nil && program.title.localizedCaseInsensitiveContains(nowPlaying!)) {
-                epgStore.associate(channelKey: current.groupKey, serviceID: program.serviceID)
-            }
-            if epgStore.serviceID(for: current.groupKey) == program.serviceID {
-                refreshEPGPrograms()
-            }
+        if channel != nil, epgStore.serviceID(forChannelNames: currentEPGNames) == nil,
+           let title = vlcTitle,
+           epgStore.learn(channelNames: currentEPGNames, fromNowPlayingTitle: title) {
+            DebugLog.log("EPG-Zuordnung über Titel gelernt: \(currentEPGNames.first ?? "")")
+        }
+        scheduleEPGRefresh()
+    }
+
+    /// Fasst viele Aktualisierungen in kurzer Folge zusammen (eine EIT bringt Dutzende Sendungen)
+    /// und meldet Ansichten wie der Programmübersicht über `epgRevision`, dass neue Daten da sind.
+    private func scheduleEPGRefresh() {
+        guard !epgRefreshPending else { return }
+        epgRefreshPending = true
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(1))
+            guard let self else { return }
+            self.epgRefreshPending = false
+            self.epgRevision &+= 1
+            self.refreshEPGPrograms()
         }
     }
 
     func refreshEPGPrograms() {
-        guard let current = channel else { return }
-        currentProgram = epgStore.currentProgram(forChannelKey: current.groupKey)
-        nextProgram = epgStore.nextProgram(forChannelKey: current.groupKey)
-        if let current = currentProgram, nowPlaying == nil {
-            nowPlaying = current.title
-        }
+        lastEPGRefresh = Date()
+        guard channel != nil else { return }
+        let names = currentEPGNames
+        let current = epgStore.currentProgram(forChannelNames: names)
+        let next = epgStore.nextProgram(forChannelNames: names)
+        if current != currentProgram { currentProgram = current }
+        if next != nextProgram { nextProgram = next }
+        if nowPlaying == nil, let current { nowPlaying = current.title }
     }
 
     /// Schlüssel für die gemerkte Variante: Sender plus gewünschte Qualität.
@@ -298,12 +340,31 @@ final class PlayerController: ObservableObject {
         // Alle Varianten wurden erfolglos probiert
         let channelName = channel?.displayName ?? "Sender"
         DebugLog.log("Keine Variante von \(channelName) liefert Bild.")
-        onAllCandidatesFailed?(channelName)
         setFailed(
             title: "Kein Bild für \(channelName)",
             message: "Senderliste veraltet – Suchlauf starten",
             hint: "Bitte in der FRITZ!Box-Oberfläche unter DVB-C einen Sendersuchlauf starten."
         )
+        // Kann die Meldung präzisieren (z. B. „Alle Tuner belegt“).
+        onAllCandidatesFailed?(channelName)
+        scheduleRetryAfterFailure()
+    }
+
+    /// Nach einer Fehlermeldung in größerem Abstand still weiter probieren: Ein belegter Tuner wird
+    /// frei, ein kurzer Netzaussetzer geht vorbei. Endet mit jedem Senderwechsel oder Stopp.
+    private func scheduleRetryAfterFailure() {
+        retryTask?.cancel()
+        let failedChannelKey = currentVariantKey
+        retryTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(30))
+            guard let self, !Task.isCancelled, case .failed = self.status,
+                  self.currentVariantKey == failedChannelKey, !self.candidates.isEmpty else { return }
+            DebugLog.log("Neuer Versuch nach Fehlermeldung")
+            self.failedCandidates = 0
+            self.candidateIndex = 0
+            self.channel = self.candidates[0]
+            self.start()
+        }
     }
 
     /// Kommen per UDP keine Daten an (VPN, Firewall), für den Rest der Sitzung RTP über TCP nutzen.
@@ -478,8 +539,10 @@ final class PlayerController: ObservableObject {
         var newStats = PlaybackStatistics()
         newStats.videoSize = mediaPlayer.videoSize
         if let vlcStats = mediaPlayer.media?.statistics {
-            newStats.inputBitrateMbps = (Double(vlcStats.inputBitrate) * 8.0) / 1_000_000.0
-            newStats.demuxBitrateMbps = (Double(vlcStats.demuxBitrate) * 8.0) / 1_000_000.0
+            // libVLC liefert Byte pro Mikrosekunde (die VLC-Oberfläche rechnet mit × 8000 in kbit/s),
+            // × 8 ergibt also Mbit/s.
+            newStats.inputBitrateMbps = Double(vlcStats.inputBitrate) * 8.0
+            newStats.demuxBitrateMbps = Double(vlcStats.demuxBitrate) * 8.0
             newStats.displayedPictures = Int(vlcStats.displayedPictures)
             newStats.lostPictures = Int(vlcStats.lostPictures)
             newStats.demuxDiscontinuities = Int(vlcStats.demuxDiscontinuity)

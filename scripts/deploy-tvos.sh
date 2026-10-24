@@ -57,9 +57,13 @@ else
     TEAM_ARG=""
 fi
 
+# -allowProvisioningUpdates: Mit kostenloser Apple-ID läuft das Profil nach 7 Tagen ab;
+# so holt xcodebuild beim Bauen selbst ein neues (setzt eine in Xcode angemeldete Apple-ID voraus).
 xcodebuild -scheme FritzTV-tvOS \
     -destination "generic/platform=tvOS" \
     -derivedDataPath "$BUILD_DIR/DerivedData" \
+    -allowProvisioningUpdates \
+    -allowProvisioningDeviceRegistration \
     $TEAM_ARG \
     build
 

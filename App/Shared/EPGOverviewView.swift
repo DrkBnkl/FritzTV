@@ -6,6 +6,7 @@ import FritzTVKit
 struct EPGOverviewView: View {
     @ObservedObject var model: AppModel
     @ObservedObject var player: PlayerController
+    @ObservedObject var scanner: BackgroundEPGScanner
     @Environment(\.dismiss) private var dismiss
 
     @State private var focusPrimeTime = false
@@ -57,10 +58,10 @@ struct EPGOverviewView: View {
                 .keyboardShortcut(.cancelAction)
                 #endif
 
-            if model.epgScanner.isScanning {
+            if scanner.isScanning {
                 HStack(spacing: UI.s(8)) {
                     ProgressView()
-                    Text("Lade EPG: \(model.epgScanner.currentScanningChannel ?? "") …")
+                    Text("Lade EPG: \(scanner.currentScanningChannel ?? "") …")
                         .font(UI.font(20))
                         .foregroundStyle(UI.secondary)
                 }
@@ -84,7 +85,7 @@ struct EPGOverviewView: View {
     }
 
     private func channelRow(_ entry: LineupEntry) -> some View {
-        let schedule = player.epgStore.schedule(forChannelKey: entry.group.key)
+        let schedule = player.epgStore.schedule(forChannelNames: entry.group.epgNames)
         let now = Date()
         let primeDate = primeTimeToday()
 

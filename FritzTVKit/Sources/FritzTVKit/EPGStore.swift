@@ -1,40 +1,77 @@
 import Foundation
 
-/// Verwaltet die EPG-Daten aller Sender, hält das aktuelle Programm vor und ordnet
-/// Programme den Sendern zu.
+/// Hält die EPG-Daten aller Sender und ordnet sie den Sendern der Senderliste zu.
+///
+/// Zuordnung: Die SDT im Stream nennt zu jeder Service-ID den Sendernamen. Die Senderlisten der
+/// FRITZ!Box verwenden dieselben Namen (die Box übernimmt sie beim Sendersuchlauf aus der SDT).
+/// Ein Sender der Senderliste wird deshalb über seine Namen (HD- und SD-Variante) gefunden.
+/// Zusätzlich kann der Player eine Zuordnung lernen, wenn der von VLC gemeldete Titel der
+/// laufenden Sendung eindeutig zu genau einem Dienst passt.
 public final class EPGStore: @unchecked Sendable {
     private let lock = NSLock()
-    private var programsByService: [Int: [String: EPGProgram]] = [:]
-    private var serviceIDByChannelKey: [String: Int] = [:]
-    private var channelKeyByServiceID: [Int: String] = [:]
+    private var programsByService: [Int: [Int: EPGProgram]] = [:]
+    private var serviceIDByName: [String: Int] = [:]
 
     public init() {}
 
-    /// Speichert ein EPG-Programm.
+    /// Normalisierte Form eines Sendernamens für den Vergleich.
+    public static func normalize(_ name: String) -> String {
+        EITLogParser.cleanName(name)
+            .folding(options: [.caseInsensitive, .diacriticInsensitive, .widthInsensitive],
+                     locale: Locale(identifier: "de_DE"))
+            .components(separatedBy: .whitespaces).filter { !$0.isEmpty }.joined(separator: " ")
+    }
+
+    // MARK: Daten aufnehmen
+
     public func add(program: EPGProgram) {
         lock.lock()
         defer { lock.unlock() }
-        var map = programsByService[program.serviceID, default: [:]]
-        map[program.id] = program
-        programsByService[program.serviceID] = map
+        programsByService[program.serviceID, default: [:]][program.eventID] = program
     }
 
-    /// Verknüpft einen Sender-Schlüssel mit einer DVB Service-ID.
-    public func associate(channelKey: String, serviceID: Int) {
+    /// Zuordnung aus der SDT: Service-ID → Sendername.
+    public func setServiceName(_ name: String, for serviceID: Int) {
+        let key = Self.normalize(name)
+        guard !key.isEmpty else { return }
         lock.lock()
         defer { lock.unlock() }
-        serviceIDByChannelKey[channelKey] = serviceID
-        channelKeyByServiceID[serviceID] = channelKey
+        serviceIDByName[key] = serviceID
     }
 
-    /// Sucht die Service-ID für einen Sender.
-    public func serviceID(for channelKey: String) -> Int? {
+    /// Lernt eine Zuordnung, wenn genau ein Dienst gerade eine Sendung mit diesem Titel zeigt.
+    /// `title` muss von VLC stammen (Metadaten des ausgewählten Programms), nicht aus diesem Speicher.
+    @discardableResult
+    public func learn(channelNames: [String], fromNowPlayingTitle title: String, at date: Date = Date()) -> Bool {
+        let wanted = Self.normalize(title)
+        guard !wanted.isEmpty else { return false }
         lock.lock()
         defer { lock.unlock() }
-        return serviceIDByChannelKey[channelKey]
+        if channelNames.contains(where: { serviceIDByName[Self.normalize($0)] != nil }) { return false }
+        let matches = programsByService.compactMap { sid, map -> Int? in
+            let schedule = EPGChannelSchedule(serviceID: sid, programs: Array(map.values))
+            guard let current = schedule.currentProgram(at: date) else { return nil }
+            return Self.normalize(current.title) == wanted ? sid : nil
+        }
+        guard matches.count == 1, let sid = matches.first else { return false }
+        for name in channelNames {
+            serviceIDByName[Self.normalize(name)] = sid
+        }
+        return true
     }
 
-    /// Liefert den Programmablauf für eine Service-ID.
+    // MARK: Abfragen
+
+    /// Service-ID eines Senders über seine Namen (z. B. alle Varianten einer Sendergruppe).
+    public func serviceID(forChannelNames names: [String]) -> Int? {
+        lock.lock()
+        defer { lock.unlock() }
+        for name in names {
+            if let sid = serviceIDByName[Self.normalize(name)] { return sid }
+        }
+        return nil
+    }
+
     public func schedule(for serviceID: Int) -> EPGChannelSchedule? {
         lock.lock()
         defer { lock.unlock() }
@@ -42,32 +79,30 @@ public final class EPGStore: @unchecked Sendable {
         return EPGChannelSchedule(serviceID: serviceID, programs: Array(map.values))
     }
 
-    /// Liefert den Programmablauf für einen Sender-Schlüssel (falls verknüpft).
-    public func schedule(forChannelKey key: String) -> EPGChannelSchedule? {
-        lock.lock()
-        let sid = serviceIDByChannelKey[key]
-        lock.unlock()
-        guard let sid else { return nil }
+    public func schedule(forChannelNames names: [String]) -> EPGChannelSchedule? {
+        guard let sid = serviceID(forChannelNames: names) else { return nil }
         return schedule(for: sid)
     }
 
-    /// Liefert die aktuell laufende Sendung für einen Sender.
-    public func currentProgram(forChannelKey key: String, at date: Date = Date()) -> EPGProgram? {
-        schedule(forChannelKey: key)?.currentProgram(at: date)
+    public func currentProgram(forChannelNames names: [String], at date: Date = Date()) -> EPGProgram? {
+        schedule(forChannelNames: names)?.currentProgram(at: date)
     }
 
-    /// Liefert die nächste Sendung für einen Sender.
-    public func nextProgram(forChannelKey key: String, at date: Date = Date()) -> EPGProgram? {
-        schedule(forChannelKey: key)?.nextProgram(at: date)
+    public func nextProgram(forChannelNames names: [String], at date: Date = Date()) -> EPGProgram? {
+        schedule(forChannelNames: names)?.nextProgram(at: date)
     }
 
-    /// Bereinigt alte Programme, die vor mehr als 12 Stunden beendet wurden.
+    /// Entfernt Sendungen, die vor mehr als 12 Stunden endeten.
     public func pruneExpired(before date: Date = Date().addingTimeInterval(-12 * 3600)) {
         lock.lock()
         defer { lock.unlock() }
         for (sid, map) in programsByService {
-            let active = map.filter { $0.value.endDate > date }
-            programsByService[sid] = active
+            programsByService[sid] = map.filter { $0.value.endDate > date }
         }
     }
+}
+
+public extension ChannelGroup {
+    /// Alle Namen der Varianten, für die EPG-Zuordnung.
+    var epgNames: [String] { variants.map(\.name) }
 }

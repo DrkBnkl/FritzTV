@@ -439,7 +439,8 @@ final class AppModel: ObservableObject {
     }
 
     func startHLSReplay(url: URL, startDate: Date?) {
-        player.mediaPlayer.pause()
+        // Live-Stream ganz beenden: gibt den Tuner frei, und `resume()` startet ihn danach neu.
+        player.stop()
         activeHLSReplay = (url: url, startDate: startDate)
     }
 
@@ -456,7 +457,7 @@ final class AppModel: ObservableObject {
     }
 
     func playMediathekResult(url: URL) {
-        player.mediaPlayer.pause()
+        player.stop()
         searchResultDialog = nil
         activeMediathekURL = url
     }
@@ -531,7 +532,8 @@ final class AppModel: ObservableObject {
     func triggerEPGScan() {
         guard let catalog else { return }
         let host = settings.host.isEmpty ? (connectedHost ?? "fritz.box") : settings.host
-        epgScanner.startScanIfNeeded(catalog: catalog, epgStore: player.epgStore, host: host)
+        epgScanner.startScanIfNeeded(catalog: catalog, epgStore: player.epgStore, host: host,
+                                      deadIDs: settings.deadChannelIDs)
     }
 
     // MARK: Senderplätze bearbeiten

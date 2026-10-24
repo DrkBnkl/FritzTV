@@ -52,6 +52,15 @@ targets:
             fritz.repeater:
               NSExceptionAllowsInsecureHTTPLoads: true
               NSIncludesSubdomains: true
+            # Senderlogos vom AVM-Server (nur per http erreichbar)
+            tv.avm.de:
+              NSExceptionAllowsInsecureHTTPLoads: true
+    # App Group, damit die Top-Shelf-Erweiterung die Senderplätze der App lesen kann
+    entitlements:
+      path: App/tvOS/FritzTV.entitlements
+      properties:
+        com.apple.security.application-groups:
+          - group.de.home.fritztv
     settings:
       base:
         PRODUCT_NAME: FritzTV
@@ -88,6 +97,9 @@ targets:
             fritz.repeater:
               NSExceptionAllowsInsecureHTTPLoads: true
               NSIncludesSubdomains: true
+            # Senderlogos vom AVM-Server (nur per http erreichbar)
+            tv.avm.de:
+              NSExceptionAllowsInsecureHTTPLoads: true
     settings:
       base:
         PRODUCT_NAME: FritzTV
@@ -105,6 +117,20 @@ targets:
       - package: FritzTVKit
     info:
       path: App/TopShelf/Info.plist
+      properties:
+        CFBundleDisplayName: FritzTV
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.tv-top-shelf
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).ContentProvider
+        NSAppTransportSecurity:
+          NSExceptionDomains:
+            tv.avm.de:
+              NSExceptionAllowsInsecureHTTPLoads: true
+    entitlements:
+      path: App/TopShelf/FritzTVTopShelf.entitlements
+      properties:
+        com.apple.security.application-groups:
+          - group.de.home.fritztv
     settings:
       base:
         PRODUCT_NAME: FritzTVTopShelf

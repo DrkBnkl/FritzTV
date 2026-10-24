@@ -1,15 +1,20 @@
 import Foundation
 import FritzTVKit
-#if os(tvOS)
+import VLCKitSPM
+#if canImport(TVVLCKit)
 import TVVLCKit
-#else
+#elseif canImport(MobileVLCKit)
+import MobileVLCKit
+#elseif canImport(VLCKit)
 import VLCKit
 #endif
 
 /// Scannt im Hintergrund andere Multiplex-Frequenzen mit einer unsichtbaren VLC-Instanz ab,
 /// um den EPG für alle Sender zu befüllen (Vorbild dream Player TV).
 ///
-/// Läuft nur, wenn mindestens ein freier Tuner an der FRITZ!Box verfügbar ist.
+/// Läuft nur, wenn danach noch mindestens ein Tuner der FRITZ!Box frei bleibt.
+/// Der Abruf nutzt die gemeinsame VLC-Bibliothek; ihr Log-Empfänger trennt die Zeilen
+/// je VLC-Objekt, und die SDT jeder Frequenz ordnet die Sendungen allen Sendern darauf zu.
 @MainActor
 final class BackgroundEPGScanner: ObservableObject {
     @Published private(set) var isScanning = false
@@ -21,11 +26,11 @@ final class BackgroundEPGScanner: ObservableObject {
     private var scannerPlayer: VLCMediaPlayer?
 
     /// Startet den Hintergrund-Scan für alle Multiplexe, die noch keine Daten haben.
-    func startScanIfNeeded(catalog: ChannelCatalog, epgStore: EPGStore, host: String) {
+    func startScanIfNeeded(catalog: ChannelCatalog, epgStore: EPGStore, host: String, deadIDs: Set<String> = []) {
         guard !isScanning else { return }
 
         // Finde alle Frequenzen, für deren Sender noch kein EPG vorliegt
-        let unscanned = findUnscannedChannels(catalog: catalog, epgStore: epgStore)
+        let unscanned = findUnscannedChannels(catalog: catalog, epgStore: epgStore, deadIDs: deadIDs)
         guard !unscanned.isEmpty else { return }
 
         isScanning = true
@@ -36,8 +41,9 @@ final class BackgroundEPGScanner: ObservableObject {
 
                 // Prüfen, ob Tuner frei sind
                 if let status = await FritzBoxTunerClient().fetchStatus(host: host) {
-                    // Mindestens 1 Tuner muss für Live-TV frei bleiben
-                    if status.freeCount < 1 {
+                    // Der Abruf belegt selbst einen Tuner; danach muss noch einer frei sein
+                    // (für andere Geräte im Heimnetz oder einen Senderwechsel).
+                    if status.freeCount < 2 {
                         DebugLog.log("EPG-Hintergrundscan pausiert: keine freien Tuner")
                         break
                     }
@@ -62,13 +68,14 @@ final class BackgroundEPGScanner: ObservableObject {
         currentScanningChannel = nil
     }
 
-    private func findUnscannedChannels(catalog: ChannelCatalog, epgStore: EPGStore) -> [(frequency: Int, channel: Channel)] {
+    private func findUnscannedChannels(catalog: ChannelCatalog, epgStore: EPGStore, deadIDs: Set<String>) -> [(frequency: Int, channel: Channel)] {
         var result: [(frequency: Int, channel: Channel)] = []
         var seenFreqs = Set<Int>()
 
         let now = Date()
         for group in catalog.groups {
-            guard let channel = group.variants.first(where: { $0.tuning?.frequencyMHz != nil }) ?? group.variants.first,
+            // Varianten ohne Bild (z. B. alte Frequenz nach einem Suchlauf) nicht abrufen.
+            guard let channel = group.variants.first(where: { $0.tuning != nil && !deadIDs.contains($0.id) }),
                   let freq = channel.tuning?.frequencyMHz else { continue }
 
             if seenFreqs.contains(freq) { continue }
@@ -80,8 +87,7 @@ final class BackgroundEPGScanner: ObservableObject {
             }
 
             // Prüfen, ob bereits EPG für diesen Service/Kanal vorliegt
-            if let serviceID = epgStore.serviceID(for: group.key),
-               epgStore.schedule(for: serviceID)?.currentProgram(at: now) != nil {
+            if epgStore.currentProgram(forChannelNames: group.epgNames, at: now) != nil {
                 continue
             }
 

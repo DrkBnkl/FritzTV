@@ -26,7 +26,7 @@ struct RootView: View {
             MediathekView(settings: model.settings)
         }
         .fullScreenCover(isPresented: $model.showEPGOverview) {
-            EPGOverviewView(model: model, player: player)
+            EPGOverviewView(model: model, player: player, scanner: model.epgScanner)
         }
         .fullScreenCover(isPresented: Binding(
             get: { model.activeHLSReplay != nil },
@@ -50,7 +50,7 @@ struct RootView: View {
                 .frame(minWidth: 1100, minHeight: 720)
         }
         .sheet(isPresented: $model.showEPGOverview) {
-            EPGOverviewView(model: model, player: player)
+            EPGOverviewView(model: model, player: player, scanner: model.epgScanner)
                 .frame(minWidth: 1100, minHeight: 720)
         }
         .sheet(isPresented: Binding(
