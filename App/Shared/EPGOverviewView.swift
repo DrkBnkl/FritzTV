@@ -10,6 +10,7 @@ struct EPGOverviewView: View {
     @State private var selectedChannelNumber: Int?
     @FocusState private var isFocused: Bool
     @State private var sheetKeyMonitor: Any?
+    @State private var horizontalProxy: ScrollViewProxy?
 
     // Timeline-Konfiguration mit gut lesbarer, größerer Typografie
     private let pointsPerMinute: CGFloat = 4.0
@@ -53,63 +54,52 @@ struct EPGOverviewView: View {
     }
 
     var body: some View {
-        NavigationStack {
-            ScrollViewReader { proxy in
-                VStack(spacing: 0) {
-                    headerBar(proxy: proxy)
-                    Divider().background(Color.white.opacity(0.15))
-                    timelineBody(proxy: proxy)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(Color(red: 0.05, green: 0.05, blue: 0.07).ignoresSafeArea())
-                .task {
-                    let num = selectedChannelNumber ?? model.currentNumber
-                    proxy.scrollTo("channel_\(num)", anchor: .center)
-                    try? await Task.sleep(for: .milliseconds(50))
-                    withAnimation(.easeOut(duration: 0.2)) {
-                        proxy.scrollTo("timeline_now", anchor: .leading)
+        VStack(spacing: 0) {
+            headerBar
+            Divider().background(Color.white.opacity(0.15))
+            timelineBody
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color(red: 0.05, green: 0.05, blue: 0.07).ignoresSafeArea())
+        .focusable()
+        .focused($isFocused)
+        .focusEffectDisabled()
+        .onAppear {
+            isFocused = true
+            if selectedChannelNumber == nil {
+                selectedChannelNumber = model.currentNumber
+            }
+            #if os(macOS)
+            if sheetKeyMonitor == nil {
+                sheetKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+                    switch event.keyCode {
+                    case 126: // Up
+                        selectPreviousChannel()
+                        return nil
+                    case 125: // Down
+                        selectNextChannel()
+                        return nil
+                    case 36, 76: // Return / Enter
+                        tuneSelected()
+                        return nil
+                    case 53: // Escape
+                        close()
+                        return nil
+                    default:
+                        return event
                     }
                 }
             }
-            .focusable()
-            .focused($isFocused)
-            .focusEffectDisabled()
-            .onAppear {
-                isFocused = true
-                if selectedChannelNumber == nil {
-                    selectedChannelNumber = model.currentNumber
-                }
-                #if os(macOS)
-                if sheetKeyMonitor == nil {
-                    sheetKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
-                        switch event.keyCode {
-                        case 126: // Up
-                            selectPreviousChannel()
-                            return nil
-                        case 125: // Down
-                            selectNextChannel()
-                            return nil
-                        case 36, 76: // Return / Enter
-                            tuneSelected()
-                            return nil
-                        case 53: // Escape
-                            close()
-                            return nil
-                        default:
-                            return event
-                        }
-                    }
-                }
-                #endif
+            #endif
+        }
+        .onDisappear {
+            #if os(macOS)
+            if let sheetKeyMonitor {
+                NSEvent.removeMonitor(sheetKeyMonitor)
+                self.sheetKeyMonitor = nil
             }
-            .onDisappear {
-                #if os(macOS)
-                if let sheetKeyMonitor {
-                    NSEvent.removeMonitor(sheetKeyMonitor)
-                    self.sheetKeyMonitor = nil
-                }
-                #endif
-            }
+            #endif
+        }
             #if os(macOS)
             .onKeyPress(.upArrow) {
                 selectPreviousChannel()
@@ -147,12 +137,11 @@ struct EPGOverviewView: View {
             }
             #endif
             .preferredColorScheme(.dark)
-        }
     }
 
     // MARK: - Header Bar
 
-    private func headerBar(proxy: ScrollViewProxy) -> some View {
+    private var headerBar: some View {
         HStack(alignment: .center, spacing: 16) {
             HStack(alignment: .firstTextBaseline, spacing: 14) {
                 Text("Programmübersicht")
@@ -183,7 +172,7 @@ struct EPGOverviewView: View {
             // Schnell-Sprung zu "Jetzt"
             Button {
                 withAnimation(.easeInOut(duration: 0.25)) {
-                    proxy.scrollTo("timeline_now", anchor: .leading)
+                    horizontalProxy?.scrollTo("timeline_now", anchor: .leading)
                 }
             } label: {
                 HStack(spacing: 7) {
@@ -224,67 +213,92 @@ struct EPGOverviewView: View {
 
     // MARK: - Timeline Body (Vertical + Horizontal Scroll)
 
-    private func timelineBody(proxy: ScrollViewProxy) -> some View {
+    private var timelineBody: some View {
         let _ = player.epgRevision
         let now = Date()
         let start = timelineStart
         let end = timelineEnd
 
-        return ScrollView(.vertical, showsIndicators: true) {
-            HStack(alignment: .top, spacing: 0) {
-                // Linke fixierte Senderspalte
-                VStack(alignment: .leading, spacing: 0) {
-                    // Eckbereich in Höhe des Zeitstrahls
-                    HStack(spacing: 8) {
-                        Image(systemName: "tv")
-                            .font(.system(size: 15, weight: .bold))
-                            .foregroundStyle(Color.white.opacity(0.55))
-                        Text("Sender")
-                            .font(UI.font(16, .bold))
-                            .foregroundStyle(Color.white.opacity(0.55))
+        return ScrollViewReader { verticalProxy in
+            ScrollView(.vertical, showsIndicators: true) {
+                HStack(alignment: .top, spacing: 0) {
+                    // Linke fixierte Senderspalte
+                    VStack(alignment: .leading, spacing: 0) {
+                        // Eckbereich in Höhe des Zeitstrahls
+                        HStack(spacing: 8) {
+                            Image(systemName: "tv")
+                                .font(.system(size: 15, weight: .bold))
+                                .foregroundStyle(Color.white.opacity(0.55))
+                            Text("Sender")
+                                .font(UI.font(16, .bold))
+                                .foregroundStyle(Color.white.opacity(0.55))
+                        }
+                        .padding(.horizontal, 14)
+                        .frame(width: channelColumnWidth, height: rulerHeight, alignment: .leading)
+                        .background(Color(red: 0.09, green: 0.09, blue: 0.12))
+
+                        Divider().background(Color.white.opacity(0.12))
+
+                        ForEach(entries) { entry in
+                            channelHeaderCell(entry)
+                                .id("channel_\(entry.number)")
+                            Divider().background(Color.white.opacity(0.06))
+                        }
                     }
-                    .padding(.horizontal, 14)
-                    .frame(width: channelColumnWidth, height: rulerHeight, alignment: .leading)
-                    .background(Color(red: 0.09, green: 0.09, blue: 0.12))
+                    .frame(width: channelColumnWidth)
+                    .background(Color(red: 0.07, green: 0.07, blue: 0.09))
 
-                    Divider().background(Color.white.opacity(0.12))
+                    Divider().background(Color.white.opacity(0.18))
 
-                    ForEach(entries) { entry in
-                        channelHeaderCell(entry)
-                            .id("channel_\(entry.number)")
-                        Divider().background(Color.white.opacity(0.06))
-                    }
-                }
-                .frame(width: channelColumnWidth)
-                .background(Color(red: 0.07, green: 0.07, blue: 0.09))
+                    // Rechter horizontal scrollbarer Zeitstrahl
+                    ScrollViewReader { hProxy in
+                        ScrollView(.horizontal, showsIndicators: true) {
+                            ZStack(alignment: .topLeading) {
+                                // Hintergrund-Gitter (alle 30 Min)
+                                timelineGridBackground
 
-                Divider().background(Color.white.opacity(0.18))
+                                // Vertikale "Jetzt"-Linie
+                                nowIndicator(in: now)
 
-                // Rechter horizontal scrollbarer Zeitstrahl
-                ScrollView(.horizontal, showsIndicators: true) {
-                    ZStack(alignment: .topLeading) {
-                        // Hintergrund-Gitter (alle 30 Min)
-                        timelineGridBackground
+                                // Inhalt: Zeitleiste oben + Zeilen pro Sender
+                                VStack(alignment: .leading, spacing: 0) {
+                                    timeRuler
+                                        .frame(height: rulerHeight)
 
-                        // Vertikale "Jetzt"-Linie
-                        nowIndicator(in: now)
+                                    Divider().background(Color.white.opacity(0.12))
 
-                        // Inhalt: Zeitleiste oben + Zeilen pro Sender
-                        VStack(alignment: .leading, spacing: 0) {
-                            timeRuler
-                                .frame(height: rulerHeight)
-
-                            Divider().background(Color.white.opacity(0.12))
-
-                            ForEach(entries) { entry in
-                                let items = buildTimelineItems(for: entry, start: start, end: end)
-                                channelTimelineRow(entry: entry, items: items, now: now)
-                                    .frame(height: rowHeight)
-                                Divider().background(Color.white.opacity(0.06))
+                                    ForEach(entries) { entry in
+                                        let items = buildTimelineItems(for: entry, start: start, end: end)
+                                        channelTimelineRow(entry: entry, items: items, now: now)
+                                            .frame(height: rowHeight)
+                                        Divider().background(Color.white.opacity(0.06))
+                                    }
+                                }
+                            }
+                            .frame(width: totalTimelineWidth)
+                        }
+                        .onAppear {
+                            self.horizontalProxy = hProxy
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                                withAnimation(.easeOut(duration: 0.25)) {
+                                    hProxy.scrollTo("timeline_now", anchor: .leading)
+                                }
                             }
                         }
                     }
-                    .frame(width: totalTimelineWidth)
+                }
+            }
+            .onChange(of: selectedChannelNumber) { _, newNum in
+                if let newNum {
+                    withAnimation(.easeOut(duration: 0.15)) {
+                        verticalProxy.scrollTo("channel_\(newNum)", anchor: .center)
+                    }
+                }
+            }
+            .onAppear {
+                let num = selectedChannelNumber ?? model.currentNumber
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                    verticalProxy.scrollTo("channel_\(num)", anchor: .center)
                 }
             }
         }
@@ -365,6 +379,7 @@ struct EPGOverviewView: View {
             }
         }
         .frame(width: totalTimelineWidth, height: rowHeight, alignment: .leading)
+        .background(entry.number == selectedChannelNumber ? Color.white.opacity(0.08) : Color.clear)
         .contentShape(Rectangle())
         .onTapGesture {
             selectedChannelNumber = entry.number
