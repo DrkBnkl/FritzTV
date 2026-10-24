@@ -178,10 +178,6 @@ final class AppModel: ObservableObject {
             DebugLog.log("Senderliste von \(result.host): \(result.catalog.groups.count) Gruppen, \(lineup?.entries.count ?? 0) sichtbare Plätze")
             let start = lineup?.entries.first { Self.key($0) == settings.lastChannelKey }?.number ?? 1
             tune(to: start)
-            Task { @MainActor [weak self] in
-                try? await Task.sleep(for: .seconds(3))
-                self?.triggerEPGScan()
-            }
         } catch let error as FritzBoxClient.ClientError {
             DebugLog.log("Senderliste fehlgeschlagen: \(error)")
             switch error {
@@ -580,8 +576,7 @@ final class AppModel: ObservableObject {
     }
 
     func epgOverviewClosed() {
-        // Stream läuft unterbrechungsfrei weiter; keinesfalls resume() aufrufen,
-        // da sonst ein gerade gewählter Sender durch doppelten Start abgebrochen würde.
+        epgScanner.stop()
     }
 
     // MARK: EPG-Hintergrundscan

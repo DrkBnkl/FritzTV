@@ -122,6 +122,10 @@ final class PlayerController: ObservableObject {
     private var workingVariant: [String: String] = [:]
     private var currentVariantKey = ""
 
+    // Watchdog gegen eingefrorene Streams
+    private var lastDisplayedPictures: Int = 0
+    private var lastPictureChangeAt = Date()
+
     // MARK: Abspielen
 
     func play(channel: Channel, options: PlaybackOptions) {
@@ -291,6 +295,7 @@ final class PlayerController: ObservableObject {
             status = (isReplaying && replayAnchor.paused) ? .paused : .playing
             updatePlaybackStats()
             refreshTrackNames()
+            checkStreamHealth()
         } else if !wasPlaying {
             // Solange noch keine sauberen Daten laufen, Audio stummhalten
             mediaPlayer.audio?.isMuted = true
@@ -344,6 +349,35 @@ final class PlayerController: ObservableObject {
         pidOverrides[channel.id] = url
         DebugLog.log("PIDs geändert bei \(channel.name): ergänze \(missing) und verbinde neu")
         scheduleReconnect(after: 1)
+    }
+
+    /// Überwacht, ob der Live-Stream tatsächlich weiterläuft oder eingefroren ist.
+    /// Steht die Anzahl angezeigter Frames bei laufendem Player länger als 3.5 s still,
+    /// wird der Stream automatisch und schnell neu verbunden.
+    private func checkStreamHealth() {
+        guard wasPlaying, status == .playing, !isReplaying, !(replayAnchor.paused) else {
+            lastPictureChangeAt = Date()
+            return
+        }
+
+        // Nicht in den ersten 3 Sekunden nach Verbindungsaufbau prüfen
+        guard Date().timeIntervalSince(openedAt) > 3.0 else {
+            lastPictureChangeAt = Date()
+            return
+        }
+
+        if let vlcStats = mediaPlayer.media?.statistics {
+            let currentPictures = Int(vlcStats.displayedPictures)
+            if currentPictures > lastDisplayedPictures {
+                lastDisplayedPictures = currentPictures
+                lastPictureChangeAt = Date()
+            } else if Date().timeIntervalSince(lastPictureChangeAt) > 3.5 {
+                DebugLog.log("Stream eingefroren (keine neuen Bilder seit 3.5 s, Stand: \(currentPictures)) – Reconnect")
+                lastPictureChangeAt = Date()
+                lastDisplayedPictures = 0
+                scheduleReconnect(after: 1)
+            }
+        }
     }
 
     /// Titel der laufenden Sendung, wie VLC ihn für das ausgewählte Programm meldet.
