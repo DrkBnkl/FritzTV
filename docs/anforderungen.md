@@ -26,7 +26,7 @@ Grundsatz: keine Wischgesten, alles über Tasten und Klicks.
 
 - Die App lädt die Listen direkt per HTTP von der Box, ohne Anmeldung (am 23.10.2026 an der eigenen Box getestet): `http://fritz.box/dvb/m3u/tvhd.m3u`, `tvsd.m3u`, `radio.m3u`; Rückfall auf 192.168.178.1.
 - Laden beim Start und automatisch, wenn ein Sender ausfällt; zusätzlich „Senderliste aktualisieren“ in den Einstellungen.
-- Den eigentlichen Sendersuchlauf im Kabelnetz löst die App nicht aus (braucht das Box-Passwort, keine öffentliche Schnittstelle). Fehlen Sender dauerhaft, zeigt sie den Hinweis, den Suchlauf in der FRITZ!Box-Oberfläche unter DVB-C zu starten.
+- Sendersuchlauf aus der App (seit 24.10.2026): Einstellungen › Sendersuchlauf, über TR-064 (`X_AVM-DE_Media:1`, `StationSearch` start/stop, Fortschritt über `GetSearchProgress`, Port 49000, HTTP-Digest). Braucht Benutzer und Kennwort der FRITZ!Box (Recht „FRITZ!Box Einstellungen“); das Kennwort liegt im Schlüsselbund des Geräts. Während des Suchlaufs ist das Fernsehbild aus, danach lädt die App die Senderliste neu und setzt die Liste toter Varianten zurück. Ohne gespeichertes Kennwort bleibt der Hinweis, den Suchlauf in der FRITZ!Box-Oberfläche unter DVB-C zu starten.
 - Nach einem Suchlauf behält die Box alte Einträge: Sender stehen doppelt, neue Frequenz vorne, alte hinten (23.10.2026: Das Erste/WDR/SWR von 330 auf 386 MHz, BR/NDR/MDR von 338 auf 402 MHz). Die App probiert alle Varianten eines Senders der Reihe nach und merkt sich die funktionierende.
 
 ## Senderplätze
@@ -114,14 +114,14 @@ Grundlage für fast alles ist ein EIT-Leser, denn VLCKit 3 liefert über seine n
 8. **Untertitel:** DVB-Untertitel und Videotext-Untertitel (Tafel 150/777). Prüfung ergab: das verwendete Paket `VLCKitSPM` enthält `zvbi 0.2.35` (`vbi_decode_teletext`, `zvbi.c`) für tvOS und macOS. Spurnamen wurden lesbar aufbereitet („Deutsch“, „Videotext (Tafel 150)“, „Dolby Digital“); Verfügbarkeitsstatus `hasSubtitles` signalisiert, wenn keine Untertitel vorliegen.
 9. **Infos zur Bildqualität:** Auflösung (z. B. `1920×1080 (1080p)`), Bitrate (in Mbit/s), verlorene Bilder und Abrisse aus `VLCMediaStats` in der Sendungsinfo. Zusätzlich Signalstärke (dB), Signal-Rausch-Verhältnis SNR (dB) und Tuner-Auslastung der Box über UPnP-SOAP ohne Passwort direkt in der Sendungsinfo integriert.
 
-Reihenfolge: Alle Punkte 1 bis 9 der Version 2 sind umgesetzt und verifiziert.
+Stand 24.10.2026: Alle Punkte 1 bis 9 sind programmiert und nach einer Durchsicht korrigiert (EPG-Zuordnung über die SDT, Logos, Top Shelf, Von Anfang an u. a.), aber noch nicht am Mac oder Apple TV gebaut und getestet.
 
 ## Später & Erweiterungen (Umgesetzt am 24.10.2026)
 
 - **Senderlogos:** Vollständig integriert (Quelle: AVM-Logoserver `http://tv.avm.de/tvapp/logos/<name>.png`) mit lokalem Disk-/Memory-Cache (`URLCache`) in Senderliste, Info-Banner, Sendungsinfo, Top Shelf und Programmübersicht.
 - **Hintergrund-EPG-Scan:** `BackgroundEPGScanner` durchsucht fremde Multiplexe automatisch mit einer unsichtbaren VLC-Instanz, sobald freie Tuner an der Box vorhanden sind.
 - **Mediathek:** Serien-Kategorie und „🎲 Überrasch mich“-Zufallsauswahl in `MediathekView` und `Press2arrClient` ergänzt.
-- **Timeshift-Ringpuffer:** `TimeshiftBufferManager` mit Prüfung des freien Speichers (mind. 200 MB Reserve, max. 50% des freien Platzes) und automatischem Bereinigen alter Pufferdateien beim Umschalten.
+- **Timeshift-Speicher:** `TimeshiftBufferManager` prüft vor dem Start die Reserve von 200 MB freiem Speicher und räumt alte Pufferdateien beim Umschalten weg. Noch offen: Mitschnitt in eine Datei nach dem Vorbild des dream Players (statt VLC-Timeshift), Aufteilung bei 4 GB, Grenze von 50 % des freien Platzes.
 - **Deployment-Skript:** `scripts/deploy-tvos.sh` für wöchentliches, bequemes Neuaufspielen auf das Apple TV per `xcrun devicectl`, ohne Daten- oder Einstellungsverlust.
 
 ## Nicht gewünscht oder nicht machbar
@@ -129,7 +129,6 @@ Reihenfolge: Alle Punkte 1 bis 9 der Version 2 sind umgesetzt und verifiziert.
 - Radio (ausdrücklich nicht gewünscht, 24.10.2026).
 - Aufnahmen (nicht gewünscht).
 - Aufholen mit erhöhter Geschwindigkeit, Bild-in-Bild, Einschlaf-Timer (nicht gewünscht, 24.10.2026).
-- Sendersuchlauf an der Box aus der App heraus.
 - „Von Anfang an“ für Private Sender (nur in deren Bezahldiensten).
 - HbbTV (tvOS hat keinen Browser für Apps), Autostart beim Einschalten.
 - Private Sender in HD (verschlüsselt), zwei Sender gleichzeitig.

@@ -64,6 +64,7 @@ final class AppModel: ObservableObject {
     let settings: AppSettings
     let player: PlayerController
     let epgScanner = BackgroundEPGScanner()
+    let stationSearch = StationSearchController()
 
     private var catalog: ChannelCatalog?
     private var preferences: LineupPreferences

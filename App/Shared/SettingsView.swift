@@ -30,6 +30,8 @@ struct SettingsView: View {
                     Text("Eine geänderte Adresse gilt nach „Senderliste neu laden“. Über VPN aus dem Hotel: Netzwerkpuffer 3000 ms wählen. Bricht das Bild immer wieder ab, „RTP über TCP“ probieren.")
                 }
 
+                StationSearchSection(model: model, settings: settings, search: model.stationSearch)
+
                 Section {
                     TextField("press2arr-Adresse", text: $settings.press2arrAddress)
                 } header: {
@@ -86,5 +88,76 @@ struct SettingsView: View {
         #if os(macOS)
         .frame(minWidth: 600, minHeight: 680)
         #endif
+    }
+}
+
+/// Sendersuchlauf der FRITZ!Box aus der App (TR-064, braucht Box-Zugangsdaten).
+private struct StationSearchSection: View {
+    @ObservedObject var model: AppModel
+    @ObservedObject var settings: AppSettings
+    @ObservedObject var search: StationSearchController
+    @State private var password = ""
+    @State private var hasStoredPassword = BoxPasswordStore.hasPassword
+
+    var body: some View {
+        Section {
+            TextField("Benutzername der FRITZ!Box", text: $settings.boxUsername)
+                .textContentType(.username)
+                .autocorrectionDisabled()
+            SecureField(hasStoredPassword ? "Kennwort (gespeichert)" : "Kennwort der FRITZ!Box", text: $password)
+                .textContentType(.password)
+                .onSubmit(savePassword)
+            if !password.isEmpty {
+                Button("Kennwort speichern", action: savePassword)
+            }
+            if hasStoredPassword {
+                Button("Zugangsdaten prüfen") { search.verify(model: model) }
+                    .disabled(search.isRunning)
+                if search.isRunning, case .running = search.phase {
+                    Button("Suchlauf abbrechen", role: .destructive) { search.cancel(model: model) }
+                } else {
+                    Button("Sendersuchlauf starten") { search.start(model: model) }
+                        .disabled(search.isRunning)
+                }
+                Button("Kennwort löschen", role: .destructive) {
+                    BoxPasswordStore.delete()
+                    hasStoredPassword = false
+                }
+                .disabled(search.isRunning)
+            }
+            statusRow
+        } header: {
+            Text("Sendersuchlauf")
+        } footer: {
+            Text("Startet den DVB-C-Sendersuchlauf der FRITZ!Box, z. B. wenn Sender nach einer Frequenzumstellung kein Bild mehr haben. Braucht einen Benutzer der FRITZ!Box mit der Berechtigung „FRITZ!Box Einstellungen“. Das Kennwort bleibt im Schlüsselbund dieses Geräts. Während des Suchlaufs (einige Minuten) gibt es kein Fernsehbild; danach wird die Senderliste neu geladen, die Senderplätze bleiben erhalten.")
+        }
+    }
+
+    @ViewBuilder private var statusRow: some View {
+        switch search.phase {
+        case .idle:
+            EmptyView()
+        case .checking:
+            LabeledContent("Status", value: "Verbinde mit der FRITZ!Box …")
+        case .credentialsOK:
+            LabeledContent("Status", value: "Anmeldung in Ordnung")
+        case .running(let progress):
+            VStack(alignment: .leading) {
+                Text("Suchlauf läuft … \(progress) %")
+                ProgressView(value: Double(progress), total: 100)
+            }
+        case .reloading:
+            LabeledContent("Status", value: "Lade Senderliste …")
+        case .finished(let count):
+            LabeledContent("Status", value: "Fertig – \(count) Senderplätze")
+        case .failed(let message):
+            Text(message).foregroundStyle(.red)
+        }
+    }
+
+    private func savePassword() {
+        guard !password.isEmpty else { return }
+        hasStoredPassword = BoxPasswordStore.save(password)
+        password = ""
     }
 }

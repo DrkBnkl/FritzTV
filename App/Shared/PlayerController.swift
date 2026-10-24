@@ -343,7 +343,7 @@ final class PlayerController: ObservableObject {
         setFailed(
             title: "Kein Bild für \(channelName)",
             message: "Senderliste veraltet – Suchlauf starten",
-            hint: "Bitte in der FRITZ!Box-Oberfläche unter DVB-C einen Sendersuchlauf starten."
+            hint: "Sendersuchlauf starten: Einstellungen › Sendersuchlauf (mit Box-Kennwort) oder in der FRITZ!Box-Oberfläche unter DVB-C."
         )
         // Kann die Meldung präzisieren (z. B. „Alle Tuner belegt“).
         onAllCandidatesFailed?(channelName)

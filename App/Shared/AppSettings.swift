@@ -18,6 +18,8 @@ final class AppSettings: ObservableObject {
     @Published var press2arrAddress: String { didSet { defaults.set(press2arrAddress, forKey: Keys.press2arr) } }
     /// Nur Apple TV: Bildwiederholrate auf 50 Hz umschalten.
     @Published var match50Hz: Bool { didSet { defaults.set(match50Hz, forKey: Keys.match50Hz) } }
+    /// Benutzername für die TR-064-Anmeldung (Sendersuchlauf). Das Kennwort liegt im Schlüsselbund.
+    @Published var boxUsername: String { didSet { defaults.set(boxUsername, forKey: Keys.boxUsername) } }
     /// Zuletzt gesehene Sender (maximal 3 Schlüssel).
     @Published var recentKeys: [String] { didSet { defaults.set(recentKeys, forKey: Keys.recentKeys) } }
     /// Sender-Varianten (RTSP-URLs), die nachweislich keine Daten liefern.
@@ -58,6 +60,7 @@ final class AppSettings: ObservableObject {
         bannerSeconds = defaults.integer(forKey: Keys.bannerSeconds)
         match50Hz = defaults.bool(forKey: Keys.match50Hz)
         press2arrAddress = defaults.string(forKey: Keys.press2arr) ?? ""
+        boxUsername = defaults.string(forKey: Keys.boxUsername) ?? ""
         recentKeys = defaults.stringArray(forKey: Keys.recentKeys) ?? []
         deadChannelIDs = Set(defaults.stringArray(forKey: Keys.deadChannels) ?? [])
         workingVariantIDs = defaults.dictionary(forKey: Keys.workingVariants) as? [String: String] ?? [:]
@@ -95,6 +98,7 @@ final class AppSettings: ObservableObject {
         static let bannerSeconds = "bannerSeconds"
         static let match50Hz = "match50Hz"
         static let press2arr = "press2arrAddress"
+        static let boxUsername = "boxUsername"
         static let lastChannel = "lastChannelKey"
         static let lineup = "lineupPreferences"
         static let recentKeys = "recentKeys"
