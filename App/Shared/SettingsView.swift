@@ -56,6 +56,11 @@ struct SettingsView: View {
                 Section {
                     Button("Aktuellen Sender ausblenden") { model.hideCurrentChannel() }
                     Button("Standardbelegung wiederherstellen") { model.resetLineup() }
+                    if !settings.deadChannelIDs.isEmpty {
+                        Button("Geprüfte Sender zurücksetzen (\(settings.deadChannelIDs.count) gemerkt)") {
+                            settings.resetDeadVariants()
+                        }
+                    }
                     ForEach(model.lineup?.hiddenGroups ?? []) { group in
                         Button("\(group.displayName) einblenden") { model.unhide(group) }
                     }
@@ -72,7 +77,9 @@ struct SettingsView: View {
             .toolbar {
                 ToolbarItem(placement: .automatic) {
                     Button("Fertig") { dismiss() }
+                    #if os(macOS)
                         .keyboardShortcut(.defaultAction)
+                    #endif
                 }
             }
         }

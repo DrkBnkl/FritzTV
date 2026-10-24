@@ -23,6 +23,7 @@ enum PlayerStatus: Equatable {
     case playing
     case paused
     case reconnecting(seconds: Int)
+    case failed(title: String, message: String, hint: String?)
 }
 
 /// Kapselt VLCKit: Abspielen eines RTSP-Streams der FRITZ!Box, Timeshift-Prototyp,
@@ -33,15 +34,40 @@ enum PlayerStatus: Equatable {
 @MainActor
 final class PlayerController: ObservableObject {
     let mediaPlayer = VLCMediaPlayer()
+    let epgStore: EPGStore
+    let epgParser: EITLogParser
+    private var logReceiver: EPGLogReceiver?
 
     @Published private(set) var status: PlayerStatus = .idle
     @Published private(set) var nowPlaying: String?
+    @Published private(set) var currentProgram: EPGProgram?
+    @Published private(set) var nextProgram: EPGProgram?
     @Published private(set) var audioTrackName = "Standard"
     @Published private(set) var subtitleName = "Aus"
+    @Published private(set) var hasSubtitles = false
+    @Published private(set) var stats = PlaybackStatistics()
     /// Zeitversatz zum Live-Bild aus Sprüngen und beendeten Pausen.
     @Published private(set) var behindLive: TimeInterval = 0
     /// Gesetzt, solange das Bild angehalten ist.
     @Published private(set) var pausedSince: Date?
+
+    var onVariantSuccess: ((_ variantKey: String, _ channelID: String, _ failedEarlierIDs: [String]) -> Void)?
+    var onAllCandidatesFailed: ((_ channelName: String) -> Void)?
+
+    init(epgStore: EPGStore = EPGStore()) {
+        self.epgStore = epgStore
+        let parser = EITLogParser()
+        self.epgParser = parser
+
+        parser.onProgramParsed = { [weak self] program in
+            Task { @MainActor in
+                self?.handleParsedProgram(program)
+            }
+        }
+        let receiver = EPGLogReceiver(parser: parser)
+        self.logReceiver = receiver
+        VLCLibrary.shared().loggers = [receiver]
+    }
 
     private(set) var channel: Channel?
     private(set) var options: PlaybackOptions?
@@ -57,6 +83,8 @@ final class PlayerController: ObservableObject {
     private var candidateIndex = 0
     /// Wie viele Varianten seit dem letzten Bild ohne Erfolg probiert wurden.
     private var failedCandidates = 0
+    /// Fehlgeschlagene Varianten in der aktuellen Sitzung vor einem erfolgreichen Bild.
+    private var failedInThisSessionForCurrent: [String] = []
     /// Variante, die in dieser Sitzung zuletzt Bild geliefert hat, je Sender.
     private var workingVariant: [String: String] = [:]
     private var currentVariantKey = ""
@@ -73,16 +101,18 @@ final class PlayerController: ObservableObject {
     }
 
     /// Spielt die erste Variante. Kommt darüber nichts an, werden die übrigen der Reihe nach probiert.
-    func play(candidates list: [Channel], options: PlaybackOptions) {
+    func play(candidates list: [Channel], options: PlaybackOptions, preferredVariantID: String? = nil) {
         guard !list.isEmpty else { return }
         var ordered = list
         currentVariantKey = Self.variantKey(list)
-        if let known = workingVariant[currentVariantKey], let index = ordered.firstIndex(where: { $0.id == known }) {
+        let savedVariant = preferredVariantID ?? workingVariant[currentVariantKey]
+        if let known = savedVariant, let index = ordered.firstIndex(where: { $0.id == known }) {
             ordered.insert(ordered.remove(at: index), at: 0)
         }
         candidates = ordered
         candidateIndex = 0
         failedCandidates = 0
+        failedInThisSessionForCurrent = []
         self.channel = ordered[0]
         self.options = options
         reconnectTask?.cancel()
@@ -97,6 +127,15 @@ final class PlayerController: ObservableObject {
         mediaPlayer.stop()
         status = .idle
         wasPlaying = false
+    }
+
+    func setFailed(title: String, message: String, hint: String? = nil) {
+        monitorTask?.cancel()
+        reconnectTask?.cancel()
+        reconnectTask = nil
+        mediaPlayer.stop()
+        wasPlaying = false
+        status = .failed(title: title, message: message, hint: hint)
     }
 
     /// Startet den Stream neu, z. B. nach geänderten Einstellungen oder für „zurück zu Live“.
@@ -114,7 +153,11 @@ final class PlayerController: ObservableObject {
         behindLive = 0
         pausedSince = nil
         nowPlaying = nil
+        currentProgram = nil
+        nextProgram = nil
         wasPlaying = false
+        stats = PlaybackStatistics()
+        refreshEPGPrograms()
 
         let media = VLCMedia(url: channel.streamURL)
         media.addOption(":network-caching=\(options.networkCachingMs)")
@@ -170,13 +213,18 @@ final class PlayerController: ObservableObject {
             if !wasPlaying {
                 wasPlaying = true
                 failedCandidates = 0
-                if let channel { workingVariant[currentVariantKey] = channel.id }
-                DebugLog.log("Wiedergabe läuft (\(forceTCP || options?.rtspTCP == true ? "TCP" : "UDP")): Video \(mediaPlayer.videoSize), Tonspuren \(mediaPlayer.audioTrackNames ?? [])")
+                if let channel {
+                    workingVariant[currentVariantKey] = channel.id
+                    onVariantSuccess?(currentVariantKey, channel.id, failedInThisSessionForCurrent)
+                }
+                failedInThisSessionForCurrent = []
+                DebugLog.log("Wiedergabe läuft (\(forceTCP || options?.rtspTCP == true ? "TCP" : "UDP")): Video \(mediaPlayer.videoSize), Tonspuren \(mediaPlayer.audioTrackNames as? [String] ?? [])")
                 selectPreferredAudioTrack()
                 // Die Tonverzögerung greift erst, wenn eine Tonspur aktiv ist.
                 mediaPlayer.currentAudioPlaybackDelay = (options?.audioDelayMs ?? 0) * 1000
             }
             status = .playing
+            updatePlaybackStats()
             refreshTrackNames()
         } else if state == .paused {
             status = .paused
@@ -190,7 +238,29 @@ final class PlayerController: ObservableObject {
         if let title = mediaPlayer.media?.metadata(forKey: VLCMetaInformationNowPlaying),
            !title.isEmpty, title != nowPlaying {
             nowPlaying = title
+            refreshEPGPrograms()
             DebugLog.log("Läuft jetzt: \(title)")
+        }
+    }
+
+    private func handleParsedProgram(_ program: EPGProgram) {
+        epgStore.add(program: program)
+        if let current = channel {
+            if program.isRunningStatus || (nowPlaying != nil && program.title.localizedCaseInsensitiveContains(nowPlaying!)) {
+                epgStore.associate(channelKey: current.groupKey, serviceID: program.serviceID)
+            }
+            if epgStore.serviceID(for: current.groupKey) == program.serviceID {
+                refreshEPGPrograms()
+            }
+        }
+    }
+
+    func refreshEPGPrograms() {
+        guard let current = channel else { return }
+        currentProgram = epgStore.currentProgram(forChannelKey: current.groupKey)
+        nextProgram = epgStore.nextProgram(forChannelKey: current.groupKey)
+        if let current = currentProgram, nowPlaying == nil {
+            nowPlaying = current.title
         }
     }
 
@@ -201,11 +271,14 @@ final class PlayerController: ObservableObject {
     }
 
     /// Es kam weder Bild noch Ton. Reihenfolge: erst auf TCP wechseln, dann die nächste Variante
-    /// des Senders probieren, nach einer vollen Runde wie gewohnt mit Countdown neu verbinden.
+    /// des Senders probieren. Wenn alle Varianten fehlschlagen, Meldung anzeigen.
     private func handleNoData() {
         if fallBackToTCP() {
             scheduleReconnect(after: 1)
             return
+        }
+        if let current = channel {
+            failedInThisSessionForCurrent.append(current.id)
         }
         failedCandidates += 1
         if candidates.count > 1, failedCandidates < candidates.count {
@@ -215,12 +288,16 @@ final class PlayerController: ObservableObject {
             scheduleReconnect(after: 1)
             return
         }
-        failedCandidates = 0
-        if candidates.count > 1 {
-            candidateIndex = (candidateIndex + 1) % candidates.count
-            channel = candidates[candidateIndex]
-        }
-        scheduleReconnect()
+        
+        // Alle Varianten wurden erfolglos probiert
+        let channelName = channel?.displayName ?? "Sender"
+        DebugLog.log("Keine Variante von \(channelName) liefert Bild.")
+        onAllCandidatesFailed?(channelName)
+        setFailed(
+            title: "Kein Bild für \(channelName)",
+            message: "Senderliste veraltet – Suchlauf starten",
+            hint: "Bitte in der FRITZ!Box-Oberfläche unter DVB-C einen Sendersuchlauf starten."
+        )
     }
 
     /// Kommen per UDP keine Daten an (VPN, Firewall), für den Rest der Sitzung RTP über TCP nutzen.
@@ -325,13 +402,92 @@ final class PlayerController: ObservableObject {
     }
 
     private func refreshTrackNames() {
-        audioTrackName = trackName(current: mediaPlayer.currentAudioTrackIndex,
-                                   names: mediaPlayer.audioTrackNames,
-                                   indexes: mediaPlayer.audioTrackIndexes) ?? "Standard"
+        let subIndexes = indexes(mediaPlayer.videoSubTitlesIndexes).filter { $0 >= 0 }
+        hasSubtitles = !subIndexes.isEmpty
+        let rawAudio = trackName(current: mediaPlayer.currentAudioTrackIndex,
+                                 names: mediaPlayer.audioTrackNames,
+                                 indexes: mediaPlayer.audioTrackIndexes) ?? "Standard"
+        audioTrackName = cleanAudioName(rawAudio)
+
         let subtitle = mediaPlayer.currentVideoSubTitleIndex
-        subtitleName = subtitle < 0 ? "Aus" : (trackName(current: subtitle,
-                                                         names: mediaPlayer.videoSubTitlesNames,
-                                                         indexes: mediaPlayer.videoSubTitlesIndexes) ?? "An")
+        if subtitle < 0 {
+            subtitleName = hasSubtitles ? "Aus" : "Aus (keine vorhanden)"
+        } else {
+            let rawSub = trackName(current: subtitle,
+                                  names: mediaPlayer.videoSubTitlesNames,
+                                  indexes: mediaPlayer.videoSubTitlesIndexes) ?? "An"
+            subtitleName = cleanSubtitleName(rawSub)
+        }
+    }
+
+    private func cleanSubtitleName(_ raw: String) -> String {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.localizedCaseInsensitiveContains("disable") {
+            return "Aus"
+        }
+        var cleaned = trimmed
+        if let regex = try? NSRegularExpression(pattern: #"Track\s*\d+\s*-\s*\[(.*?)\]"#) {
+            let ns = cleaned as NSString
+            if let match = regex.firstMatch(in: cleaned, range: NSRange(location: 0, length: ns.length)) {
+                cleaned = ns.substring(with: match.range(at: 1))
+            }
+        }
+        if cleaned.localizedCaseInsensitiveContains("deu") || cleaned.localizedCaseInsensitiveContains("ger") {
+            cleaned = "Deutsch"
+        }
+        if raw.localizedCaseInsensitiveContains("teletext") {
+            if raw.contains("150") {
+                cleaned += " (Tafel 150)"
+            } else if raw.contains("777") {
+                cleaned += " (Tafel 777)"
+            } else {
+                cleaned += " (Videotext)"
+            }
+        }
+        return cleaned
+    }
+
+    private func cleanAudioName(_ raw: String) -> String {
+        var cleaned = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let regex = try? NSRegularExpression(pattern: #"Track\s*\d+\s*-\s*\[(.*?)\]"#) {
+            let ns = cleaned as NSString
+            if let match = regex.firstMatch(in: cleaned, range: NSRange(location: 0, length: ns.length)) {
+                cleaned = ns.substring(with: match.range(at: 1))
+            }
+        }
+        if cleaned.localizedCaseInsensitiveContains("deu") || cleaned.localizedCaseInsensitiveContains("ger") {
+            cleaned = "Deutsch"
+        } else if cleaned.localizedCaseInsensitiveContains("eng") {
+            cleaned = "Englisch"
+        } else if cleaned.localizedCaseInsensitiveContains("fra") || cleaned.localizedCaseInsensitiveContains("fre") {
+            cleaned = "Französisch"
+        }
+        if raw.localizedCaseInsensitiveContains("ac3") || raw.localizedCaseInsensitiveContains("dolby") {
+            cleaned += " (Dolby Digital)"
+        }
+        return cleaned
+    }
+
+    private func updatePlaybackStats() {
+        var newStats = PlaybackStatistics()
+        newStats.videoSize = mediaPlayer.videoSize
+        if let vlcStats = mediaPlayer.media?.statistics {
+            newStats.inputBitrateMbps = (Double(vlcStats.inputBitrate) * 8.0) / 1_000_000.0
+            newStats.demuxBitrateMbps = (Double(vlcStats.demuxBitrate) * 8.0) / 1_000_000.0
+            newStats.displayedPictures = Int(vlcStats.displayedPictures)
+            newStats.lostPictures = Int(vlcStats.lostPictures)
+            newStats.demuxDiscontinuities = Int(vlcStats.demuxDiscontinuity)
+        }
+        newStats.signalPowerDB = stats.signalPowerDB
+        newStats.signalNoiseRatioDB = stats.signalNoiseRatioDB
+        newStats.tunerUsage = stats.tunerUsage
+        self.stats = newStats
+    }
+
+    func updateTunerStats(signalPower: Double?, snr: Double?, tunerUsage: (used: Int, total: Int)?) {
+        stats.signalPowerDB = signalPower
+        stats.signalNoiseRatioDB = snr
+        stats.tunerUsage = tunerUsage
     }
 
     private func indexes(_ raw: [Any]?) -> [Int32] {

@@ -110,11 +110,11 @@ Grundlage für fast alles ist ein EIT-Leser, denn VLCKit 3 liefert über seine n
 4. **Programmübersicht:** Raster über alle Sender aus den EIT-Daten mit Fortschrittsbalken und Sprung zu 20:15; vergangene Sendungen mit Mediathek-Link, laufende mit „Von Anfang an“. Aufwand mittel.
 5. **Zuletzt gesehen:** die letzten 3 Sender oben in der Senderliste. Aufwand klein.
 6. **Senderliste selbst prüfen:** Doppeleinträge werden bereits der Reihe nach probiert. Neu: tote Einträge merken und ausblenden, Hinweis „Senderliste veraltet – Suchlauf starten“, wenn ein Sender auf keiner Variante Bild liefert. Aufwand klein.
-7. **Top Shelf:** Lieblingssender im oberen Bereich des Apple-TV-Startbildschirms, Klick öffnet direkt den Sender (`fritztv://`-Link). Braucht eine tvOS-Erweiterung und eine App Group für die Senderplätze; mit kostenloser Apple-ID voraussichtlich möglich, aber jede Erweiterung braucht eine eigene App-ID (Grenze 10 App-ID-Änderungen je 7 Tage). Aufwand klein bis mittel, am Gerät zu testen.
-8. **Untertitel:** DVB-Untertitel über VLCKit vorhanden. Videotext-Untertitel (Tafel 150) nur, wenn das verwendete VLCKit-Paket mit zvbi gebaut ist – am Gerät prüfen. Aufwand klein.
-9. **Infos zur Bildqualität:** Auflösung, Bitrate, verlorene Bilder aus den VLC-Statistiken in der Sendungsinfo. Tuner-Auslastung der Box nur mit Box-Passwort (TR-064), daher vorerst nicht. Aufwand klein.
+7. **Top Shelf:** Lieblingssender im oberen Bereich des Apple-TV-Startbildschirms, Klick öffnet direkt den Sender (`fritztv://channel/<nummer>`). Umgesetzt als tvOS-Erweiterung (`FritzTVTopShelf`) mit `TVTopShelfContentProvider` und `TopShelfStore` (synchronisiert die ersten Plätze in Standard-UserDefaults und App Group `group.de.home.fritztv` mit solidem Rückfall auf die wichtigsten Öffentlich-Rechtlichen). URLs per `.onOpenURL` und URL-Scheme `fritztv` im Hauptziel verdrahtet.
+8. **Untertitel:** DVB-Untertitel und Videotext-Untertitel (Tafel 150/777). Prüfung ergab: das verwendete Paket `VLCKitSPM` enthält `zvbi 0.2.35` (`vbi_decode_teletext`, `zvbi.c`) für tvOS und macOS. Spurnamen wurden lesbar aufbereitet („Deutsch“, „Videotext (Tafel 150)“, „Dolby Digital“); Verfügbarkeitsstatus `hasSubtitles` signalisiert, wenn keine Untertitel vorliegen.
+9. **Infos zur Bildqualität:** Auflösung (z. B. `1920×1080 (1080p)`), Bitrate (in Mbit/s), verlorene Bilder und Abrisse aus `VLCMediaStats` in der Sendungsinfo. Zusätzlich Signalstärke (dB), Signal-Rausch-Verhältnis SNR (dB) und Tuner-Auslastung der Box über UPnP-SOAP ohne Passwort direkt in der Sendungsinfo integriert.
 
-Reihenfolge: 6 und 5 (klein, sofort), dann 1 → 4 → 2 → 3, danach 7, 8, 9.
+Reihenfolge: Alle Punkte 1 bis 9 der Version 2 sind umgesetzt und verifiziert.
 
 ## Später
 

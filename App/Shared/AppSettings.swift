@@ -18,6 +18,12 @@ final class AppSettings: ObservableObject {
     @Published var press2arrAddress: String { didSet { defaults.set(press2arrAddress, forKey: Keys.press2arr) } }
     /// Nur Apple TV: Bildwiederholrate auf 50 Hz umschalten.
     @Published var match50Hz: Bool { didSet { defaults.set(match50Hz, forKey: Keys.match50Hz) } }
+    /// Zuletzt gesehene Sender (maximal 3 Schlüssel).
+    @Published var recentKeys: [String] { didSet { defaults.set(recentKeys, forKey: Keys.recentKeys) } }
+    /// Sender-Varianten (RTSP-URLs), die nachweislich keine Daten liefern.
+    @Published var deadChannelIDs: Set<String> { didSet { defaults.set(Array(deadChannelIDs), forKey: Keys.deadChannels) } }
+    /// Zuletzt funktionierende Variante je Sender (Variant-Key -> Channel ID).
+    @Published var workingVariantIDs: [String: String] { didSet { defaults.set(workingVariantIDs, forKey: Keys.workingVariants) } }
 
     var lastChannelKey: String? {
         get { defaults.string(forKey: Keys.lastChannel) }
@@ -52,6 +58,30 @@ final class AppSettings: ObservableObject {
         bannerSeconds = defaults.integer(forKey: Keys.bannerSeconds)
         match50Hz = defaults.bool(forKey: Keys.match50Hz)
         press2arrAddress = defaults.string(forKey: Keys.press2arr) ?? ""
+        recentKeys = defaults.stringArray(forKey: Keys.recentKeys) ?? []
+        deadChannelIDs = Set(defaults.stringArray(forKey: Keys.deadChannels) ?? [])
+        workingVariantIDs = defaults.dictionary(forKey: Keys.workingVariants) as? [String: String] ?? [:]
+    }
+
+    /// Fügt einen Sender zur Liste der zuletzt gesehenen Sender hinzu (max. 3, ohne Duplikate und ohne den aktuellen).
+    func recordRecent(key: String, currentKey: String? = nil) {
+        var updated = recentKeys.filter { $0 != key && $0 != currentKey }
+        updated.insert(key, at: 0)
+        recentKeys = Array(updated.prefix(3))
+    }
+
+    func markVariantWorking(variantKey: String, channelID: String) {
+        workingVariantIDs[variantKey] = channelID
+        deadChannelIDs.remove(channelID)
+    }
+
+    func markVariantDead(channelID: String) {
+        deadChannelIDs.insert(channelID)
+    }
+
+    func resetDeadVariants() {
+        deadChannelIDs.removeAll()
+        workingVariantIDs.removeAll()
     }
 
     private enum Keys {
@@ -67,6 +97,9 @@ final class AppSettings: ObservableObject {
         static let press2arr = "press2arrAddress"
         static let lastChannel = "lastChannelKey"
         static let lineup = "lineupPreferences"
+        static let recentKeys = "recentKeys"
+        static let deadChannels = "deadChannels"
+        static let workingVariants = "workingVariants"
     }
 }
 

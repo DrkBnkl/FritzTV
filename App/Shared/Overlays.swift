@@ -74,11 +74,25 @@ struct InfoBanner: View {
                     }
                     .frame(width: UI.s(220))
 
-                    VStack(alignment: .leading, spacing: UI.s(10)) {
-                        Text("JETZT").font(UI.font(24, .semibold)).foregroundStyle(UI.secondary)
-                        Text(player.nowPlaying ?? "Keine Programminformation")
-                            .font(UI.font(44, .bold))
+                    VStack(alignment: .leading, spacing: UI.s(8)) {
+                        let current = player.currentProgram
+                        let timeString = current.map { "\(Self.formatTime($0.startDate)) – \(Self.formatTime($0.endDate))" } ?? ""
+                        HStack(spacing: UI.s(16)) {
+                            Text("JETZT").font(UI.font(24, .semibold)).foregroundStyle(UI.secondary)
+                            if !timeString.isEmpty {
+                                Text(timeString).font(UI.font(24, .semibold)).foregroundStyle(UI.accent)
+                            }
+                        }
+                        Text(current?.title ?? player.nowPlaying ?? "Keine Programminformation")
+                            .font(UI.font(40, .bold))
                             .lineLimit(2)
+
+                        if let next = player.nextProgram {
+                            Text("Danach ab \(Self.formatTime(next.startDate)): \(next.title)")
+                                .font(UI.font(24))
+                                .foregroundStyle(UI.secondary)
+                                .lineLimit(1)
+                        }
                     }
 
                     Spacer(minLength: UI.s(24))
@@ -93,6 +107,12 @@ struct InfoBanner: View {
                 .foregroundStyle(UI.text)
             }
         }
+    }
+
+    static func formatTime(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "HH:mm"
+        return formatter.string(from: date)
     }
 }
 
@@ -110,7 +130,7 @@ struct TimeshiftBar: View {
                     HStack {
                         Text("\(model.currentEntry?.number ?? 0) \(model.currentEntry?.group.displayName ?? "")")
                             .font(UI.font(32, .bold))
-                        if let title = player.nowPlaying {
+                        if let title = player.currentProgram?.title ?? player.nowPlaying {
                             Text("· \(title)").font(UI.font(32)).lineLimit(1)
                         }
                         Spacer()
@@ -152,39 +172,147 @@ struct InfoPanel: View {
 
     var body: some View {
         BottomPanel {
-            VStack(alignment: .leading, spacing: UI.s(32)) {
-                HStack(spacing: UI.s(24)) {
-                    pill("Ton: \(player.audioTrackName)", selected: selection == 0)
-                    pill("Untertitel: \(player.subtitleName)", selected: selection == 1)
-                    Spacer()
-                    pill("Einstellungen", selected: selection == 2)
+            VStack(alignment: .leading, spacing: UI.s(28)) {
+                // Schalter oben
+                let pills = model.availableInfoPills
+                HStack(spacing: UI.s(16)) {
+                    ForEach(0..<pills.count, id: \.self) { index in
+                        pill(title(for: pills[index]), selected: selection == index)
+                    }
                 }
-                VStack(alignment: .leading, spacing: UI.s(12)) {
-                    Text("JETZT · \(model.currentEntry?.number ?? 0) \(model.currentEntry?.group.displayName ?? "")")
-                        .font(UI.font(24, .semibold))
-                        .foregroundStyle(UI.secondary)
-                    Text(player.nowPlaying ?? "Keine Programminformation")
-                        .font(UI.font(44, .bold))
-                    Text("Beschreibung und „Danach“ folgen mit dem eigenen EPG-Leser.")
-                        .font(UI.font(26))
-                        .foregroundStyle(UI.secondary)
+
+                // Sendungsinformationen (Jetzt & Danach)
+                HStack(alignment: .top, spacing: UI.s(48)) {
+                    // JETZT
+                    VStack(alignment: .leading, spacing: UI.s(10)) {
+                        Text("JETZT · \(model.currentEntry?.number ?? 0) \(model.currentEntry?.group.displayName ?? "")")
+                            .font(UI.font(24, .semibold))
+                            .foregroundStyle(UI.secondary)
+
+                        if let current = player.currentProgram {
+                            HStack(spacing: UI.s(16)) {
+                                Text("\(Self.formatTime(current.startDate)) – \(Self.formatTime(current.endDate))")
+                                    .font(UI.font(26, .bold))
+                                    .foregroundStyle(UI.accent)
+                                Text(current.title)
+                                    .font(UI.font(38, .bold))
+                                    .lineLimit(2)
+                            }
+
+                            TimelineView(.periodic(from: .now, by: 10)) { context in
+                                let progress = current.progress(at: context.date)
+                                GeometryReader { geo in
+                                    ZStack(alignment: .leading) {
+                                        Capsule().fill(Color.white.opacity(0.15))
+                                        Capsule().fill(UI.accent)
+                                            .frame(width: max(geo.size.width * progress, UI.s(6)))
+                                    }
+                                }
+                                .frame(height: UI.s(6))
+                            }
+
+                            if let subtitle = current.subtitle {
+                                Text(subtitle)
+                                    .font(UI.font(24, .medium))
+                                    .foregroundStyle(UI.secondary)
+                                    .lineLimit(2)
+                            }
+
+                            if let desc = current.description {
+                                Text(desc)
+                                    .font(UI.font(22))
+                                    .foregroundStyle(UI.secondary)
+                                    .lineLimit(3)
+                            }
+                        } else {
+                            Text(player.nowPlaying ?? "Keine Programminformation")
+                                .font(UI.font(40, .bold))
+                            Text("Ausführliche Programmdaten werden aus dem laufenden Stream geladen.")
+                                .font(UI.font(24))
+                                .foregroundStyle(UI.secondary)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                    // DANACH
+                    if let next = player.nextProgram {
+                        VStack(alignment: .leading, spacing: UI.s(8)) {
+                            Text("DANACH · Ab \(Self.formatTime(next.startDate))")
+                                .font(UI.font(24, .semibold))
+                                .foregroundStyle(UI.secondary)
+                            Text(next.title)
+                                .font(UI.font(32, .bold))
+                                .lineLimit(2)
+                            if let sub = next.subtitle ?? next.description {
+                                Text(sub)
+                                    .font(UI.font(22))
+                                    .foregroundStyle(UI.secondary)
+                                    .lineLimit(3)
+                            }
+                        }
+                        .frame(width: UI.s(420), alignment: .leading)
+                        .padding(.leading, UI.s(24))
+                        .overlay(alignment: .leading) {
+                            Rectangle().fill(Color.white.opacity(0.12)).frame(width: UI.s(2))
+                        }
+                    }
                 }
-                Text("\(UI.leftRight): auswählen · \(UI.select): umschalten · \(UI.back): schließen")
-                    .font(UI.font(24))
+
+                // Stream-Qualität & Signal (VLC-Statistiken + Tuner)
+                HStack(spacing: UI.s(20)) {
+                    if !player.stats.resolutionLabel.isEmpty {
+                        Label(player.stats.resolutionLabel, systemImage: "tv")
+                    }
+                    if !player.stats.bitrateLabel.isEmpty {
+                        Label(player.stats.bitrateLabel, systemImage: "speedometer")
+                    }
+                    Label(player.stats.lossLabel,
+                          systemImage: player.stats.lostPictures > 0 ? "exclamationmark.triangle" : "checkmark.shield")
+                        .foregroundStyle(player.stats.lostPictures > 0 ? Color.orange : UI.secondary)
+
+                    if let signal = player.stats.signalLabel {
+                        Label(signal, systemImage: "antenna.radiowaves.left.and.right")
+                    }
+                    if let tuner = player.stats.tunerLabel {
+                        Label(tuner, systemImage: "cpu")
+                    }
+                }
+                .font(UI.font(20, .medium))
+                .foregroundStyle(UI.secondary)
+                .padding(.top, UI.s(4))
+
+                Text("\(UI.leftRight): auswählen · \(UI.select): Aktion ausführen · \(UI.back): schließen")
+                    .font(UI.font(22))
                     .foregroundStyle(UI.secondary)
             }
             .foregroundStyle(UI.text)
         }
     }
 
+    private func title(for pill: AppModel.InfoPill) -> String {
+        switch pill {
+        case .audio: return "Ton: \(player.audioTrackName)"
+        case .subtitle: return "Untertitel: \(player.subtitleName)"
+        case .restartHLS: return "Von Anfang an"
+        case .searchMediathek: return "In Mediathek suchen"
+        case .settings: return "Einstellungen"
+        }
+    }
+
     private func pill(_ title: String, selected: Bool) -> some View {
         Text(title)
-            .font(UI.font(28, .semibold))
+            .font(UI.font(26, .semibold))
             .lineLimit(1)
             .foregroundStyle(selected ? Color.black : UI.text)
-            .padding(.horizontal, UI.s(32))
-            .padding(.vertical, UI.s(16))
+            .padding(.horizontal, UI.s(28))
+            .padding(.vertical, UI.s(14))
             .background(selected ? UI.text : Color.white.opacity(0.14), in: Capsule())
+    }
+
+    static func formatTime(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "HH:mm"
+        return formatter.string(from: date)
     }
 }
 
@@ -193,7 +321,7 @@ struct InfoPanel: View {
 struct ChannelListOverlay: View {
     @ObservedObject var model: AppModel
     @ObservedObject var player: PlayerController
-    let selection: Int
+    let selectedID: String
     let moving: Bool
 
     var body: some View {
@@ -211,15 +339,39 @@ struct ChannelListOverlay: View {
                 ScrollViewReader { proxy in
                     ScrollView(.vertical, showsIndicators: false) {
                         LazyVStack(spacing: UI.s(8)) {
-                            specialRow("Mediathek · Spielfilme", selected: selection == -1).id(-1)
-                            specialRow("Platz eingeben (Direktwahl)", selected: selection == 0).id(0)
-                            ForEach(model.lineup?.entries ?? []) { entry in
-                                row(entry).id(entry.number)
+                            specialRow("Mediathek · Spielfilme", selected: selectedID == "mediathek").id("mediathek")
+                            specialRow("Programmübersicht (EPG)", selected: selectedID == "epgOverview").id("epgOverview")
+                            specialRow("Platz eingeben (Direktwahl)", selected: selectedID == "directEntry").id("directEntry")
+
+                            if !model.recentEntries.isEmpty {
+                                VStack(alignment: .leading, spacing: UI.s(8)) {
+                                    Text("ZULETZT GESEHEN")
+                                        .font(UI.font(22, .bold))
+                                        .foregroundStyle(UI.secondary)
+                                        .padding(.top, UI.s(16))
+                                        .padding(.horizontal, UI.s(24))
+                                    ForEach(model.recentEntries) { entry in
+                                        row(entry, isRecentSection: true, selected: selectedID == "recent-\(entry.number)")
+                                            .id("recent-\(entry.number)")
+                                    }
+                                }
+                            }
+
+                            VStack(alignment: .leading, spacing: UI.s(8)) {
+                                Text("ALLE SENDER")
+                                    .font(UI.font(22, .bold))
+                                    .foregroundStyle(UI.secondary)
+                                    .padding(.top, UI.s(16))
+                                    .padding(.horizontal, UI.s(24))
+                                ForEach(model.lineup?.entries ?? []) { entry in
+                                    row(entry, isRecentSection: false, selected: selectedID == "channel-\(entry.number)")
+                                        .id("channel-\(entry.number)")
+                                }
                             }
                         }
                     }
-                    .onAppear { proxy.scrollTo(selection, anchor: .center) }
-                    .onChange(of: selection) { _, new in
+                    .onAppear { proxy.scrollTo(selectedID, anchor: .center) }
+                    .onChange(of: selectedID) { _, new in
                         withAnimation(.easeOut(duration: 0.15)) { proxy.scrollTo(new, anchor: .center) }
                     }
                 }
@@ -253,10 +405,8 @@ struct ChannelListOverlay: View {
             .overlay(RoundedRectangle(cornerRadius: UI.s(16)).stroke(Color.white.opacity(selected ? 0 : 0.25), lineWidth: UI.s(2)))
     }
 
-    private func row(_ entry: LineupEntry) -> some View {
-        let selected = selection == entry.number
+    private func row(_ entry: LineupEntry, isRecentSection: Bool, selected: Bool) -> some View {
         let isCurrent = entry.number == model.currentNumber
-        let isPrevious = AppModel.key(entry) == model.previousKey
         let ink: Color = selected ? .black : UI.text
         let quiet: Color = selected ? Color(white: 0.3) : UI.secondary
 
@@ -268,6 +418,8 @@ struct ChannelListOverlay: View {
         } else {
             detail = entry.group.hd != nil ? "HD" : "SD"
         }
+
+        let isDead = entry.group.areAllVariantsDead(deadIDs: model.settings.deadChannelIDs)
 
         return HStack(spacing: UI.s(24)) {
             Text("\(entry.number)")
@@ -284,10 +436,12 @@ struct ChannelListOverlay: View {
             Spacer(minLength: 0)
             if selected && moving {
                 Badge(text: "↕ VERSCHIEBEN", dark: true)
+            } else if isRecentSection {
+                Badge(text: "ZULETZT", dark: selected)
             } else if isCurrent {
                 Badge(text: "LÄUFT", dark: selected)
-            } else if isPrevious {
-                Badge(text: "ZULETZT", dark: selected)
+            } else if isDead {
+                Badge(text: "KEIN SIGNAL", dark: selected)
             }
         }
         .padding(.horizontal, UI.s(24))

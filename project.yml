@@ -31,11 +31,16 @@ targets:
       - package: FritzTVKit
       - package: VLCKitSPM
         product: VLCKitSPM
+      - target: FritzTV-tvOS-TopShelf
     info:
       path: App/tvOS/Info.plist
       properties:
         CFBundleDisplayName: FritzTV
         UIUserInterfaceStyle: Dark
+        CFBundleURLTypes:
+          - CFBundleURLName: de.home.fritztv
+            CFBundleURLSchemes:
+              - fritztv
         NSLocalNetworkUsageDescription: Zum Abrufen der Sender von deiner FRITZ!Box.
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
@@ -68,6 +73,10 @@ targets:
       properties:
         CFBundleDisplayName: FritzTV
         LSApplicationCategoryType: public.app-category.entertainment
+        CFBundleURLTypes:
+          - CFBundleURLName: de.home.fritztv.mac
+            CFBundleURLSchemes:
+              - fritztv
         NSLocalNetworkUsageDescription: Zum Abrufen der Sender von deiner FRITZ!Box.
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
@@ -86,6 +95,21 @@ targets:
         CODE_SIGN_IDENTITY: "-"
         ENABLE_HARDENED_RUNTIME: NO
         ENABLE_APP_SANDBOX: NO
+
+  FritzTV-tvOS-TopShelf:
+    type: app-extension
+    platform: tvOS
+    sources:
+      - path: App/TopShelf
+    dependencies:
+      - package: FritzTVKit
+    info:
+      path: App/TopShelf/Info.plist
+    settings:
+      base:
+        PRODUCT_NAME: FritzTVTopShelf
+        PRODUCT_BUNDLE_IDENTIFIER: de.home.fritztv.topshelf
+        TARGETED_DEVICE_FAMILY: "3"
 
 schemes:
   FritzTV-tvOS:
