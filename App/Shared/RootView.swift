@@ -26,6 +26,10 @@ struct RootView: View {
                     model.mediathekPlayClosed()
                 }
                 .ignoresSafeArea()
+            } else if model.showEPGOverview {
+                EPGOverviewView(model: model, player: player)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .transition(.opacity)
             } else {
                 Color.clear
                     .contentShape(Rectangle())
@@ -49,17 +53,10 @@ struct RootView: View {
         .fullScreenCover(isPresented: $model.showMediathek, onDismiss: { model.mediathekClosed() }) {
             MediathekView(settings: model.settings)
         }
-        .fullScreenCover(isPresented: $model.showEPGOverview, onDismiss: { model.epgOverviewClosed() }) {
-            EPGOverviewView(model: model, player: player)
-        }
         #else
         .sheet(isPresented: $model.showMediathek, onDismiss: { model.mediathekClosed() }) {
             MediathekView(settings: model.settings)
                 .frame(minWidth: 1000, maxWidth: .infinity, minHeight: 650, maxHeight: .infinity)
-        }
-        .sheet(isPresented: $model.showEPGOverview, onDismiss: { model.epgOverviewClosed() }) {
-            EPGOverviewView(model: model, player: player)
-                .frame(minWidth: 1100, idealWidth: 1320, maxWidth: .infinity, minHeight: 700, idealHeight: 820, maxHeight: .infinity)
         }
         #endif
         .sheet(isPresented: Binding(

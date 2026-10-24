@@ -93,7 +93,7 @@ struct EPGOverviewView: View {
                             tuneSelected()
                             return nil
                         case 53: // Escape
-                            dismiss()
+                            close()
                             return nil
                         default:
                             return event
@@ -128,7 +128,7 @@ struct EPGOverviewView: View {
                 return .handled
             }
             .onKeyPress(.escape) {
-                dismiss()
+                close()
                 return .handled
             }
             #elseif os(tvOS)
@@ -143,7 +143,7 @@ struct EPGOverviewView: View {
                 tuneSelected()
             }
             .onExitCommand {
-                dismiss()
+                close()
             }
             #endif
             .preferredColorScheme(.dark)
@@ -199,9 +199,23 @@ struct EPGOverviewView: View {
             .buttonStyle(.plain)
             .focusable(false)
 
-            Text("Esc: Schließen")
-                .font(UI.font(15, .regular))
-                .foregroundStyle(Color.white.opacity(0.45))
+            Button {
+                close()
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "xmark")
+                        .font(UI.font(13, .bold))
+                    Text("Schließen")
+                        .font(UI.font(15, .medium))
+                }
+                .foregroundStyle(Color.white.opacity(0.85))
+                .padding(.horizontal, 14)
+                .padding(.vertical, 8)
+                .background(Color.white.opacity(0.12), in: Capsule())
+            }
+            .buttonStyle(.plain)
+            .focusable(false)
+            .help("EPG schließen (Esc)")
         }
         .padding(.horizontal, 22)
         .padding(.vertical, 14)
@@ -315,7 +329,7 @@ struct EPGOverviewView: View {
         .onTapGesture {
             selectedChannelNumber = entry.number
             model.tune(to: entry.number)
-            dismiss()
+            close()
         }
     }
 
@@ -355,7 +369,7 @@ struct EPGOverviewView: View {
         .onTapGesture {
             selectedChannelNumber = entry.number
             model.tune(to: entry.number)
-            dismiss()
+            close()
         }
     }
 
@@ -539,6 +553,18 @@ struct EPGOverviewView: View {
     private func tuneSelected() {
         guard let num = selectedChannelNumber else { return }
         model.tune(to: num)
+        close()
+    }
+
+    private func close() {
+        #if os(macOS)
+        if let sheetKeyMonitor {
+            NSEvent.removeMonitor(sheetKeyMonitor)
+            self.sheetKeyMonitor = nil
+        }
+        #endif
+        model.showEPGOverview = false
+        model.epgOverviewClosed()
         dismiss()
     }
 
