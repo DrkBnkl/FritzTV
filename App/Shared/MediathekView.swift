@@ -303,6 +303,7 @@ enum MovieText {
 private struct PlayItem: Identifiable {
     let id = UUID()
     let url: URL
+    let channel: String?
 }
 
 struct MovieDetailView: View {
@@ -388,11 +389,11 @@ struct MovieDetailView: View {
         .task { await loadDetail() }
         #if os(tvOS)
         .fullScreenCover(item: $playing) { item in
-            MediathekPlayer(url: item.url)
+            MediathekPlayer(url: item.url, title: movie.title, channel: item.channel)
         }
         #else
         .sheet(item: $playing) { item in
-            MediathekPlayer(url: item.url)
+            MediathekPlayer(url: item.url, title: movie.title, channel: item.channel)
                 .frame(minWidth: 1000, minHeight: 600)
         }
         #endif
@@ -412,7 +413,9 @@ struct MovieDetailView: View {
         HStack(spacing: UI.s(20)) {
             ForEach(Array(hits.prefix(3).enumerated()), id: \.offset) { index, hit in
                 Button {
-                    if let url = hit.streamURL { playing = PlayItem(url: url) }
+                    if let url = hit.streamURL {
+                        playing = PlayItem(url: url, channel: hit.channel ?? movie.channels.first)
+                    }
                 } label: {
                     Text(hitLabel(hit, first: index == 0)).font(UI.font(26, .semibold))
                 }
@@ -499,26 +502,236 @@ struct MovieDetailView: View {
 /// Spielt einen Mediathek-Film direkt von den Servern der Sender (MP4) mit Apples Player.
 struct MediathekPlayer: View {
     let url: URL
+    /// Untertitel-Datei (TTML/WebVTT), falls bekannt.
+    var subtitleURL: URL? = nil
+    /// Titel zum Nachschlagen der Untertitel bei MediathekViewWeb, wenn `subtitleURL` fehlt.
+    var title: String? = nil
+    var channel: String? = nil
+    var onClose: (() -> Void)? = nil
+
     @State private var player = AVPlayer()
+    @State private var cues: [SubtitleCue] = []
+    @State private var caption: String?
+    @State private var timeObserver: Any?
+    @State private var jumpFeedback: String?
+    @State private var jumpFeedbackTask: Task<Void, Never>?
+    @State private var lastJumpPressAt = Date.distantPast
+    @State private var lastJumpForward = true
+    @State private var jumpPressCount = 0
+    @AppStorage("mediathekSubtitles") private var showSubtitles = false
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         VideoPlayer(player: player)
             .ignoresSafeArea()
+            .overlay(alignment: .bottom) {
+                if showSubtitles, let caption {
+                    Text(caption)
+                        .font(UI.font(38, .semibold))
+                        .multilineTextAlignment(.center)
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, UI.s(24))
+                        .padding(.vertical, UI.s(10))
+                        .background(Color.black.opacity(0.7), in: RoundedRectangle(cornerRadius: UI.s(10)))
+                        .padding(.bottom, UI.s(90))
+                        .allowsHitTesting(false)
+                }
+            }
+            .overlay(alignment: .center) {
+                if let jumpFeedback {
+                    Text(jumpFeedback)
+                        .font(.system(size: 32, weight: .bold))
+                        .foregroundStyle(Color.white)
+                        .padding(.horizontal, 24)
+                        .padding(.vertical, 12)
+                        .background(Color.black.opacity(0.75), in: Capsule())
+                        .overlay(Capsule().stroke(Color.white.opacity(0.3), lineWidth: 1.5))
+                        .shadow(color: .black.opacity(0.5), radius: 8)
+                        .transition(.scale.combined(with: .opacity))
+                }
+            }
+            .overlay(alignment: .top) {
+                HStack(alignment: .center) {
+                    Button(action: close) {
+                        HStack(spacing: 8) {
+                            Image(systemName: "chevron.left")
+                                .font(.system(size: 14, weight: .bold))
+                            Text("Live-TV")
+                                .font(.system(size: 15, weight: .semibold))
+                            #if os(macOS)
+                            Text("Esc")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(Color.white.opacity(0.85))
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(Color.white.opacity(0.2), in: RoundedRectangle(cornerRadius: 4))
+                            #endif
+                        }
+                        .foregroundStyle(Color.white)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 10)
+                        .background(Color.black.opacity(0.8), in: Capsule())
+                        .overlay(Capsule().stroke(Color.white.opacity(0.35), lineWidth: 1.5))
+                        .shadow(color: .black.opacity(0.5), radius: 6, x: 0, y: 2)
+                    }
+                    .buttonStyle(.plain)
+                    #if os(macOS)
+                    .keyboardShortcut(.cancelAction)
+                    .keyboardShortcut(.escape, modifiers: [])
+                    .onHover { inside in
+                        if inside {
+                            NSCursor.pointingHand.push()
+                        } else {
+                            NSCursor.pop()
+                        }
+                    }
+                    #endif
+
+                    Spacer()
+
+                    HStack(spacing: 8) {
+                        Circle()
+                            .fill(Color.blue)
+                            .frame(width: 8, height: 8)
+                        Text("Mediathek")
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(Color.white.opacity(0.9))
+                    }
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 8)
+                    .background(Color.black.opacity(0.7), in: Capsule())
+                    .overlay(Capsule().stroke(Color.white.opacity(0.2), lineWidth: 1))
+                }
+                .padding(.horizontal, 24)
+                .padding(.top, 20)
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .mediathekJump)) { notification in
+                if let forward = notification.object as? Bool {
+                    jumpProgressive(forward: forward)
+                } else if let seconds = notification.object as? Double {
+                    jumpProgressive(forward: seconds > 0)
+                }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .mediathekTogglePause)) { _ in
+                togglePlayPause()
+            }
+            #if os(macOS)
+            .onKeyPress(.escape) {
+                close()
+                return .handled
+            }
+            .onKeyPress(.leftArrow) {
+                jumpProgressive(forward: false)
+                return .handled
+            }
+            .onKeyPress(.rightArrow) {
+                jumpProgressive(forward: true)
+                return .handled
+            }
+            .onKeyPress(.space) {
+                togglePlayPause()
+                return .handled
+            }
+            #elseif os(tvOS)
+            .onExitCommand {
+                close()
+            }
+            #endif
             .onAppear {
                 player.replaceCurrentItem(with: AVPlayerItem(url: url))
                 player.play()
+                // Untertitel zur Abspielposition nachführen (viermal pro Sekunde)
+                timeObserver = player.addPeriodicTimeObserver(forInterval: CMTime(value: 1, timescale: 4),
+                                                              queue: .main) { time in
+                    caption = SubtitleParser.text(at: time.seconds, in: cues)
+                }
+            }
+            .task { await loadSubtitles() }
+            .onChange(of: showSubtitles) { _, enabled in
+                if enabled && cues.isEmpty {
+                    Task { await loadSubtitles() }
+                }
             }
             .onDisappear {
+                jumpFeedbackTask?.cancel()
+                if let timeObserver { player.removeTimeObserver(timeObserver) }
+                timeObserver = nil
                 player.pause()
                 player.replaceCurrentItem(with: nil)
             }
-            #if os(macOS)
-            .overlay(alignment: .topTrailing) {
-                Button("Schließen") { dismiss() }
-                    .keyboardShortcut(.cancelAction)
-                    .padding()
+    }
+
+    private func jumpProgressive(forward: Bool) {
+        let step = ProgressiveJump.nextStep(
+            forward: forward,
+            lastPressAt: &lastJumpPressAt,
+            lastDirectionForward: &lastJumpForward,
+            pressCount: &jumpPressCount
+        )
+        jump(seconds: step.stepDelta, display: step.displayText)
+    }
+
+    private func jump(seconds: Double, display: String? = nil) {
+        let current = player.currentTime()
+        let delta = CMTime(seconds: seconds, preferredTimescale: 600)
+        let target = CMTimeAdd(current, delta)
+
+        if let range = player.currentItem?.seekableTimeRanges.first?.timeRangeValue {
+            let start = range.start
+            let end = CMTimeAdd(range.start, range.duration)
+            var clamped = target
+            if target < start {
+                clamped = start
+            } else if target > end {
+                clamped = end
             }
-            #endif
+            player.seek(to: clamped, toleranceBefore: .zero, toleranceAfter: .zero)
+        } else {
+            player.seek(to: target, toleranceBefore: .zero, toleranceAfter: .zero)
+        }
+
+        let label = display ?? (seconds > 0 ? "+\(Int(seconds)) s" : "\(Int(seconds)) s")
+        withAnimation(.spring(response: 0.25, dampingFraction: 0.7)) {
+            jumpFeedback = label
+        }
+        jumpFeedbackTask?.cancel()
+        jumpFeedbackTask = Task {
+            try? await Task.sleep(for: .milliseconds(800))
+            if !Task.isCancelled {
+                withAnimation(.easeOut(duration: 0.25)) {
+                    jumpFeedback = nil
+                }
+            }
+        }
+    }
+
+    private func togglePlayPause() {
+        if player.timeControlStatus == .paused {
+            player.play()
+        } else {
+            player.pause()
+        }
+    }
+
+    private func close() {
+        if let onClose {
+            onClose()
+        } else {
+            dismiss()
+        }
+    }
+
+    private func loadSubtitles() async {
+        guard cues.isEmpty else { return }
+        var source = subtitleURL
+        if source == nil, let title, !title.isEmpty {
+            source = await MediathekSearchClient().subtitleURL(forVideo: url, title: title, channel: channel)
+        }
+        guard let source, let (data, _) = try? await URLSession.shared.data(from: source) else {
+            DebugLog.log("Mediathek: keine Untertitel gefunden")
+            return
+        }
+        cues = SubtitleParser.parse(data)
+        DebugLog.log("Mediathek: \(cues.count) Untertitel geladen")
     }
 }

@@ -17,19 +17,7 @@ public struct TopShelfChannel: Codable, Sendable, Identifiable, Hashable {
     }
 
     /// URL zum Senderlogo auf dem AVM-Server als Vorschau für Top Shelf.
-    public var logoURL: URL? {
-        var slug = name.lowercased()
-            .replacingOccurrences(of: "ä", with: "ae")
-            .replacingOccurrences(of: "ö", with: "oe")
-            .replacingOccurrences(of: "ü", with: "ue")
-            .replacingOccurrences(of: "ß", with: "ss")
-            .replacingOccurrences(of: " hd", with: "")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .replacingOccurrences(of: " ", with: "_")
-        slug = slug.filter { $0.isLetter || $0.isNumber || $0 == "_" }
-        guard !slug.isEmpty else { return nil }
-        return URL(string: "http://tv.avm.de/tvapp/logos/\(slug).png")
-    }
+    public var logoURL: URL? { ChannelLogo.url(for: name) }
 }
 
 /// Verwaltet die Ablage der Favoriten / Top-Sender für tvOS Top Shelf.

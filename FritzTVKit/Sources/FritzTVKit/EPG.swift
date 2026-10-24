@@ -38,7 +38,9 @@ public struct EPGProgram: Identifiable, Hashable, Sendable, Codable {
 
     /// Prüft, ob die Sendung zum angegebenen Zeitpunkt läuft.
     public func isLive(at date: Date = Date()) -> Bool {
-        if isRunningStatus { return true }
+        if isRunningStatus, startDate <= date, date < endDate.addingTimeInterval(EPGChannelSchedule.overrunGrace) {
+            return true
+        }
         return date >= startDate && date < endDate
     }
 
@@ -60,12 +62,20 @@ public struct EPGChannelSchedule: Sendable, Hashable {
         self.programs = programs.sorted { $0.startDate < $1.startDate }
     }
 
-    /// Die aktuell laufende Sendung.
+    /// Wie lange eine als „läuft“ gemeldete Sendung über ihr geplantes Ende hinaus noch als
+    /// aktuell gilt (Überziehen, z. B. bei Sport). Danach zählt nur noch die Uhrzeit.
+    public static let overrunGrace: TimeInterval = 30 * 60
+
+    /// Die aktuell laufende Sendung. Der Running Status aus der EIT hat Vorrang, aber nur,
+    /// solange die Sendung nicht schon lange vorbei ist – sonst bliebe eine veraltete Meldung
+    /// hängen, wenn keine neuen Daten mehr kommen.
     public func currentProgram(at date: Date = Date()) -> EPGProgram? {
-        if let explicit = programs.first(where: { $0.isRunningStatus }) {
+        if let explicit = programs.last(where: {
+            $0.isRunningStatus && $0.startDate <= date && date < $0.endDate.addingTimeInterval(Self.overrunGrace)
+        }) {
             return explicit
         }
-        return programs.first { $0.isLive(at: date) }
+        return programs.first { date >= $0.startDate && date < $0.endDate }
     }
 
     /// Die danach folgende Sendung.

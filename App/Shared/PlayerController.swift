@@ -42,27 +42,38 @@ final class PlayerController: ObservableObject {
     @Published private(set) var nowPlaying: String?
     @Published private(set) var currentProgram: EPGProgram?
     @Published private(set) var nextProgram: EPGProgram?
+    /// Zählt hoch, sobald neue EPG-Daten eingetroffen sind (auch für andere Sender).
+    @Published private(set) var epgRevision = 0
     @Published private(set) var audioTrackName = "Standard"
     @Published private(set) var subtitleName = "Aus"
     @Published private(set) var hasSubtitles = false
     @Published private(set) var stats = PlaybackStatistics()
     /// Zeitversatz zum Live-Bild aus Sprüngen und beendeten Pausen.
-    @Published private(set) var behindLive: TimeInterval = 0
     /// Gesetzt, solange das Bild angehalten ist.
     @Published private(set) var pausedSince: Date?
+    /// Zweiter Player für Timeshift: spielt die Mitschnittdatei, solange nicht live geschaut wird.
+    let replayPlayer = VLCMediaPlayer()
+    /// Gesetzt, solange der Mitschnitt statt des Live-Bilds zu sehen ist.
+    @Published private(set) var isReplaying = false
 
     var onVariantSuccess: ((_ variantKey: String, _ channelID: String, _ failedEarlierIDs: [String]) -> Void)?
     var onAllCandidatesFailed: ((_ channelName: String) -> Void)?
 
-    init(epgStore: EPGStore = EPGStore()) {
+    init(epgStore: EPGStore = EPGStore(cacheURL: EPGStore.defaultCacheURL)) {
         self.epgStore = epgStore
         let parser = EITLogParser()
         self.epgParser = parser
 
+        // Der Speicher ist threadsicher; die Rückrufe kommen aus VLC-Threads (Wiedergabe und
+        // Hintergrund-Abruf teilen sich die Bibliothek und damit diesen Parser).
+        let store = epgStore
+        parser.onServiceName = { [weak self] serviceID, name in
+            store.setServiceName(name, for: serviceID)
+            Task { @MainActor in self?.scheduleEPGRefresh() }
+        }
         parser.onProgramParsed = { [weak self] program in
-            Task { @MainActor in
-                self?.handleParsedProgram(program)
-            }
+            store.add(program: program)
+            Task { @MainActor in self?.handleParsedProgram(program) }
         }
         let receiver = EPGLogReceiver(parser: parser)
         self.logReceiver = receiver
@@ -85,14 +96,31 @@ final class PlayerController: ObservableObject {
     private var failedCandidates = 0
     /// Fehlgeschlagene Varianten in der aktuellen Sitzung vor einem erfolgreichen Bild.
     private var failedInThisSessionForCurrent: [String] = []
+    private var retryTask: Task<Void, Never>?
+
+    // Timeshift über Mitschnitt in eine Datei (Vorbild dream Player)
+    /// Datei, in die der Live-Player gerade mitschreibt.
+    private var recordingURL: URL?
+    /// Beginn des Mitschnitts (erste Daten); Grundlage für die Position in der Datei.
+    private var recordingStartedAt: Date?
+    private var recordingLimit: Int64 = 0
+    private var recordingActive = false
+    private var lastRecordingCheck = Date.distantPast
+    /// Position im Mitschnitt in Sekunden ab Dateianfang, gemessen mit eigener Uhr
+    /// (unabhängig von den Zeitstempeln im TS-Strom).
+    private var replayAnchor: (fileSeconds: Double, at: Date, paused: Bool) = (0, .distantPast, true)
+    private var replaySeekPending: Double?
+    private var replayPausePending = false
+    private var replayTracksSynced = false
+    private var replayOpenedAt = Date.distantPast
+
+    /// Ergänzte RTSP-Links nach PID-Änderungen, je Variante (Sitzung).
+    private var pidOverrides: [String: URL] = [:]
+    /// Varianten, für die in dieser Sitzung schon PIDs ergänzt wurden (nur ein Versuch je Variante).
+    private var pidCheckDone: Set<String> = []
     /// Variante, die in dieser Sitzung zuletzt Bild geliefert hat, je Sender.
     private var workingVariant: [String: String] = [:]
     private var currentVariantKey = ""
-
-    private var timeshiftDirectory: URL {
-        FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("Timeshift", isDirectory: true)
-    }
 
     // MARK: Abspielen
 
@@ -115,6 +143,7 @@ final class PlayerController: ObservableObject {
         failedInThisSessionForCurrent = []
         self.channel = ordered[0]
         self.options = options
+        retryTask?.cancel()
         reconnectTask?.cancel()
         reconnectTask = nil
         start()
@@ -122,20 +151,35 @@ final class PlayerController: ObservableObject {
 
     func stop() {
         monitorTask?.cancel()
+        retryTask?.cancel()
         reconnectTask?.cancel()
         reconnectTask = nil
+        wasPlaying = false
+        stopReplay()
+        if recordingActive {
+            mediaPlayer.stopRecording()
+            recordingActive = false
+        }
+        mediaPlayer.audio?.isMuted = true
         mediaPlayer.stop()
+        recordingURL = nil
+        recordingStartedAt = nil
         TimeshiftBufferManager.shared.cleanup()
         status = .idle
-        wasPlaying = false
     }
 
     func setFailed(title: String, message: String, hint: String? = nil) {
         monitorTask?.cancel()
         reconnectTask?.cancel()
         reconnectTask = nil
-        mediaPlayer.stop()
         wasPlaying = false
+        stopReplay()
+        if recordingActive {
+            mediaPlayer.stopRecording()
+            recordingActive = false
+        }
+        mediaPlayer.audio?.isMuted = true
+        mediaPlayer.stop()
         status = .failed(title: title, message: message, hint: hint)
     }
 
@@ -150,33 +194,36 @@ final class PlayerController: ObservableObject {
     private func start() {
         guard let channel, let options else { return }
         monitorTask?.cancel()
+        if recordingActive {
+            mediaPlayer.stopRecording()
+            recordingActive = false
+        }
+        wasPlaying = false
+        stopReplay()
+        mediaPlayer.audio?.isMuted = true
         mediaPlayer.stop()
-        behindLive = 0
-        pausedSince = nil
+        recordingURL = nil
+        recordingStartedAt = nil
+        recordingLimit = 0
         nowPlaying = nil
+        vlcTitle = nil
         currentProgram = nil
         nextProgram = nil
-        wasPlaying = false
         stats = PlaybackStatistics()
         refreshEPGPrograms()
 
-        let media = VLCMedia(url: channel.streamURL)
+        let media = VLCMedia(url: pidOverrides[channel.id] ?? channel.streamURL)
         media.addOption(":network-caching=\(options.networkCachingMs)")
         if options.rtspTCP || forceTCP {
             media.addOption(":rtsp-tcp")
         }
         DebugLog.log("Öffne Stream per \(options.rtspTCP || forceTCP ? "TCP" : "UDP"), Puffer \(options.networkCachingMs) ms")
         if options.timeshift {
-            let safety = TimeshiftBufferManager.shared.checkStorageSafety()
-            if safety.isSafe {
-                try? FileManager.default.createDirectory(at: TimeshiftBufferManager.shared.bufferDirectory, withIntermediateDirectories: true)
-                media.addOption(":input-timeshift-path=\(TimeshiftBufferManager.shared.bufferDirectory.path)")
-            } else {
-                DebugLog.log("Timeshift deaktiviert: \(safety.reason ?? "Speicher voll")")
-            }
+            prepareRecording()
         }
         mediaPlayer.media = media
         mediaPlayer.setDeinterlaceFilter(options.deinterlace && !channel.isHD ? "yadif" : nil)
+        mediaPlayer.audio?.isMuted = true
         mediaPlayer.play()
 
         status = .connecting
@@ -228,11 +275,26 @@ final class PlayerController: ObservableObject {
                 selectPreferredAudioTrack()
                 // Die Tonverzögerung greift erst, wenn eine Tonspur aktiv ist.
                 mediaPlayer.currentAudioPlaybackDelay = (options?.audioDelayMs ?? 0) * 1000
+                if !isReplaying {
+                    // Entmuten erst nach Spurwahl und einer kurzen Einpendelzeit (200 ms),
+                    // damit unvollständige Audio-Frames zu Beginn und der Spurwechsel nicht krächzen/knacken.
+                    Task { @MainActor [weak self] in
+                        try? await Task.sleep(for: .milliseconds(200))
+                        guard let self, self.wasPlaying, !self.isReplaying else { return }
+                        self.mediaPlayer.audio?.isMuted = false
+                    }
+                }
+                if options?.timeshift == true && recordingLimit >= 500 * 1024 * 1024 {
+                    beginNativeRecording()
+                }
             }
-            status = .playing
+            status = (isReplaying && replayAnchor.paused) ? .paused : .playing
             updatePlaybackStats()
             refreshTrackNames()
-        } else if state == .paused {
+        } else if !wasPlaying {
+            // Solange noch keine sauberen Daten laufen, Audio stummhalten
+            mediaPlayer.audio?.isMuted = true
+        } else if state == .paused || (isReplaying && replayAnchor.paused) {
             status = .paused
         } else if !wasPlaying, Date().timeIntervalSince(openedAt) > 12 {
             // Nach 12 Sekunden ohne Bild und Ton neu versuchen.
@@ -242,32 +304,92 @@ final class PlayerController: ObservableObject {
         }
 
         if let title = mediaPlayer.media?.metadata(forKey: VLCMetaInformationNowPlaying),
-           !title.isEmpty, title != nowPlaying {
+           !title.isEmpty, title != vlcTitle {
+            vlcTitle = title
             nowPlaying = title
+            if channel != nil, epgStore.serviceID(forChannelNames: currentEPGNames) == nil {
+                if epgStore.learn(channelNames: currentEPGNames, fromNowPlayingTitle: title) {
+                    DebugLog.log("EPG-Zuordnung über Titel gelernt: \(currentEPGNames.first ?? "")")
+                }
+            }
             refreshEPGPrograms()
             DebugLog.log("Läuft jetzt: \(title)")
         }
+        // Jetzt/Danach wechseln auch ohne neue Daten, wenn eine Sendung endet.
+        if Date().timeIntervalSince(lastEPGRefresh) > 15 {
+            refreshEPGPrograms()
+        }
+        pollTimeshift()
+        checkForChangedPIDs()
+    }
+
+    /// Kommt nach einigen Sekunden kein Bild (oder gar nichts), prüfen, ob die PMT Spuren nennt,
+    /// die der RTSP-Link nicht anfordert, und den Sender einmal mit ergänzten PIDs neu öffnen.
+    private func checkForChangedPIDs() {
+        guard let channel, channel.kind == .tv, !pidCheckDone.contains(channel.id) else { return }
+        let elapsed = Date().timeIntervalSince(openedAt)
+        let noPicture = mediaPlayer.videoSize.width == 0 && !mediaPlayer.hasVideoOut
+        guard elapsed > 6, noPicture else { return }
+
+        let trackIDs = (indexes(mediaPlayer.videoTrackIndexes)
+                        + indexes(mediaPlayer.audioTrackIndexes)
+                        + indexes(mediaPlayer.videoSubTitlesIndexes)).map(Int.init)
+        let missing = channel.missingPIDs(trackIDs: trackIDs)
+        guard !missing.isEmpty else {
+            if elapsed > 11 { pidCheckDone.insert(channel.id) }
+            return
+        }
+        pidCheckDone.insert(channel.id)
+        guard let url = channel.streamURL(addingPIDs: missing) else { return }
+        pidOverrides[channel.id] = url
+        DebugLog.log("PIDs geändert bei \(channel.name): ergänze \(missing) und verbinde neu")
+        scheduleReconnect(after: 1)
+    }
+
+    /// Titel der laufenden Sendung, wie VLC ihn für das ausgewählte Programm meldet.
+    /// Unabhängig vom EPG-Speicher, daher als Anker für das Lernen einer Zuordnung geeignet.
+    private var vlcTitle: String?
+    private var lastEPGRefresh = Date.distantPast
+    private var epgRefreshPending = false
+
+    /// Namen aller Varianten des aktuellen Senders (HD/SD, alte/neue Frequenz).
+    private var currentEPGNames: [String] {
+        let names = candidates.map(\.name)
+        return names.isEmpty ? (channel.map { [$0.name] } ?? []) : names
     }
 
     private func handleParsedProgram(_ program: EPGProgram) {
-        epgStore.add(program: program)
-        if let current = channel {
-            if program.isRunningStatus || (nowPlaying != nil && program.title.localizedCaseInsensitiveContains(nowPlaying!)) {
-                epgStore.associate(channelKey: current.groupKey, serviceID: program.serviceID)
-            }
-            if epgStore.serviceID(for: current.groupKey) == program.serviceID {
-                refreshEPGPrograms()
-            }
+        if channel != nil, epgStore.serviceID(forChannelNames: currentEPGNames) == nil,
+           let title = vlcTitle,
+           epgStore.learn(channelNames: currentEPGNames, fromNowPlayingTitle: title) {
+            DebugLog.log("EPG-Zuordnung über Titel gelernt: \(currentEPGNames.first ?? "")")
+        }
+        scheduleEPGRefresh()
+    }
+
+    /// Fasst viele Aktualisierungen in kurzer Folge zusammen (eine EIT bringt Dutzende Sendungen)
+    /// und meldet Ansichten wie der Programmübersicht über `epgRevision`, dass neue Daten da sind.
+    private func scheduleEPGRefresh() {
+        guard !epgRefreshPending else { return }
+        epgRefreshPending = true
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(1))
+            guard let self else { return }
+            self.epgRefreshPending = false
+            self.epgRevision &+= 1
+            self.refreshEPGPrograms()
         }
     }
 
     func refreshEPGPrograms() {
-        guard let current = channel else { return }
-        currentProgram = epgStore.currentProgram(forChannelKey: current.groupKey)
-        nextProgram = epgStore.nextProgram(forChannelKey: current.groupKey)
-        if let current = currentProgram, nowPlaying == nil {
-            nowPlaying = current.title
-        }
+        lastEPGRefresh = Date()
+        guard channel != nil else { return }
+        let names = currentEPGNames
+        let current = epgStore.currentProgram(forChannelNames: names)
+        let next = epgStore.nextProgram(forChannelNames: names)
+        if current != currentProgram { currentProgram = current }
+        if next != nextProgram { nextProgram = next }
+        if nowPlaying == nil, let current { nowPlaying = current.title }
     }
 
     /// Schlüssel für die gemerkte Variante: Sender plus gewünschte Qualität.
@@ -295,15 +417,33 @@ final class PlayerController: ObservableObject {
             return
         }
         
-        // Alle Varianten wurden erfolglos probiert
         let channelName = channel?.displayName ?? "Sender"
         DebugLog.log("Keine Variante von \(channelName) liefert Bild.")
-        onAllCandidatesFailed?(channelName)
         setFailed(
             title: "Kein Bild für \(channelName)",
             message: "Senderliste veraltet – Suchlauf starten",
-            hint: "Bitte in der FRITZ!Box-Oberfläche unter DVB-C einen Sendersuchlauf starten."
+            hint: "Sendersuchlauf starten: Einstellungen › Sendersuchlauf (mit Box-Kennwort) oder in der FRITZ!Box-Oberfläche unter DVB-C."
         )
+        // Kann die Meldung präzisieren (z. B. „Alle Tuner belegt“).
+        onAllCandidatesFailed?(channelName)
+        scheduleRetryAfterFailure()
+    }
+
+    /// Nach einer Fehlermeldung in größerem Abstand still weiter probieren: Ein belegter Tuner wird
+    /// frei, ein kurzer Netzaussetzer geht vorbei. Endet mit jedem Senderwechsel oder Stopp.
+    private func scheduleRetryAfterFailure() {
+        retryTask?.cancel()
+        let failedChannelKey = currentVariantKey
+        retryTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(30))
+            guard let self, !Task.isCancelled, case .failed = self.status,
+                  self.currentVariantKey == failedChannelKey, !self.candidates.isEmpty else { return }
+            DebugLog.log("Neuer Versuch nach Fehlermeldung")
+            self.failedCandidates = 0
+            self.candidateIndex = 0
+            self.channel = self.candidates[0]
+            self.start()
+        }
     }
 
     /// Kommen per UDP keine Daten an (VPN, Firewall), für den Rest der Sitzung RTP über TCP nutzen.
@@ -319,6 +459,11 @@ final class PlayerController: ObservableObject {
     private func scheduleReconnect(after seconds: Int = 3) {
         guard reconnectTask == nil else { return }
         monitorTask?.cancel()
+        if recordingActive {
+            mediaPlayer.stopRecording()
+            recordingActive = false
+        }
+        mediaPlayer.audio?.isMuted = true
         mediaPlayer.stop()
         wasPlaying = false
         reconnectTask = Task { [weak self] in
@@ -332,47 +477,262 @@ final class PlayerController: ObservableObject {
         }
     }
 
-    // MARK: Timeshift (Prototyp mit dem eingebauten Timeshift von VLC)
+    // MARK: Timeshift über Mitschnitt in eine Datei
+    //
+    // Der Live-Player zeigt das Bild im normalen Dekodiermodus (ohne `:sout`, damit nur eine
+    // Tonspur dekodiert wird) und schreibt den Strom gleichzeitig per libVLC-Mitschnitt in eine
+    // TS-Datei (eine RTSP-Sitzung, ein Tuner). Anhalten oder Zurückspulen startet den zweiten
+    // Player auf dieser Datei; der Live-Player läuft stumm weiter und schreibt mit. „Live“ oder
+    // Aufholen bis zum Dateiende schaltet zurück.
+
+    private func prepareRecording() {
+        let manager = TimeshiftBufferManager.shared
+        manager.cleanup()
+        try? FileManager.default.createDirectory(at: manager.bufferDirectory, withIntermediateDirectories: true)
+        let limit = manager.recordingLimitBytes()
+        guard limit >= 500 * 1024 * 1024 else {
+            recordingLimit = 0
+            DebugLog.log("Timeshift aus: zu wenig freier Speicher (\(limit / 1_048_576) MB nutzbar)")
+            return
+        }
+        recordingLimit = limit
+        lastRecordingCheck = Date()
+    }
+
+    private func beginNativeRecording() {
+        let manager = TimeshiftBufferManager.shared
+        try? FileManager.default.createDirectory(at: manager.bufferDirectory, withIntermediateDirectories: true)
+        _ = mediaPlayer.startRecording(atPath: manager.bufferDirectory.path)
+        recordingActive = true
+        recordingStartedAt = Date()
+        lastRecordingCheck = Date()
+        DebugLog.log("Timeshift-Mitschnitt gestartet in \(manager.bufferDirectory.lastPathComponent), höchstens \(recordingLimit / 1_048_576) MB")
+    }
 
     var canTimeshift: Bool {
-        options?.timeshift == true && (status == .playing || status == .paused)
+        guard options?.timeshift == true, recordingStartedAt != nil,
+              status == .playing || status == .paused else { return false }
+        if recordingURL == nil {
+            recordingURL = TimeshiftBufferManager.shared.latestRecordingURL()
+        }
+        guard let url = recordingURL else { return false }
+        return TimeshiftBufferManager.shared.fileSize(at: url) > 65_536
+    }
+
+    /// Länge des bisherigen Mitschnitts in Sekunden.
+    private var recordedSeconds: Double {
+        recordingStartedAt.map { Date().timeIntervalSince($0) } ?? 0
+    }
+
+    /// Aktuelle Position im Mitschnitt in Sekunden ab Dateianfang.
+    private var replayPosition: Double {
+        replayAnchor.paused ? replayAnchor.fileSeconds
+                            : replayAnchor.fileSeconds + Date().timeIntervalSince(replayAnchor.at)
     }
 
     /// Aktueller Rückstand zum Live-Bild in Sekunden.
     var currentBehind: TimeInterval {
-        behindLive + (pausedSince.map { Date().timeIntervalSince($0) } ?? 0)
+        isReplaying ? max(0, recordedSeconds - replayPosition) : 0
     }
 
-    var isTimeshifted: Bool { pausedSince != nil || behindLive > 0.5 }
+    var isTimeshifted: Bool { isReplaying }
 
     func togglePause() {
-        guard canTimeshift else { return }
-        if let since = pausedSince {
-            behindLive += Date().timeIntervalSince(since)
-            pausedSince = nil
-            mediaPlayer.play()
-        } else {
-            pausedSince = Date()
-            mediaPlayer.pause()
+        if isReplaying {
+            if replayAnchor.paused {
+                replayAnchor = (replayPosition, Date(), false)
+                pausedSince = nil
+                replayPausePending = false
+                replayPlayer.audio?.isMuted = false
+                replayPlayer.play()
+                status = .playing
+            } else {
+                replayAnchor = (replayPosition, Date(), true)
+                pausedSince = Date()
+                replayPlayer.audio?.isMuted = true
+                if replayPlayer.isPlaying {
+                    replayPlayer.pause()
+                } else {
+                    replayPausePending = true
+                }
+                status = .paused
+            }
+        } else if canTimeshift {
+            startReplay(behind: 0, paused: true)
+        } else if status != .playing || !mediaPlayer.isPlaying {
+            start()
+        }
+    }
+
+    // MARK: Progressive Jump
+    private var lastJumpPressAt = Date.distantPast
+    private var lastJumpForward = true
+    private var jumpPressCount = 0
+    @Published public private(set) var jumpFeedback: String?
+    private var jumpFeedbackTask: Task<Void, Never>?
+
+    public func jumpProgressive(forward: Bool) {
+        let step = ProgressiveJump.nextStep(
+            forward: forward,
+            lastPressAt: &lastJumpPressAt,
+            lastDirectionForward: &lastJumpForward,
+            pressCount: &jumpPressCount
+        )
+        jump(seconds: Int(step.stepDelta))
+        jumpFeedback = step.displayText
+        jumpFeedbackTask?.cancel()
+        jumpFeedbackTask = Task {
+            try? await Task.sleep(for: .milliseconds(900))
+            if !Task.isCancelled {
+                await MainActor.run { [weak self] in
+                    self?.jumpFeedback = nil
+                }
+            }
         }
     }
 
     func jump(seconds: Int) {
-        guard canTimeshift else { return }
+        let step = Double(seconds)
         if seconds < 0 {
-            mediaPlayer.jumpBackward(Int32(-seconds))
-            behindLive += Double(-seconds)
-        } else if currentBehind <= Double(seconds) {
-            goLive()
-        } else {
-            mediaPlayer.jumpForward(Int32(seconds))
-            behindLive -= Double(seconds)
+            if isReplaying {
+                let target = max(0, replayPosition + step)
+                if replaySeekPending != nil {
+                    replaySeekPending = target
+                } else {
+                    replayPlayer.jumpBackward(Int32(replayPosition - target))
+                }
+                replayAnchor = (target, Date(), replayAnchor.paused)
+            } else if canTimeshift {
+                startReplay(behind: -step, paused: false)
+            }
+        } else if isReplaying {
+            if currentBehind <= step + 1 {
+                goLive()
+            } else {
+                let target = replayPosition + step
+                if replaySeekPending != nil {
+                    replaySeekPending = target
+                } else {
+                    replayPlayer.jumpForward(Int32(seconds))
+                }
+                replayAnchor = (target, Date(), replayAnchor.paused)
+            }
         }
     }
 
     func goLive() {
-        guard isTimeshifted else { return }
-        restart()
+        guard isReplaying else { return }
+        DebugLog.log("Timeshift: zurück zu Live")
+        stopReplay()
+    }
+
+    private func startReplay(behind: Double, paused: Bool) {
+        if recordingURL == nil {
+            recordingURL = TimeshiftBufferManager.shared.latestRecordingURL()
+        }
+        guard let url = recordingURL, let options else { return }
+        // 1 s Abstand zum Dateiende: VLC puffert, die Datei hinkt dem Bild leicht hinterher.
+        let position = max(0, recordedSeconds - behind - 1)
+        let media = VLCMedia(url: url)
+        media.addOption(":file-caching=300")
+        replayPlayer.media = media
+        replayPlayer.setDeinterlaceFilter(options.deinterlace && channel?.isHD == false ? "yadif" : nil)
+        mediaPlayer.audio?.isMuted = true
+        replayPlayer.audio?.isMuted = paused
+        replayPlayer.play()
+        replayAnchor = (position, Date(), paused)
+        replaySeekPending = position > 0.5 ? position : nil
+        replayPausePending = paused
+        replayTracksSynced = false
+        replayOpenedAt = Date()
+        pausedSince = paused ? Date() : nil
+        isReplaying = true
+        status = paused ? .paused : .playing
+        DebugLog.log("Timeshift: Wiedergabe aus dem Mitschnitt ab \(Int(position)) s (\(Int(behind)) s hinter Live), angehalten=\(paused)")
+    }
+
+    private func stopReplay() {
+        replaySeekPending = nil
+        replayPausePending = false
+        replayTracksSynced = false
+        pausedSince = nil
+        if isReplaying || replayPlayer.media != nil {
+            replayPlayer.stop()
+        }
+        replayPlayer.audio?.isMuted = false
+        isReplaying = false
+        if wasPlaying {
+            mediaPlayer.audio?.isMuted = false
+            status = .playing
+        }
+    }
+
+    /// Läuft mit der Überwachung zweimal pro Sekunde.
+    private func pollTimeshift() {
+        if recordingActive && recordingURL == nil {
+            if let url = TimeshiftBufferManager.shared.latestRecordingURL(),
+               TimeshiftBufferManager.shared.fileSize(at: url) > 0 {
+                recordingURL = url
+                DebugLog.log("Timeshift-Mitschnittdatei erkannt: \(url.lastPathComponent)")
+            }
+        }
+
+        if isReplaying {
+            mediaPlayer.audio?.isMuted = true
+            let hasReplayVideo = replayPlayer.hasVideoOut || replayPlayer.videoSize.width > 0
+            let hasReplayMedia = hasReplayVideo || replayPlayer.numberOfAudioTracks > 0
+
+            if replayPlayer.isPlaying && hasReplayMedia {
+                if !replayTracksSynced {
+                    replayTracksSynced = true
+                    if mediaPlayer.currentAudioTrackIndex >= 0 {
+                        replayPlayer.currentAudioTrackIndex = mediaPlayer.currentAudioTrackIndex
+                    }
+                    if mediaPlayer.currentVideoSubTitleIndex >= 0 {
+                        replayPlayer.currentVideoSubTitleIndex = mediaPlayer.currentVideoSubTitleIndex
+                    }
+                    replayPlayer.currentAudioPlaybackDelay = (options?.audioDelayMs ?? 0) * 1000
+                }
+                // Bei MPEG-TS greift ein Sprung erst, nachdem VLC PMT und PCR-PID gelesen hat.
+                if let targetSeconds = replaySeekPending {
+                    replaySeekPending = nil
+                    var targetMs = Int32(targetSeconds * 1000)
+                    let knownLengthMs = replayPlayer.media?.length.intValue ?? 0
+                    if knownLengthMs > 500 {
+                        targetMs = min(targetMs, knownLengthMs - 500)
+                    }
+                    if targetMs > 0 {
+                        replayPlayer.time = VLCTime(int: targetMs)
+                    }
+                }
+                // Angehalten starten: erst pausieren, wenn wirklich Bild (bzw. bei Radio Ton) anliegt.
+                let readyToPause = channel?.kind == .radio ? hasReplayMedia : hasReplayVideo
+                if replayPausePending && readyToPause {
+                    replayPausePending = false
+                    replayPlayer.audio?.isMuted = true
+                    replayPlayer.pause()
+                } else if replayAnchor.paused && !replayPausePending && readyToPause {
+                    replayPlayer.audio?.isMuted = true
+                    replayPlayer.pause()
+                }
+            }
+
+            // Bis zum Dateiende aufgeholt: zurück zum Live-Bild.
+            let state = replayPlayer.state
+            let openingGrace = Date().timeIntervalSince(replayOpenedAt) < 1.5
+            if state == .ended || state == .error || (!replayAnchor.paused && !openingGrace && currentBehind < 1) {
+                goLive()
+            }
+        }
+
+        // Größe des Mitschnitts prüfen (alle 10 s).
+        guard let url = recordingURL, recordingLimit > 0,
+              Date().timeIntervalSince(lastRecordingCheck) > 10 else { return }
+        lastRecordingCheck = Date()
+        if TimeshiftBufferManager.shared.fileSize(at: url) > recordingLimit {
+            DebugLog.log("Timeshift-Mitschnitt hat die Grenze von \(recordingLimit / 1_048_576) MB erreicht – Puffer wird neu begonnen")
+            restart()
+        }
     }
 
     // MARK: Ton und Untertitel
@@ -394,7 +754,11 @@ final class PlayerController: ObservableObject {
         let tracks = indexes(mediaPlayer.audioTrackIndexes).filter { $0 >= 0 }
         guard tracks.count > 1 else { return }
         let position = tracks.firstIndex(of: mediaPlayer.currentAudioTrackIndex) ?? -1
-        mediaPlayer.currentAudioTrackIndex = tracks[(position + 1) % tracks.count]
+        let nextTrack = tracks[(position + 1) % tracks.count]
+        mediaPlayer.currentAudioTrackIndex = nextTrack
+        if isReplaying {
+            replayPlayer.currentAudioTrackIndex = nextTrack
+        }
         refreshTrackNames()
     }
 
@@ -403,7 +767,11 @@ final class PlayerController: ObservableObject {
         if !tracks.contains(-1) { tracks.insert(-1, at: 0) }
         guard tracks.count > 1 else { return }
         let position = tracks.firstIndex(of: mediaPlayer.currentVideoSubTitleIndex) ?? 0
-        mediaPlayer.currentVideoSubTitleIndex = tracks[(position + 1) % tracks.count]
+        let nextSub = tracks[(position + 1) % tracks.count]
+        mediaPlayer.currentVideoSubTitleIndex = nextSub
+        if isReplaying {
+            replayPlayer.currentVideoSubTitleIndex = nextSub
+        }
         refreshTrackNames()
     }
 
@@ -426,13 +794,15 @@ final class PlayerController: ObservableObject {
         }
     }
 
+    private static let trackRegex = try? NSRegularExpression(pattern: #"Track\s*\d+\s*-\s*\[(.*?)\]"#)
+
     private func cleanSubtitleName(_ raw: String) -> String {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.localizedCaseInsensitiveContains("disable") {
             return "Aus"
         }
         var cleaned = trimmed
-        if let regex = try? NSRegularExpression(pattern: #"Track\s*\d+\s*-\s*\[(.*?)\]"#) {
+        if let regex = Self.trackRegex {
             let ns = cleaned as NSString
             if let match = regex.firstMatch(in: cleaned, range: NSRange(location: 0, length: ns.length)) {
                 cleaned = ns.substring(with: match.range(at: 1))
@@ -455,7 +825,7 @@ final class PlayerController: ObservableObject {
 
     private func cleanAudioName(_ raw: String) -> String {
         var cleaned = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        if let regex = try? NSRegularExpression(pattern: #"Track\s*\d+\s*-\s*\[(.*?)\]"#) {
+        if let regex = Self.trackRegex {
             let ns = cleaned as NSString
             if let match = regex.firstMatch(in: cleaned, range: NSRange(location: 0, length: ns.length)) {
                 cleaned = ns.substring(with: match.range(at: 1))
@@ -478,8 +848,10 @@ final class PlayerController: ObservableObject {
         var newStats = PlaybackStatistics()
         newStats.videoSize = mediaPlayer.videoSize
         if let vlcStats = mediaPlayer.media?.statistics {
-            newStats.inputBitrateMbps = (Double(vlcStats.inputBitrate) * 8.0) / 1_000_000.0
-            newStats.demuxBitrateMbps = (Double(vlcStats.demuxBitrate) * 8.0) / 1_000_000.0
+            // libVLC liefert Byte pro Mikrosekunde (die VLC-Oberfläche rechnet mit × 8000 in kbit/s),
+            // × 8 ergibt also Mbit/s.
+            newStats.inputBitrateMbps = Double(vlcStats.inputBitrate) * 8.0
+            newStats.demuxBitrateMbps = Double(vlcStats.demuxBitrate) * 8.0
             newStats.displayedPictures = Int(vlcStats.displayedPictures)
             newStats.lostPictures = Int(vlcStats.lostPictures)
             newStats.demuxDiscontinuities = Int(vlcStats.demuxDiscontinuity)

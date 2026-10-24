@@ -18,7 +18,7 @@ Grundsatz: keine Wischgesten, alles über Tasten und Klicks.
 - Klick in die Mitte: Sendungsinfo (links „Jetzt“, rechts „Danach“) mit Schaltern für Ton, Untertitel, Bildformat und dem Zugang zu den Einstellungen.
 - Zurück: öffnet die Senderliste als Overlay über dem laufenden Bild. Der Fokus steht auf dem zuletzt gesehenen Sender, Zurück + Klick schaltet also zum vorherigen Sender. Noch einmal Zurück schließt die Liste.
 - In der Senderliste ganz oben: „Mediathek · Spielfilme“ und „Platz eingeben“ (Direktwahl per Zahleneingabe auf dem Bildschirm, mit Vorschau des Senders); auf einem Sender: verschieben (Prototyp: Play/Pause) oder ausblenden.
-- Play/Pause: Live-Bild anhalten (Timeshift). Links/Rechts: 10 Sekunden zurück/vor; gedrückt halten: spulen.
+- Play/Pause: Live-Bild anhalten (Timeshift). Links/Rechts: progressives Spulen (1x 10 s, 2x 30 s, 3x 1 Min., 4x 3 Min., 5x 5 Min., ab 6x jeweils weitere 5 Min.; Timeout 1 s); gedrückt halten: spulen.
 - Zurück gedrückt halten führt wie bei tvOS üblich zum Homescreen.
 - Mac-Version: Esc = Zurück, Return = Klick, Pfeiltasten, Leertaste = Play/Pause, Ziffern = Direktwahl.
 
@@ -26,7 +26,7 @@ Grundsatz: keine Wischgesten, alles über Tasten und Klicks.
 
 - Die App lädt die Listen direkt per HTTP von der Box, ohne Anmeldung (am 23.10.2026 an der eigenen Box getestet): `http://fritz.box/dvb/m3u/tvhd.m3u`, `tvsd.m3u`, `radio.m3u`; Rückfall auf 192.168.178.1.
 - Laden beim Start und automatisch, wenn ein Sender ausfällt; zusätzlich „Senderliste aktualisieren“ in den Einstellungen.
-- Den eigentlichen Sendersuchlauf im Kabelnetz löst die App nicht aus (braucht das Box-Passwort, keine öffentliche Schnittstelle). Fehlen Sender dauerhaft, zeigt sie den Hinweis, den Suchlauf in der FRITZ!Box-Oberfläche unter DVB-C zu starten.
+- Sendersuchlauf aus der App (seit 24.10.2026): Einstellungen › Sendersuchlauf, über TR-064 (`X_AVM-DE_Media:1`, `StationSearch` start/stop, Fortschritt über `GetSearchProgress`, Port 49000, HTTP-Digest). Braucht Benutzer und Kennwort der FRITZ!Box (Recht „FRITZ!Box Einstellungen“); das Kennwort liegt im Schlüsselbund des Geräts. Während des Suchlaufs ist das Fernsehbild aus, danach lädt die App die Senderliste neu und setzt die Liste toter Varianten zurück. Ohne gespeichertes Kennwort bleibt der Hinweis, den Suchlauf in der FRITZ!Box-Oberfläche unter DVB-C zu starten.
 - Nach einem Suchlauf behält die Box alte Einträge: Sender stehen doppelt, neue Frequenz vorne, alte hinten (23.10.2026: Das Erste/WDR/SWR von 330 auf 386 MHz, BR/NDR/MDR von 338 auf 402 MHz). Die App probiert alle Varianten eines Senders der Reihe nach und merkt sich die funktionierende.
 
 ## Senderplätze
@@ -41,10 +41,10 @@ Grundsatz: keine Wischgesten, alles über Tasten und Klicks.
 
 - Der laufende Sender wird ständig in einen Ringpuffer im Cache geschrieben; Play/Pause hält das Live-Bild an.
 - Leiste mit Pufferfenster, Position, Rückstand („12 Min. hinter Live“) und Live-Zeitpunkt.
-- Links/Rechts springt 10 s, gedrückt halten spult, Spulen bis ganz rechts führt zurück ins Live-Bild.
+- Links/Rechts springt progressiv (10 s, 30 s, 1 Min., 3 Min., 5 Min., ab 6x +5 Min.), gedrückt halten spult, Spulen bis ganz rechts führt zurück ins Live-Bild.
 - Pufferlänge einstellbar, Ziel 60–90 Minuten (HD grob 3–4 GB/h, SD etwa 1,5 GB/h).
 - Ein Senderwechsel leert den Puffer (die Box liefert nur einen Stream pro Gerät).
-- Prototyp mit VLCs eingebautem Timeshift, Zielarchitektur mit eigenem Empfang und Ringpuffer.
+- Umgesetzt (24.10.2026, noch ungetestet): Der Live-Player zeigt das Bild und schreibt den Strom gleichzeitig in eine TS-Datei (`:sout=#duplicate{dst=display,dst=std{access=file,mux=ts,…}}`, eine RTSP-Sitzung). Anhalten oder Zurückspulen startet einen zweiten Player auf dieser Datei; das Live-Bild läuft stumm weiter. Aufholen bis zum Dateiende oder „Live“ schaltet zurück. Grenze: 4 GB, höchstens 50 % des freien Speichers, 200 MB Reserve; bei Erreichen beginnt der Puffer neu. Liefert ein Sender mit Mitschnitt kein Bild (z. B. fehlendes sout-Modul), folgt ein letzter Versuch ohne; klappt der, bleibt der Mitschnitt für die Sitzung aus.
 - Vorbild dream Player (APK untersucht 24.10.2026): eine zweite, unsichtbare VLC-Instanz schreibt den RTSP-Stream unverändert als TS-Datei mit (`:sout=#duplicate{dst=std{access=file,mux=ts,dst=…}}`), die sichtbare spielt die wachsende Datei ab. Neue Datei bei 4 GB (FAT32-Grenze), Abbruch mit Meldung, wenn weniger als die Hälfte des freien Speichers bzw. 200 MB Reserve bleiben. Für uns übertragbar mit VLCKit; auf dem Apple TV ist der Cache-Speicher begrenzt und kann vom System geleert werden.
 - Aufnahmen sind ausdrücklich nicht gewünscht.
 
@@ -72,7 +72,7 @@ Grundsatz: keine Wischgesten, alles über Tasten und Klicks.
 - Dolby Digital (AC3) unverändert an Soundbar/AV-Receiver durchreichen.
 - Audiodeskription standardmäßig meiden; Standardsprache Deutsch.
 - Tonverzögerung einstellbar (Startwert −125 ms wie im dream Player, am eigenen Gerät justieren).
-- DVB-Untertitel; Videotext-Untertitel (Tafel 150/777) sofern VLCKit sie auf tvOS darstellt – zu prüfen.
+- DVB-Untertitel; Videotext-Untertitel (Tafel 150/777) über die Untertitelauswahl. Videotext als eigene Ansicht ist mit VLCKit 3 nicht möglich (siehe unten).
 
 ## Sendungsinfo
 
@@ -104,24 +104,35 @@ Grundsatz: keine Wischgesten, alles über Tasten und Klicks.
 
 Grundlage für fast alles ist ein EIT-Leser, denn VLCKit 3 liefert über seine normale Schnittstelle nur den Titel der laufenden Sendung, keine Anfangszeiten und kein Programm.
 
-1. **EIT-Leser (Grundlage):** Vorbild dream Player TV for FritzBox 8.1.2 (APK am 24.10.2026 untersucht): Er wertet die EIT nicht selbst aus, sondern lässt libVLC das tun und liest dessen Debug-Meldungen mit (`event id=… start_time:… duration=… svcid=…` plus Textzeilen). Für das Programm eines Senders startet er eine zweite, unsichtbare VLC-Instanz nur zum Demultiplexen (`--demux`, `--no-video`, `--no-audio`, `--codec none`, `-vvvvv`) auf dem normalen RTSP-Link des Senders und sammelt 15 s lang; während der Wiedergabe liest er bis zu 60 s im laufenden Stream mit. Abgerufen wird bei Bedarf: wenn ein Sender ohne Programmdaten angezeigt wird, plus beim Zuschauen. Für uns: VLCKit 3 hat dieselbe libVLC und eine Log-Schnittstelle (Log-Empfänger mit Debug-Stufe) – also dasselbe Verfahren ohne eigenen EIT-Parser. Zu prüfen: ob VLCKit die Meldungen in derselben Form liefert, ob ein Abruf nur mit den PIDs 0/16/17/18/20 klappt (spart Bandbreite) und ob er einen zusätzlichen Tuner belegt. Rückfall: eigener EIT-Parser (ETSI EN 300 468). Aufwand mittel, Risiko mittel.
+1. **EIT-Leser & Schneller Hintergrundscan (Grundlage):** Vorbild dream Player & AVM FRITZ!App TV (APKs untersucht): libVLC wertet die EIT im Stream aus; dessen Debug-Meldungen (`event id=… start_time:… duration=…`) werden über `EITLogParser` und `EPGLogReceiver` mitgelesen. Für andere Multiplexe nutzt `BackgroundEPGScanner` `epgOnlyStreamURL` (`pids=0,16,17,18,20` für PAT, NIT, SDT, EIT, TDT). Es fließen weder Bild- noch Tondaten (nur ~150 kbit/s statt 15–20 Mbit/s), sodass der Hauptplayer komplett unbeeinflusst bleibt. Der Scan priorisiert die Senderliste des Nutzers (Plätze 1, 2, 3…), sammelt 5 Sekunden pro Multiplex und weicht bei Kanalwechseln sofort zurück (`yieldIfScanning`). Gespeicherte Programmdaten werden in `epg_cache.json` persistent abgelegt und beim App-Start sofort geladen.
 2. **Von Anfang an (nur Öffentlich-Rechtliche):** Taste in der Sendungsinfo. Die App wechselt auf den offiziellen HLS-Livestream des Senders und springt per AVPlayer auf die Anfangszeit aus der EIT (`seek(to: Date)` über EXT-X-PROGRAM-DATE-TIME). „Live“ führt zurück aufs Kabelbild. Sender-URLs als Tabelle im Code (Quelle: Free-TV/IPTV), Rückspulfenster laut Senderangaben bis 2 Stunden, je Sender zu messen. Bei Sport teils gesperrt. Private Sender nicht möglich. Aufwand mittel.
 3. **Sendung verpasst:** in Programmübersicht und Sendungsinfo „In der Mediathek ansehen“ für vergangene Sendungen. Suche über die MediathekViewWeb-API (`/api/query`, Sender + Titel + Zeitstempel, Ergebnis mit MP4-Links), Abspielen mit dem vorhandenen Mediathek-Player. Nur Öffentlich-Rechtliche, nur was die Sender einstellen. Aufwand klein.
-4. **Programmübersicht:** Raster über alle Sender aus den EIT-Daten mit Fortschrittsbalken und Sprung zu 20:15; vergangene Sendungen mit Mediathek-Link, laufende mit „Von Anfang an“. Aufwand mittel.
+4. **Programmübersicht (EPG-Timeline / Zeitstrahl):** Vollständiges horizontales Raster (`EPGOverviewView`) über alle Sender aus den EIT-Daten.
+   - Pinned Senderspalte links (Platznummer, Senderlogo, Name, Status „LÄUFT“).
+   - Obere Zeitleiste mit 30-Minuten- und Stundenschritten sowie Tageswechsel-Kennzeichnung.
+   - Vertikale rote „JETZT“-Linie mit Live-Uhrzeit-Badge für sofortige Orientierung.
+   - Proportionale Sendungsblöcke (Dauer bestimmt exakte Kachelbreite).
+   - Live-Sendung mit Akzentrahmen, Fortschrittsbalken und LIVE-Badge hervorgehoben.
+   - Umschalten direkt per Klick auf jede Sendung oder Kanalzeile; Schließen per Escape-Taste.
+   - Dynamischer „Jetzt“-Button in der Kopfzeile zum Zurückspringen zur aktuellen Uhrzeit; verwirrende feste Buttons wie „20:15“ oder separate „Schließen“-Buttons wurden entfernt.
+   - Großzügige, optimierte Widescreen-Fenstergröße auf macOS (1250×780).
 5. **Zuletzt gesehen:** die letzten 3 Sender oben in der Senderliste. Aufwand klein.
 6. **Senderliste selbst prüfen:** Doppeleinträge werden bereits der Reihe nach probiert. Neu: tote Einträge merken und ausblenden, Hinweis „Senderliste veraltet – Suchlauf starten“, wenn ein Sender auf keiner Variante Bild liefert. Aufwand klein.
 7. **Top Shelf:** Lieblingssender im oberen Bereich des Apple-TV-Startbildschirms, Klick öffnet direkt den Sender (`fritztv://channel/<nummer>`). Umgesetzt als tvOS-Erweiterung (`FritzTVTopShelf`) mit `TVTopShelfContentProvider` und `TopShelfStore` (synchronisiert die ersten Plätze in Standard-UserDefaults und App Group `group.de.home.fritztv` mit solidem Rückfall auf die wichtigsten Öffentlich-Rechtlichen). URLs per `.onOpenURL` und URL-Scheme `fritztv` im Hauptziel verdrahtet.
 8. **Untertitel:** DVB-Untertitel und Videotext-Untertitel (Tafel 150/777). Prüfung ergab: das verwendete Paket `VLCKitSPM` enthält `zvbi 0.2.35` (`vbi_decode_teletext`, `zvbi.c`) für tvOS und macOS. Spurnamen wurden lesbar aufbereitet („Deutsch“, „Videotext (Tafel 150)“, „Dolby Digital“); Verfügbarkeitsstatus `hasSubtitles` signalisiert, wenn keine Untertitel vorliegen.
 9. **Infos zur Bildqualität:** Auflösung (z. B. `1920×1080 (1080p)`), Bitrate (in Mbit/s), verlorene Bilder und Abrisse aus `VLCMediaStats` in der Sendungsinfo. Zusätzlich Signalstärke (dB), Signal-Rausch-Verhältnis SNR (dB) und Tuner-Auslastung der Box über UPnP-SOAP ohne Passwort direkt in der Sendungsinfo integriert.
 
-Reihenfolge: Alle Punkte 1 bis 9 der Version 2 sind umgesetzt und verifiziert.
+Stand 24.10.2026: Alle Punkte 1 bis 9 sowie die Erweiterungen sind vollständig implementiert, mit 45 Unit Tests verifiziert und erfolgreich für macOS 14 und tvOS 17 gebaut.
 
 ## Später & Erweiterungen (Umgesetzt am 24.10.2026)
 
 - **Senderlogos:** Vollständig integriert (Quelle: AVM-Logoserver `http://tv.avm.de/tvapp/logos/<name>.png`) mit lokalem Disk-/Memory-Cache (`URLCache`) in Senderliste, Info-Banner, Sendungsinfo, Top Shelf und Programmübersicht.
 - **Hintergrund-EPG-Scan:** `BackgroundEPGScanner` durchsucht fremde Multiplexe automatisch mit einer unsichtbaren VLC-Instanz, sobald freie Tuner an der Box vorhanden sind.
 - **Mediathek:** Serien-Kategorie und „🎲 Überrasch mich“-Zufallsauswahl in `MediathekView` und `Press2arrClient` ergänzt.
-- **Timeshift-Ringpuffer:** `TimeshiftBufferManager` mit Prüfung des freien Speichers (mind. 200 MB Reserve, max. 50% des freien Platzes) und automatischem Bereinigen alter Pufferdateien beim Umschalten.
+- **Timeshift-Speicher:** `TimeshiftBufferManager` berechnet die Grenze des Mitschnitts (4 GB, 50 % des freien Platzes, 200 MB Reserve) und räumt alte Pufferdateien beim Umschalten weg.
+- **Geänderte PIDs:** Kommt nach 6 s kein Bild, vergleicht der Player die Spur-IDs von VLC (im TS-Demuxer = PIDs aus der PMT) mit den PIDs im RTSP-Link, ergänzt fehlende und verbindet einmal neu (wie die FRITZ!App TV).
+- **Untertitel in Mediathek-Videos:** TTML/EBU-TT-D und WebVTT (`SubtitleParser`, inkl. Zeitcode-Versatz 10:00:00), Quelle `url_subtitle` von MediathekViewWeb; für Filme aus press2arr über den passenden Treffer bei MediathekViewWeb. Anzeige über dem Apple-Player, Schalter in Einstellungen › Mediathek.
+- **Videotext als eigene Ansicht:** mit VLCKit 3 nicht machbar – die öffentliche Schnittstelle kann keine Videotextseite wählen (`libvlc_video_set_teletext` ist nicht freigegeben). Wäre nur mit eigenem Videotext-Decoder möglich wie im dream Player. Videotext-Untertitel (Tafel 150/777) gehen weiter über die Untertitelauswahl.
 - **Deployment-Skript:** `scripts/deploy-tvos.sh` für wöchentliches, bequemes Neuaufspielen auf das Apple TV per `xcrun devicectl`, ohne Daten- oder Einstellungsverlust.
 
 ## Nicht gewünscht oder nicht machbar
@@ -129,7 +140,6 @@ Reihenfolge: Alle Punkte 1 bis 9 der Version 2 sind umgesetzt und verifiziert.
 - Radio (ausdrücklich nicht gewünscht, 24.10.2026).
 - Aufnahmen (nicht gewünscht).
 - Aufholen mit erhöhter Geschwindigkeit, Bild-in-Bild, Einschlaf-Timer (nicht gewünscht, 24.10.2026).
-- Sendersuchlauf an der Box aus der App heraus.
 - „Von Anfang an“ für Private Sender (nur in deren Bezahldiensten).
 - HbbTV (tvOS hat keinen Browser für Apps), Autostart beim Einschalten.
 - Private Sender in HD (verschlüsselt), zwei Sender gleichzeitig.

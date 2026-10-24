@@ -65,11 +65,11 @@ Hinweis: Zwei vorher heruntergeladene Dateien („dream-player-tv-for-fritzbox.a
 
 ## Folgerungen für FritzTV
 
-1. Programmdaten über VLCKit-Protokoll mitlesen (Log-Empfänger mit Debug-Stufe) statt eigenem EIT-Parser; Abruf je Multiplex mit zweiter, unsichtbarer VLC-Instanz.
-2. Timeshift auf Mitschnitt in Datei umstellen (zweite VLC-Instanz mit `:sout=#duplicate…`), sichtbarer Player spielt die Datei.
-3. Tuner-Status per UPnP abfragen: „Tuner belegt“, Signalwerte bei Sendern ohne Bild, Bildqualität.
-4. Senderlogos vom AVM-Server; AVM-HLS-Liste als Quelle für „Von Anfang an“ prüfen.
-5. Geänderte PIDs abfangen (neu laden bzw. PMT auswerten).
-6. Optional: Sendersuchlauf aus der App per TR-064, nur mit gespeichertem Box-Passwort.
-
-Am Mac zu testen: Tuner-Abfrage ohne Passwort, VLCKit-Protokollzeilen zur EIT, Abruf nur mit PIDs 0/16/17/18/20, Logo-Pfade.
+1. **Programmdaten & EIT:** Über VLCKit-Protokollzeilen (Debug-Stufe mit `EITLogParser` und `EPGLogReceiver`) mitlesen; Zuordnung Service-ID ↔ Sendername über die SDT.
+2. **Schneller EPG-Hintergrundscan (`BackgroundEPGScanner`):** Verifiziert und implementiert mit `epgOnlyStreamURL` (`pids=0,16,17,18,20`). Dadurch fließen weder Bild- noch Tondaten (nur ~150 kbit/s), der Hauptplayer bleibt ungestört und alle Multiplexe der Senderliste werden innerhalb von ~60 s gescannt und in `epg_cache.json` persistent gespeichert.
+3. **EPG-Timeline (Zeitstrahl):** Vollständiges horizontales Raster (`EPGOverviewView`) mit Zeitleiste, Live-Zeitlinie („Jetzt-Linie“ in Rot), proportionaler Sendungsbreite und direktem Umschalten.
+4. **Timeshift:** Mitschnitt-Pufferverwaltung mit `TimeshiftBufferManager` (4 GB Grenze, 50 % freier Speicher, 200 MB Reserve).
+5. **Tuner-Status:** UPnP-SOAP ohne Passwort (`urn:ses-com:service:satip:1` unter Port 49000).
+6. **Senderlogos:** Vom AVM-Logoserver `http://tv.avm.de/tvapp/logos/<name>.png` mit Speicher- und Festplatten-Cache.
+7. **Geänderte PIDs:** Werden über `missingPIDs` und `streamURL(addingPIDs:)` dynamisch nachgezogen.
+8. **Sendersuchlauf:** Über TR-064 (`X_AVM-DE_Media:1`, `StationSearch`) integriert.

@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 import Network
 import FritzTVKit
 
@@ -15,26 +16,36 @@ enum Overlay: Equatable {
     /// Sendungsinfo; Auswahl 0 = Ton, 1 = Untertitel, 2 = Einstellungen.
     case info(selection: Int)
     /// Senderliste; `selectedID` identifiziert die ausgewählte Zeile.
-    case channelList(selectedID: String, moving: Bool)
+    case channelList(selectedID: String)
     /// Direktwahl; `key` = Taste im Ziffernblock (0…11).
     case directEntry(digits: String, key: Int)
 }
 
+struct ManagedChannel: Identifiable, Equatable {
+    var id: String { key }
+    let key: String
+    let displayName: String
+    let isHD: Bool
+    let group: ChannelGroup
+    let number: Int?
+    let isHidden: Bool
+}
+
 /// Element in der Senderliste für Tastennavigation und Fokus.
 enum ChannelListItem: Hashable, Identifiable {
-    case mediathek
     case epgOverview
     case directEntry
     case recent(LineupEntry)
     case channel(LineupEntry)
+    case settings
 
     var id: String {
         switch self {
-        case .mediathek: return "mediathek"
         case .epgOverview: return "epgOverview"
         case .directEntry: return "directEntry"
         case .recent(let entry): return "recent-\(entry.number)"
         case .channel(let entry): return "channel-\(entry.number)"
+        case .settings: return "settings"
         }
     }
 }
@@ -59,11 +70,14 @@ final class AppModel: ObservableObject {
     @Published var showEPGOverview = false
     @Published var activeHLSReplay: (url: URL, startDate: Date?)?
     @Published var activeMediathekURL: URL?
+    /// Untertitel zum laufenden Mediathek-Video aus der Suche, falls vorhanden.
+    private(set) var activeMediathekSubtitle: URL?
     @Published var searchResultDialog: (title: String, results: [MediathekSearchResult])?
 
     let settings: AppSettings
     let player: PlayerController
     let epgScanner = BackgroundEPGScanner()
+    let stationSearch = StationSearchController()
 
     private var catalog: ChannelCatalog?
     private var preferences: LineupPreferences
@@ -134,13 +148,14 @@ final class AppModel: ObservableObject {
 
     /// Alle ansteuerbaren Einträge in der Senderliste in Darstellungsreihenfolge.
     var channelListItems: [ChannelListItem] {
-        var items: [ChannelListItem] = [.mediathek, .epgOverview, .directEntry]
+        var items: [ChannelListItem] = [.epgOverview, .directEntry]
         for entry in recentEntries {
             items.append(.recent(entry))
         }
         for entry in lineup?.entries ?? [] {
             items.append(.channel(entry))
         }
+        items.append(.settings)
         return items
     }
 
@@ -163,6 +178,10 @@ final class AppModel: ObservableObject {
             DebugLog.log("Senderliste von \(result.host): \(result.catalog.groups.count) Gruppen, \(lineup?.entries.count ?? 0) sichtbare Plätze")
             let start = lineup?.entries.first { Self.key($0) == settings.lastChannelKey }?.number ?? 1
             tune(to: start)
+            Task { @MainActor [weak self] in
+                try? await Task.sleep(for: .seconds(3))
+                self?.triggerEPGScan()
+            }
         } catch let error as FritzBoxClient.ClientError {
             DebugLog.log("Senderliste fehlgeschlagen: \(error)")
             switch error {
@@ -209,7 +228,29 @@ final class AppModel: ObservableObject {
 
     // MARK: Umschalten
 
+    private var zapDebounceTask: Task<Void, Never>?
+
     func tune(to number: Int) {
+        zapDebounceTask?.cancel()
+        zapDebounceTask = nil
+        performTune(to: number)
+    }
+
+    private func zap(_ step: Int) {
+        guard let next = lineup?.entry(after: currentNumber, step: step) else { return }
+        currentNumber = next.number
+        showBanner()
+        zapDebounceTask?.cancel()
+        zapDebounceTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(350))
+            guard let self, !Task.isCancelled else { return }
+            await MainActor.run {
+                self.performTune(to: next.number)
+            }
+        }
+    }
+
+    private func performTune(to number: Int) {
         guard let entry = lineup?.entry(number: number) else { return }
         if let old = currentEntry, old.id != entry.id {
             previousKey = Self.key(old)
@@ -218,15 +259,13 @@ final class AppModel: ObservableObject {
         currentNumber = entry.number
         settings.lastChannelKey = Self.key(entry)
         let candidates = entry.group.candidates(preferHD: settings.preferHD, deadIDs: settings.deadChannelIDs)
+        if let target = candidates.first, let freq = target.tuning?.frequencyMHz {
+            epgScanner.yieldIfScanning(frequency: freq)
+        }
         let preferredID = settings.workingVariantIDs[Self.variantKey(candidates)]
         DebugLog.log("Umschalten auf \(entry.number) \(entry.group.displayName): \(candidates.count) Variante(n), zuerst \(candidates.first?.streamURL.absoluteString ?? "-") \(playbackOptions())")
         player.play(candidates: candidates, options: playbackOptions(), preferredVariantID: preferredID)
         showBanner()
-    }
-
-    private func zap(_ step: Int) {
-        guard let next = lineup?.entry(after: currentNumber, step: step) else { return }
-        tune(to: next.number)
     }
 
     func playbackOptions() -> PlaybackOptions {
@@ -251,22 +290,32 @@ final class AppModel: ObservableObject {
     }
 
     func resume() {
-        if player.status == .idle, let entry = currentEntry {
-            let candidates = entry.group.candidates(preferHD: settings.preferHD, deadIDs: settings.deadChannelIDs)
-            let preferredID = settings.workingVariantIDs[Self.variantKey(candidates)]
-            player.play(candidates: candidates, options: playbackOptions(), preferredVariantID: preferredID)
+        guard let entry = currentEntry else { return }
+        let candidates = entry.group.candidates(preferHD: settings.preferHD, deadIDs: settings.deadChannelIDs)
+        if let target = candidates.first, let freq = target.tuning?.frequencyMHz {
+            epgScanner.yieldIfScanning(frequency: freq)
         }
+        let preferredID = settings.workingVariantIDs[Self.variantKey(candidates)]
+        player.play(candidates: candidates, options: playbackOptions(), preferredVariantID: preferredID)
     }
 
     // MARK: Infoleiste
 
     func showBanner() {
-        bannerVisible = true
         bannerTask?.cancel()
+        withAnimation(.spring(response: 0.35, dampingFraction: 0.82)) {
+            bannerVisible = true
+        }
         let seconds = settings.bannerSeconds
         bannerTask = Task { [weak self] in
             try? await Task.sleep(for: .seconds(seconds))
-            if !Task.isCancelled { self?.bannerVisible = false }
+            if !Task.isCancelled {
+                await MainActor.run {
+                    withAnimation(.easeOut(duration: 0.25)) {
+                        self?.bannerVisible = false
+                    }
+                }
+            }
         }
     }
 
@@ -293,8 +342,8 @@ final class AppModel: ObservableObject {
             handleLive(command)
         case .info(let selection):
             handleInfo(command, selection: selection)
-        case .channelList(let selectedID, let moving):
-            handleList(command, selectedID: selectedID, moving: moving)
+        case .channelList(let selectedID):
+            handleList(command, selectedID: selectedID)
         case .directEntry(let digits, let key):
             handleDirect(command, digits: digits, key: key)
         }
@@ -307,15 +356,22 @@ final class AppModel: ObservableObject {
         case .select:
             if case .failed = player.status {
                 tune(to: currentNumber)
+            } else if player.status == .idle {
+                resume()
             } else {
                 bannerVisible = false
                 overlay = .info(selection: 0)
                 refreshTunerStats()
             }
         case .back: openChannelList()
-        case .playPause: player.togglePause()
-        case .left: player.jump(seconds: -10)
-        case .right: player.jump(seconds: 10)
+        case .playPause:
+            if player.status == .idle {
+                resume()
+            } else {
+                player.togglePause()
+            }
+        case .left: player.jumpProgressive(forward: false)
+        case .right: player.jumpProgressive(forward: true)
         case .digit(let digit): enterDigit(digit, into: "", key: 0)
         }
     }
@@ -331,7 +387,9 @@ final class AppModel: ObservableObject {
     var availableInfoPills: [InfoPill] {
         var list: [InfoPill] = [.audio, .subtitle]
         if let entry = currentEntry, let hls = PublicHLSChannels.hlsURL(for: entry.group.key) {
-            list.append(.restartHLS(hls, player.currentProgram?.startDate))
+            let start = player.currentProgram?.startDate
+                ?? player.epgStore.currentProgram(forChannelNames: entry.group.epgNames)?.startDate
+            list.append(.restartHLS(hls, start))
         }
         let title = player.currentProgram?.title ?? player.nowPlaying
         if let title, !title.isEmpty {
@@ -372,25 +430,28 @@ final class AppModel: ObservableObject {
 
     private func openChannelList() {
         bannerVisible = false
+        epgScanner.stop()
         let targetID: String
-        if let firstRecent = recentEntries.first {
-            targetID = "recent-\(firstRecent.number)"
+        if let recent = recentEntries.first {
+            targetID = "recent-\(recent.number)"
+        } else if let current = currentEntry {
+            targetID = "channel-\(current.number)"
         } else {
-            targetID = "channel-\(currentNumber)"
+            targetID = "epgOverview"
         }
-        overlay = .channelList(selectedID: targetID, moving: false)
+        overlay = .channelList(selectedID: targetID)
     }
 
     func openEPGOverview() {
         overlay = .none
-        bannerVisible = false
         showEPGOverview = true
+        triggerEPGScan()
     }
 
-    private func handleList(_ command: RemoteCommand, selectedID: String, moving: Bool) {
+    private func handleList(_ command: RemoteCommand, selectedID: String) {
         let items = channelListItems
         guard let currentIndex = items.firstIndex(where: { $0.id == selectedID }) else {
-            overlay = .channelList(selectedID: items.first?.id ?? "mediathek", moving: false)
+            overlay = .channelList(selectedID: items.first?.id ?? "epgOverview")
             return
         }
         let currentItem = items[currentIndex]
@@ -398,39 +459,25 @@ final class AppModel: ObservableObject {
         switch command {
         case .up, .down:
             let step = command == .up ? -1 : 1
-            if moving {
-                if case .channel(let entry) = currentItem {
-                    if moveEntry(number: entry.number, by: step) {
-                        let newNumber = entry.number + step
-                        overlay = .channelList(selectedID: "channel-\(newNumber)", moving: true)
-                    }
-                }
-            } else {
-                let nextIndex = (currentIndex + step + items.count) % items.count
-                overlay = .channelList(selectedID: items[nextIndex].id, moving: false)
-            }
+            let nextIndex = (currentIndex + step + items.count) % items.count
+            overlay = .channelList(selectedID: items[nextIndex].id)
         case .select:
-            if moving {
-                overlay = .channelList(selectedID: selectedID, moving: false)
-            } else {
-                switch currentItem {
-                case .mediathek:
-                    openMediathek()
-                case .epgOverview:
-                    openEPGOverview()
-                case .directEntry:
-                    overlay = .directEntry(digits: "", key: 0)
-                case .recent(let entry), .channel(let entry):
-                    overlay = .none
-                    tune(to: entry.number)
-                }
+            switch currentItem {
+            case .epgOverview:
+                openEPGOverview()
+            case .directEntry:
+                overlay = .directEntry(digits: "", key: 0)
+            case .recent(let entry), .channel(let entry):
+                overlay = .none
+                tune(to: entry.number)
+            case .settings:
+                overlay = .none
+                showSettings = true
             }
         case .playPause:
-            if case .channel = currentItem {
-                overlay = .channelList(selectedID: selectedID, moving: !moving)
-            }
+            player.togglePause()
         case .back:
-            overlay = moving ? .channelList(selectedID: selectedID, moving: false) : .none
+            overlay = .none
         case .left, .right:
             break
         case .digit(let digit):
@@ -439,7 +486,8 @@ final class AppModel: ObservableObject {
     }
 
     func startHLSReplay(url: URL, startDate: Date?) {
-        player.mediaPlayer.pause()
+        // Live-Stream ganz beenden: gibt den Tuner frei, und `resume()` startet ihn danach neu.
+        player.stop()
         activeHLSReplay = (url: url, startDate: startDate)
     }
 
@@ -455,8 +503,9 @@ final class AppModel: ObservableObject {
         }
     }
 
-    func playMediathekResult(url: URL) {
-        player.mediaPlayer.pause()
+    func playMediathekResult(url: URL, subtitleURL: URL? = nil) {
+        activeMediathekSubtitle = subtitleURL
+        player.stop()
         searchResultDialog = nil
         activeMediathekURL = url
     }
@@ -526,40 +575,124 @@ final class AppModel: ObservableObject {
         resume()
     }
 
+    func epgOverviewClosed() {
+        resume()
+    }
+
     // MARK: EPG-Hintergrundscan
 
     func triggerEPGScan() {
         guard let catalog else { return }
         let host = settings.host.isEmpty ? (connectedHost ?? "fritz.box") : settings.host
-        epgScanner.startScanIfNeeded(catalog: catalog, epgStore: player.epgStore, host: host)
+        let activeFreq = player.channel?.tuning?.frequencyMHz
+        epgScanner.startScanIfNeeded(
+            lineup: lineup,
+            catalog: catalog,
+            epgStore: player.epgStore,
+            host: host,
+            activeFrequency: activeFreq,
+            deadIDs: settings.deadChannelIDs
+        )
     }
 
-    // MARK: Senderplätze bearbeiten
+    // MARK: Senderplätze verwalten (Einstellungen)
 
-    /// Verschiebt den Sender auf Platz `number` um `delta` Plätze.
-    @discardableResult
-    private func moveEntry(number: Int, by delta: Int) -> Bool {
-        guard let entries = lineup?.entries else { return false }
-        var keys = entries.map(Self.key)
-        let from = number - 1, to = number - 1 + delta
-        guard keys.indices.contains(from), keys.indices.contains(to) else { return false }
-        keys.swapAt(from, to)
-        let visible = Set(keys)
-        preferences.order = keys + preferences.order.filter { !visible.contains($0) }
+    static func key(group: ChannelGroup) -> String { group.variants[0].groupKey }
+
+    var allManagedChannels: [ManagedChannel] {
+        guard let catalog else { return [] }
+        let tv = catalog.tvGroups
+        let byKey = Dictionary(tv.map { (Self.key(group: $0), $0) }, uniquingKeysWith: { first, _ in first })
+        let known = Set(preferences.order)
+
+        var items: [ManagedChannel] = []
+        var currentNum = 1
+
+        for key in preferences.order {
+            guard let group = byKey[key] else { continue }
+            let isHidden = preferences.hidden.contains(key)
+            let num: Int? = isHidden ? nil : currentNum
+            if !isHidden { currentNum += 1 }
+            items.append(ManagedChannel(
+                key: key,
+                displayName: group.displayName,
+                isHD: group.hd != nil,
+                group: group,
+                number: num,
+                isHidden: isHidden
+            ))
+        }
+
+        for group in tv where !known.contains(Self.key(group: group)) {
+            let key = Self.key(group: group)
+            let isHidden = preferences.hidden.contains(key)
+            let num: Int? = isHidden ? nil : currentNum
+            if !isHidden { currentNum += 1 }
+            items.append(ManagedChannel(
+                key: key,
+                displayName: group.displayName,
+                isHD: group.hd != nil,
+                group: group,
+                number: num,
+                isHidden: isHidden
+            ))
+        }
+
+        return items
+    }
+
+    func moveActiveChannel(key: String, by delta: Int) {
+        guard let entries = lineup?.entries else { return }
+        guard let currentIndex = entries.firstIndex(where: { Self.key($0) == key }) else { return }
+        let targetIndex = currentIndex + delta
+        guard entries.indices.contains(targetIndex) else { return }
+
+        var activeKeys = entries.map(Self.key)
+        activeKeys.swapAt(currentIndex, targetIndex)
+        applyActiveOrder(activeKeys)
+    }
+
+    func moveActiveChannels(fromOffsets source: IndexSet, toOffset destination: Int) {
+        guard let entries = lineup?.entries else { return }
+        var activeKeys = entries.map(Self.key)
+        activeKeys.move(fromOffsets: source, toOffset: destination)
+        applyActiveOrder(activeKeys)
+    }
+
+    private func applyActiveOrder(_ activeKeys: [String]) {
+        let activeSet = Set(activeKeys)
+        var result: [String] = []
+        var activeIter = activeKeys.makeIterator()
+        for key in preferences.order {
+            if activeSet.contains(key) {
+                if let next = activeIter.next() {
+                    result.append(next)
+                }
+            } else {
+                result.append(key)
+            }
+        }
+        while let next = activeIter.next() {
+            result.append(next)
+        }
+        preferences.order = result
         savePreferences()
-        return true
     }
 
-    func hideCurrentChannel() {
-        guard let entry = currentEntry else { return }
-        preferences.hidden.insert(Self.key(entry))
+    func toggleChannelVisibility(key: String) {
+        if preferences.hidden.contains(key) {
+            preferences.hidden.remove(key)
+        } else {
+            preferences.hidden.insert(key)
+            if let current = currentEntry, Self.key(current) == key {
+                tune(to: min(currentNumber, max((lineup?.entries.count ?? 1) - 1, 1)))
+            }
+        }
         savePreferences()
-        tune(to: min(currentNumber, lineup?.entries.count ?? 1))
     }
 
-    func unhide(_ group: ChannelGroup) {
-        let key = group.variants[0].groupKey
-        preferences.hidden.remove(key)
+    func unhideAllChannels() {
+        preferences.hidden.removeAll()
         savePreferences()
     }
 
@@ -613,6 +746,8 @@ final class AppModel: ObservableObject {
         showMediathek = false
         showEPGOverview = false
         activeHLSReplay = nil
+        activeMediathekURL = nil
+        searchResultDialog = nil
 
         if let number = Int(target) {
             tune(to: number)

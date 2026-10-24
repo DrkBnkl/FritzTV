@@ -69,9 +69,18 @@ public struct FritzBoxTunerClient: Sendable {
         guard let count = await fetchTunerCount(host: host), count > 0 else {
             return nil
         }
+        // Ob die Box ab 0 oder ab 1 zählt, ist nicht dokumentiert: antwortet Tuner 0 nicht,
+        // wird ab 1 gezählt.
         var tuners: [TunerInfo] = []
-        for index in 0..<count {
-            if let info = await fetchTunerInfo(host: host, tunerNumber: index) {
+        let numbers: [Int]
+        if let info = await fetchTunerInfo(host: host, tunerNumber: 0) {
+            tuners.append(info)
+            numbers = Array(1..<count)          // 0 … count-1, Tuner 0 schon abgefragt
+        } else {
+            numbers = Array(1...count)          // 1 … count
+        }
+        for number in numbers {
+            if let info = await fetchTunerInfo(host: host, tunerNumber: number) {
                 tuners.append(info)
             }
         }
@@ -110,8 +119,12 @@ public struct FritzBoxTunerClient: Sendable {
 
         let used = extractTag("NewX_AVM-DE_Used", from: xml) == "1"
         let lock = extractTag("NewX_AVM-DE_HasLock", from: xml) == "1"
-        let power = extractTag("NewX_AVM-DE_SignalPower", from: xml).flatMap(Double.init)
-        let snr = extractTag("NewX_AVM-DE_SignalNoiseRatio", from: xml).flatMap(Double.init)
+        // Dezimalkomma vorsichtshalber zulassen
+        func decimal(_ tag: String) -> Double? {
+            extractTag(tag, from: xml).flatMap { Double($0.replacingOccurrences(of: ",", with: ".")) }
+        }
+        let power = decimal("NewX_AVM-DE_SignalPower")
+        let snr = decimal("NewX_AVM-DE_SignalNoiseRatio")
         let name = extractTag("NewX_AVM-DE_ChannelName", from: xml).flatMap { $0.isEmpty ? nil : $0 }
         let clientCount = extractTag("NewX_AVM-DE_ClientCount", from: xml).flatMap(Int.init) ?? 0
         let ipString = extractTag("NewX_AVM-DE_IPAddresses", from: xml) ?? ""

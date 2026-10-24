@@ -3,7 +3,7 @@ import FritzTVKit
 
 // MARK: Bausteine
 
-private struct Badge: View {
+struct Badge: View {
     let text: String
     var dark = false
 
@@ -141,7 +141,7 @@ struct TimeshiftBar: View {
                             .foregroundStyle(UI.accent)
                     }
                     GeometryReader { geo in
-                        let share = min(behind / 3600, 1)
+                        let share = min(max(behind / 3600, 0), 1)
                         ZStack(alignment: .trailing) {
                             Capsule().fill(Color.white.opacity(0.15))
                             Capsule().fill(Color.white.opacity(0.5))
@@ -149,7 +149,7 @@ struct TimeshiftBar: View {
                         }
                     }
                     .frame(height: UI.s(8))
-                    Text("\(UI.playPause): weiter/anhalten · \(UI.leftRight): 10 s · rechts bis zum Ende: Live")
+                    Text("\(UI.playPause): weiter/anhalten · \(UI.leftRight): spulen (10 s, 30 s, 1 m, 3 m, 5 m) · rechts bis zum Ende: Live")
                         .font(UI.font(24))
                         .foregroundStyle(UI.secondary)
                 }
@@ -326,7 +326,16 @@ struct ChannelListOverlay: View {
     @ObservedObject var model: AppModel
     @ObservedObject var player: PlayerController
     let selectedID: String
-    let moving: Bool
+
+    private var selectedChannelEntry: LineupEntry? {
+        if selectedID.hasPrefix("recent-"), let num = Int(selectedID.dropFirst("recent-".count)) {
+            return model.recentEntries.first { $0.number == num } ?? model.lineup?.entry(number: num)
+        }
+        if selectedID.hasPrefix("channel-"), let num = Int(selectedID.dropFirst("channel-".count)) {
+            return model.lineup?.entry(number: num)
+        }
+        return model.currentEntry
+    }
 
     var body: some View {
         HStack(spacing: 0) {
@@ -342,36 +351,41 @@ struct ChannelListOverlay: View {
 
                 ScrollViewReader { proxy in
                     ScrollView(.vertical, showsIndicators: false) {
-                        LazyVStack(spacing: UI.s(8)) {
-                            specialRow("Mediathek · Spielfilme", selected: selectedID == "mediathek").id("mediathek")
-                            specialRow("Programmübersicht (EPG)", selected: selectedID == "epgOverview").id("epgOverview")
-                            specialRow("Platz eingeben (Direktwahl)", selected: selectedID == "directEntry").id("directEntry")
+                        VStack(alignment: .leading, spacing: UI.s(8)) {
+                            specialRow("Programmübersicht (EPG)", selected: selectedID == "epgOverview") {
+                                model.openEPGOverview()
+                            }
+                            .id("epgOverview")
+
+                            specialRow("Sender-Direktwahl", selected: selectedID == "directEntry") {
+                                model.overlay = .directEntry(digits: "", key: 0)
+                            }
+                            .id("directEntry")
 
                             if !model.recentEntries.isEmpty {
-                                VStack(alignment: .leading, spacing: UI.s(8)) {
-                                    Text("ZULETZT GESEHEN")
-                                        .font(UI.font(22, .bold))
-                                        .foregroundStyle(UI.secondary)
-                                        .padding(.top, UI.s(16))
-                                        .padding(.horizontal, UI.s(24))
-                                    ForEach(model.recentEntries) { entry in
-                                        row(entry, isRecentSection: true, selected: selectedID == "recent-\(entry.number)")
-                                            .id("recent-\(entry.number)")
-                                    }
-                                }
-                            }
-
-                            VStack(alignment: .leading, spacing: UI.s(8)) {
-                                Text("ALLE SENDER")
+                                Text("ZULETZT GESEHEN")
                                     .font(UI.font(22, .bold))
                                     .foregroundStyle(UI.secondary)
                                     .padding(.top, UI.s(16))
                                     .padding(.horizontal, UI.s(24))
-                                ForEach(model.lineup?.entries ?? []) { entry in
-                                    row(entry, isRecentSection: false, selected: selectedID == "channel-\(entry.number)")
-                                        .id("channel-\(entry.number)")
+                                ForEach(model.recentEntries) { entry in
+                                    row(entry, isRecentSection: true, selected: selectedID == "recent-\(entry.number)")
+                                        .id("recent-\(entry.number)")
                                 }
                             }
+
+                            Text("ALLE SENDER")
+                                .font(UI.font(22, .bold))
+                                .foregroundStyle(UI.secondary)
+                                .padding(.top, UI.s(16))
+                                .padding(.horizontal, UI.s(24))
+                            ForEach(model.lineup?.entries ?? []) { entry in
+                                row(entry, isRecentSection: false, selected: selectedID == "channel-\(entry.number)")
+                                    .id("channel-\(entry.number)")
+                            }
+
+                            settingsRow(selected: selectedID == "settings")
+                                .id("settings")
                         }
                     }
                     .onAppear { proxy.scrollTo(selectedID, anchor: .center) }
@@ -380,33 +394,252 @@ struct ChannelListOverlay: View {
                     }
                 }
 
-                Text(moving ? "\(UI.upDown): verschieben · \(UI.select): fertig"
-                            : "\(UI.select): umschalten · \(UI.playPause): verschieben · \(UI.back): schließen")
+                Text("\(UI.select): umschalten · \(UI.back): schließen")
                     .font(UI.font(24))
                     .foregroundStyle(UI.secondary)
                     .padding(.horizontal, UI.s(24))
             }
             .padding(.vertical, UI.s(56))
             .padding(.horizontal, UI.s(40))
-            .frame(width: UI.s(820))
+            .frame(width: UI.s(760))
             .frame(maxHeight: .infinity)
-            .background(Color(red: 0.055, green: 0.063, blue: 0.086).opacity(0.95))
+            .background(Color(red: 0.055, green: 0.063, blue: 0.086).opacity(0.97))
             .foregroundStyle(UI.text)
 
-            Spacer()
+            // Rechte Seite: EPG-Detailansicht für den fokussierten Sender
+            ZStack(alignment: .topLeading) {
+                Color.black.opacity(0.7)
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        model.overlay = .none
+                    }
+
+                if let entry = selectedChannelEntry {
+                    epgDetailPane(for: entry)
+                        .padding(UI.s(48))
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .ignoresSafeArea()
     }
 
-    private func specialRow(_ title: String, selected: Bool) -> some View {
-        Text(title)
-            .font(UI.font(28, .semibold))
-            .foregroundStyle(selected ? Color.black : UI.text)
+    private func epgDetailPane(for entry: LineupEntry) -> some View {
+        let isCurrent = entry.number == model.currentNumber
+        let current = (isCurrent ? player.currentProgram : nil)
+            ?? player.epgStore.currentProgram(forChannelNames: entry.group.epgNames)
+        let next = player.epgStore.nextProgram(forChannelNames: entry.group.epgNames)
+        let prime = primeProgram(for: entry)
+
+        return VStack(alignment: .leading, spacing: UI.s(24)) {
+            // Sender-Kopfzeile
+            HStack(spacing: UI.s(18)) {
+                ChannelLogoView(channelName: entry.group.displayName, height: UI.s(48), maxWidth: UI.s(120))
+                VStack(alignment: .leading, spacing: UI.s(4)) {
+                    Text("\(entry.number) · \(entry.group.displayName)")
+                        .font(UI.font(36, .heavy))
+                        .foregroundStyle(UI.text)
+                    HStack(spacing: UI.s(10)) {
+                        if entry.group.hd != nil {
+                            Badge(text: "HD")
+                        } else {
+                            Badge(text: "SD")
+                        }
+                        if isCurrent {
+                            Badge(text: "LÄUFT AKTUELL")
+                        }
+                    }
+                }
+                Spacer()
+            }
+
+            Divider().background(Color.white.opacity(0.18))
+
+            // JETZT
+            VStack(alignment: .leading, spacing: UI.s(12)) {
+                HStack {
+                    Text("JETZT")
+                        .font(UI.font(22, .bold))
+                        .foregroundStyle(UI.accent)
+                    if let current {
+                        Text("· \(Self.formatTime(current.startDate)) – \(Self.formatTime(current.endDate))")
+                            .font(UI.font(22, .medium))
+                            .foregroundStyle(UI.secondary)
+                    }
+                }
+
+                if let current {
+                    Text(current.title)
+                        .font(UI.font(34, .bold))
+                        .foregroundStyle(UI.text)
+                        .lineLimit(2)
+
+                    TimelineView(.periodic(from: .now, by: 10)) { context in
+                        let progress = current.progress(at: context.date)
+                        GeometryReader { geo in
+                            ZStack(alignment: .leading) {
+                                Capsule().fill(Color.white.opacity(0.15))
+                                Capsule().fill(UI.accent)
+                                    .frame(width: max(geo.size.width * progress, UI.s(6)))
+                            }
+                        }
+                        .frame(height: UI.s(6))
+                    }
+
+                    if let subtitle = current.subtitle, !subtitle.isEmpty, subtitle != "(null)" {
+                        Text(subtitle)
+                            .font(UI.font(22, .semibold))
+                            .foregroundStyle(UI.text.opacity(0.9))
+                            .lineLimit(2)
+                    }
+
+                    if let desc = current.description, !desc.isEmpty, desc != "(null)" {
+                        Text(desc)
+                            .font(UI.font(20))
+                            .foregroundStyle(UI.secondary)
+                            .lineLimit(4)
+                    }
+                } else {
+                    Text("Keine Programmdaten")
+                        .font(UI.font(26, .semibold))
+                        .foregroundStyle(UI.secondary)
+                    Text("Ausführliche Programmdaten werden automatisch im Hintergrund aus dem Stream geladen.")
+                        .font(UI.font(20))
+                        .foregroundStyle(UI.secondary.opacity(0.8))
+                }
+            }
+            .padding(UI.s(24))
             .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: UI.s(20)))
+
+            // DANACH
+            if let next {
+                VStack(alignment: .leading, spacing: UI.s(8)) {
+                    Text("DANACH · Ab \(Self.formatTime(next.startDate))")
+                        .font(UI.font(20, .bold))
+                        .foregroundStyle(UI.secondary)
+                    Text(next.title)
+                        .font(UI.font(26, .bold))
+                        .foregroundStyle(UI.text)
+                        .lineLimit(2)
+                    let sub = (next.subtitle ?? next.description)?.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if let sub, !sub.isEmpty, sub != "(null)" {
+                        Text(sub)
+                            .font(UI.font(20))
+                            .foregroundStyle(UI.secondary)
+                            .lineLimit(2)
+                    }
+                }
+                .padding(UI.s(20))
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color.white.opacity(0.04), in: RoundedRectangle(cornerRadius: UI.s(16)))
+            }
+
+            // 20:15 HIGHLIGHT (nur anzeigen, solange die Sendung heute noch nicht vorüber ist)
+            if let prime {
+                VStack(alignment: .leading, spacing: UI.s(8)) {
+                    Text("HEUTE 20:15")
+                        .font(UI.font(20, .bold))
+                        .foregroundStyle(Color.yellow)
+                    Text(prime.title)
+                        .font(UI.font(26, .bold))
+                        .foregroundStyle(UI.text)
+                        .lineLimit(1)
+                    let sub = (prime.subtitle ?? prime.description)?.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if let sub, !sub.isEmpty, sub != "(null)" {
+                        Text(sub)
+                            .font(UI.font(20))
+                            .foregroundStyle(UI.secondary)
+                            .lineLimit(2)
+                    }
+                }
+                .padding(UI.s(20))
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color.yellow.opacity(0.08), in: RoundedRectangle(cornerRadius: UI.s(16)))
+                .overlay(RoundedRectangle(cornerRadius: UI.s(16)).stroke(Color.yellow.opacity(0.2), lineWidth: 1))
+            }
+
+            Spacer(minLength: 0)
+        }
+    }
+
+    private func primeProgram(for entry: LineupEntry) -> EPGProgram? {
+        let calendar = Calendar.current
+        let now = Date()
+        var components = calendar.dateComponents([.year, .month, .day], from: now)
+        components.hour = 20
+        components.minute = 15
+        guard let primeDate = calendar.date(from: components) else { return nil }
+        guard let prog = player.epgStore.schedule(forChannelNames: entry.group.epgNames)?.program(at: primeDate) else {
+            return nil
+        }
+        // Nur einblenden, wenn die 20:15-Sendung noch nicht vorbei ist
+        guard prog.endDate > now else { return nil }
+        return prog
+    }
+
+    static func formatTime(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "HH:mm"
+        return formatter.string(from: date)
+    }
+
+    private func specialRow(_ title: String, selected: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(UI.font(28, .semibold))
+                .foregroundStyle(selected ? Color.black : UI.text)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, UI.s(24))
+                .padding(.vertical, UI.s(14))
+                .background(selected ? UI.text : Color.clear, in: RoundedRectangle(cornerRadius: UI.s(16)))
+                .overlay(RoundedRectangle(cornerRadius: UI.s(16)).stroke(Color.white.opacity(selected ? 0 : 0.25), lineWidth: UI.s(2)))
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func settingsRow(selected: Bool) -> some View {
+        let ink: Color = selected ? .black : UI.text
+        let quiet: Color = selected ? Color(white: 0.3) : UI.secondary
+        let bg = selected ? UI.text : Color.white.opacity(0.08)
+        let strokeColor = selected ? Color.clear : Color.white.opacity(0.18)
+
+        return Button(action: {
+            model.overlay = .none
+            model.showSettings = true
+        }) {
+            HStack(spacing: UI.s(20)) {
+                Image(systemName: "gearshape.fill")
+                    .font(UI.font(30, .semibold))
+                    .foregroundStyle(selected ? Color.black : UI.accent)
+                    .frame(width: UI.s(60), alignment: .center)
+                VStack(alignment: .leading, spacing: UI.s(4)) {
+                    Text("Einstellungen")
+                        .font(UI.font(32, .semibold))
+                        .foregroundStyle(ink)
+                        .lineLimit(1)
+                    Text("Sender sortieren, FRITZ!Box, Bild & Ton")
+                        .font(UI.font(22))
+                        .foregroundStyle(quiet)
+                        .lineLimit(1)
+                }
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.right")
+                    .font(UI.font(24, .semibold))
+                    .foregroundStyle(quiet)
+            }
             .padding(.horizontal, UI.s(24))
-            .padding(.vertical, UI.s(14))
-            .background(selected ? UI.text : Color.clear, in: RoundedRectangle(cornerRadius: UI.s(16)))
-            .overlay(RoundedRectangle(cornerRadius: UI.s(16)).stroke(Color.white.opacity(selected ? 0 : 0.25), lineWidth: UI.s(2)))
+            .padding(.vertical, UI.s(16))
+            .background(bg, in: RoundedRectangle(cornerRadius: UI.s(16)))
+            .overlay(
+                RoundedRectangle(cornerRadius: UI.s(16))
+                    .stroke(strokeColor, lineWidth: UI.s(1.5))
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .padding(.top, UI.s(14))
+        .padding(.bottom, UI.s(8))
     }
 
     private func row(_ entry: LineupEntry, isRecentSection: Bool, selected: Bool) -> some View {
@@ -414,45 +647,63 @@ struct ChannelListOverlay: View {
         let ink: Color = selected ? .black : UI.text
         let quiet: Color = selected ? Color(white: 0.3) : UI.secondary
 
-        let detail: String
-        if isCurrent, let title = player.nowPlaying {
-            detail = title
-        } else if entry.group.hd != nil && entry.group.sd != nil {
-            detail = "HD + SD"
-        } else {
-            detail = entry.group.hd != nil ? "HD" : "SD"
-        }
-
+        let current = (isCurrent ? player.currentProgram : nil)
+            ?? player.epgStore.currentProgram(forChannelNames: entry.group.epgNames)
         let isDead = entry.group.areAllVariantsDead(deadIDs: model.settings.deadChannelIDs)
 
-        return HStack(spacing: UI.s(20)) {
-            Text("\(entry.number)")
-                .font(UI.font(32, .bold))
-                .foregroundStyle(quiet)
-                .frame(width: UI.s(60), alignment: .leading)
-            ChannelLogoView(channelName: entry.group.displayName, height: UI.s(32), maxWidth: UI.s(72))
-            VStack(alignment: .leading, spacing: UI.s(4)) {
-                Text(entry.group.displayName + (entry.isNew ? " · neu" : ""))
-                    .font(UI.font(32, .semibold))
-                    .foregroundStyle(ink)
-                    .lineLimit(1)
-                Text(detail).font(UI.font(24)).foregroundStyle(quiet).lineLimit(1)
+        return Button(action: {
+            model.overlay = .none
+            model.tune(to: entry.number)
+        }) {
+            HStack(spacing: UI.s(20)) {
+                Text("\(entry.number)")
+                    .font(UI.font(32, .bold))
+                    .foregroundStyle(quiet)
+                    .frame(width: UI.s(60), alignment: .leading)
+                ChannelLogoView(channelName: entry.group.displayName, height: UI.s(32), maxWidth: UI.s(72))
+                VStack(alignment: .leading, spacing: UI.s(4)) {
+                    HStack(spacing: UI.s(10)) {
+                        Text(entry.group.displayName + (entry.isNew ? " · neu" : ""))
+                            .font(UI.font(30, .semibold))
+                            .foregroundStyle(ink)
+                            .lineLimit(1)
+                        if entry.group.hd != nil {
+                            Text("HD")
+                                .font(UI.font(16, .bold))
+                                .foregroundStyle(selected ? Color.black.opacity(0.8) : UI.accent)
+                                .padding(.horizontal, UI.s(6))
+                                .padding(.vertical, UI.s(2))
+                                .background(selected ? Color.black.opacity(0.12) : Color.white.opacity(0.12), in: RoundedRectangle(cornerRadius: UI.s(4)))
+                        }
+                    }
+                    if let current {
+                        Text("\(Self.formatTime(current.startDate)) – \(Self.formatTime(current.endDate)) · \(current.title)")
+                            .font(UI.font(22))
+                            .foregroundStyle(quiet)
+                            .lineLimit(1)
+                    } else {
+                        Text(entry.group.hd != nil && entry.group.sd != nil ? "HD + SD" : (entry.group.hd != nil ? "HD" : "SD"))
+                            .font(UI.font(22))
+                            .foregroundStyle(quiet)
+                            .lineLimit(1)
+                    }
+                }
+                Spacer(minLength: 0)
+                if isRecentSection {
+                    Badge(text: "ZULETZT", dark: selected)
+                } else if isCurrent {
+                    Badge(text: "LÄUFT", dark: selected)
+                } else if isDead {
+                    Badge(text: "KEIN SIGNAL", dark: selected)
+                }
             }
-            Spacer(minLength: 0)
-            if selected && moving {
-                Badge(text: "↕ VERSCHIEBEN", dark: true)
-            } else if isRecentSection {
-                Badge(text: "ZULETZT", dark: selected)
-            } else if isCurrent {
-                Badge(text: "LÄUFT", dark: selected)
-            } else if isDead {
-                Badge(text: "KEIN SIGNAL", dark: selected)
-            }
+            .padding(.horizontal, UI.s(24))
+            .padding(.vertical, UI.s(14))
+            .background(selected ? UI.text : (isCurrent ? Color.white.opacity(0.08) : Color.clear),
+                        in: RoundedRectangle(cornerRadius: UI.s(16)))
+            .contentShape(Rectangle())
         }
-        .padding(.horizontal, UI.s(24))
-        .padding(.vertical, UI.s(14))
-        .background(selected ? UI.text : (isCurrent ? Color.white.opacity(0.08) : Color.clear),
-                    in: RoundedRectangle(cornerRadius: UI.s(16)))
+        .buttonStyle(.plain)
     }
 }
 
@@ -467,7 +718,7 @@ struct DirectEntryOverlay: View {
         ZStack {
             Color.black.opacity(0.5).ignoresSafeArea()
             VStack(spacing: UI.s(20)) {
-                Text("Platz eingeben").font(UI.font(28, .semibold)).foregroundStyle(UI.secondary)
+                Text("Sender-Direktwahl").font(UI.font(28, .semibold)).foregroundStyle(UI.secondary)
                 Text(digits.isEmpty ? "–" : digits).font(UI.font(96, .heavy))
                 Text(previewText).font(UI.font(28)).foregroundStyle(UI.secondary).lineLimit(1)
                 LazyVGrid(columns: Array(repeating: GridItem(.fixed(UI.s(160)), spacing: UI.s(16)), count: 3),

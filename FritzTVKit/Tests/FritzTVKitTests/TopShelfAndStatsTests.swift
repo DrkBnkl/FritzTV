@@ -42,14 +42,46 @@ final class TopShelfAndStatsTests: XCTestCase {
         TopShelfStore.save(channels: defaults)
     }
 
-    func testChannelLogoSlugGeneration() {
-        XCTAssertEqual(ChannelLogo.slug(for: "Das Erste HD"), "das_erste")
-        XCTAssertEqual(ChannelLogo.slug(for: "ZDF HD"), "zdf")
-        XCTAssertEqual(ChannelLogo.slug(for: "rbb Berlin HD"), "rbb_berlin")
-        XCTAssertEqual(ChannelLogo.slug(for: "SAT.1"), "sat.1")
-        XCTAssertEqual(ChannelLogo.slug(for: "3sat HD"), "3sat")
-        XCTAssertEqual(ChannelLogo.slug(for: "KiKA HD"), "kika")
-        XCTAssertEqual(ChannelLogo.url(for: "ZDF HD")?.absoluteString, "http://tv.avm.de/tvapp/logos/zdf.png")
+    func testChannelLogoSlugFollowsFritzAppTV() {
+        // Beispiele aus der FRITZ!App TV
+        XCTAssertEqual(ChannelLogo.slug(for: "WDR"), "wdr")
+        XCTAssertEqual(ChannelLogo.slug(for: "NDR FS HH"), "ndr_fs_hh")
+        XCTAssertEqual(ChannelLogo.slug(for: "SWR Fernsehen BW"), "swr_fernsehen_bw")
+        // Sonderzeichen entfernt, Umlaute umgeschrieben, Präfix/Suffix entfernt
+        XCTAssertEqual(ChannelLogo.slug(for: "SAT.1"), "sat1")
+        XCTAssertEqual(ChannelLogo.slug(for: "hr-fernsehen"), "hrfernsehen")
+        XCTAssertEqual(ChannelLogo.slug(for: "BR Süd"), "br_sued")
+        XCTAssertEqual(ChannelLogo.slug(for: "CNN (eng)"), "cnn")
+        XCTAssertEqual(ChannelLogo.slug(for: "BBC News eng"), "bbc_news")
+        XCTAssertEqual(ChannelLogo.slug(for: "Home & Garden TV"), "home_garden_tv")
+    }
+
+    func testChannelLogoCandidatesTryWithAndWithoutHD() {
+        let urls = ChannelLogo.candidateURLs(for: "Das Erste HD").map(\.absoluteString)
+        XCTAssertEqual(urls, ["http://tv.avm.de/tvapp/logos/das_erste_hd.png",
+                              "http://tv.avm.de/tvapp/logos/das_erste.png"])
+        XCTAssertEqual(ChannelLogo.candidateURLs(for: "ZDF").map(\.absoluteString),
+                       ["http://tv.avm.de/tvapp/logos/zdf.png"])
+    }
+
+    func testPublicHLSLookupIsExactNotSubstring() {
+        let zdf = PublicHLSChannels.streams["zdf"]
+        XCTAssertEqual(PublicHLSChannels.hlsURL(for: "tv:zdf"), zdf)
+        XCTAssertEqual(PublicHLSChannels.hlsURL(for: "tv:zdfinfo"), PublicHLSChannels.streams["zdfinfo"])
+        XCTAssertEqual(PublicHLSChannels.hlsURL(for: "tv:zdfneo"), PublicHLSChannels.streams["zdfneo"])
+        XCTAssertEqual(PublicHLSChannels.hlsURL(for: "tv:zdf_neo"), PublicHLSChannels.streams["zdfneo"])
+        XCTAssertEqual(PublicHLSChannels.hlsURL(for: "tv:swr rp"), PublicHLSChannels.streams["swr rp"])
+        XCTAssertEqual(PublicHLSChannels.hlsURL(for: "tv:ndr fs nds"), PublicHLSChannels.streams["ndr niedersachsen"])
+        XCTAssertEqual(PublicHLSChannels.hlsURL(for: "Das Erste HD"), PublicHLSChannels.streams["das erste"])
+        XCTAssertEqual(PublicHLSChannels.hlsURL(for: "hr-fernsehen"), PublicHLSChannels.streams["hr-fernsehen"])
+        XCTAssertEqual(PublicHLSChannels.hlsURL(for: "hr fernsehen"), PublicHLSChannels.streams["hr-fernsehen"])
+        XCTAssertEqual(PublicHLSChannels.hlsURL(for: "hr"), PublicHLSChannels.streams["hr-fernsehen"])
+        // Präfix als ganzes Wort: „wdr koln“ hat einen eigenen Eintrag, „wdr duisburg“ fällt auf „wdr“
+        XCTAssertEqual(PublicHLSChannels.hlsURL(for: "tv:wdr duisburg"), PublicHLSChannels.streams["wdr"])
+        // Private Sender und zufällige Teilstrings ergeben nichts
+        XCTAssertNil(PublicHLSChannels.hlsURL(for: "tv:rtl"))
+        XCTAssertNil(PublicHLSChannels.hlsURL(for: "tv:disney channel"))
+        XCTAssertNil(PublicHLSChannels.hlsURL(for: "   "))
     }
 
     func testTimeshiftBufferManagerSafetyAndUrls() {

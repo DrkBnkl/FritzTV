@@ -1,175 +1,220 @@
 import Foundation
 
-/// Liest EIT-Programminformationen (EPG) aus den libVLC-Debug-Meldungen des Demuxers (`ts_psip.c`).
+/// Liest Programminformationen (EIT) und Sendernamen (SDT) aus den libVLC-Debug-Meldungen
+/// des TS-Demuxers (VLC 3, `modules/demux/mpeg/ts_si.c`).
 ///
 /// libVLC gibt bei Debug-Stufe Zeilen wie folgende aus:
 /// ```
-/// new EIT service_id=11110 version=12 current_next=1 ts_id=10 network_id=1 ...
-///   * event id=45120 start_time:1729760400 duration:3600 running=4 free_ca=0
+/// new SDT ts_id=10 version=3 current_next=1 network_id=61441
+///   * service id=28106 eit schedule=1 present=1 running=4 free_ca=0
+///     - type=25 provider=ARD name=Das Erste HD
+/// new EIT service_id=28106 version=12 current_next=1 ts_id=10 network_id=61441 ...
+///   * event id=45120 start_time:1729760400 duration=3600 running=4 free_ca=0
 ///     - short event lang=deu 'Sportschau' : 'Bundesliga am Samstag'
 ///     - extended event lang=deu [1/2]
 ///        - text='Moderation: Esther Sedlaczek. Berichte von den Spielen...'
 /// ```
+///
+/// Die SDT liefert die eindeutige Zuordnung Service-ID → Sendername. Nur darüber lassen sich
+/// die Sendungen einem Sender zuordnen, denn die EIT eines Multiplex enthält die Sendungen
+/// aller Sender auf dieser Frequenz.
+///
+/// Laufen mehrere VLC-Instanzen gleichzeitig (Wiedergabe und Hintergrund-Abruf), kommen ihre
+/// Zeilen vermischt an. Deshalb führt der Parser den Lesezustand getrennt je Quelle
+/// (`source`, z. B. die Objekt-ID aus dem VLC-Protokollkontext).
 public final class EITLogParser: @unchecked Sendable {
-    private let lock = NSLock()
+    private struct SourceState {
+        // EIT
+        var serviceID: Int?
+        var eventID: Int?
+        var startTime: Date?
+        var duration: TimeInterval?
+        var running = false
+        var title: String?
+        var subtitle: String?
+        var descriptions: [String] = []
+        // SDT
+        var sdtServiceID: Int?
 
-    private var activeServiceID: Int?
-    private var pendingEventID: Int?
-    private var pendingStartTime: Date?
-    private var pendingDuration: TimeInterval?
-    private var pendingRunning: Bool = false
-    private var pendingTitle: String?
-    private var pendingSubtitle: String?
-    private var pendingDescriptions: [String] = []
-
-    /// Callback, der aufgerufen wird, sobald eine Sendung vollständig erkannt wurde.
-    public var onProgramParsed: ((EPGProgram) -> Void)?
-
-    public init(onProgramParsed: ((EPGProgram) -> Void)? = nil) {
-        self.onProgramParsed = onProgramParsed
+        mutating func resetEvent() {
+            eventID = nil
+            startTime = nil
+            duration = nil
+            running = false
+            title = nil
+            subtitle = nil
+            descriptions.removeAll()
+        }
     }
 
-    /// Verarbeitet eine einzelne Protokollzeile.
-    public func processLine(_ rawLine: String) {
-        lock.lock()
-        defer { lock.unlock() }
+    private let lock = NSLock()
+    private var states: [Int: SourceState] = [:]
 
+    /// Wird aufgerufen, sobald eine Sendung vollständig erkannt wurde.
+    public var onProgramParsed: ((EPGProgram) -> Void)?
+    /// Wird für jeden Eintrag der SDT aufgerufen: Service-ID und Sendername.
+    public var onServiceName: ((_ serviceID: Int, _ name: String) -> Void)?
+
+    public init(onProgramParsed: ((EPGProgram) -> Void)? = nil,
+                onServiceName: ((_ serviceID: Int, _ name: String) -> Void)? = nil) {
+        self.onProgramParsed = onProgramParsed
+        self.onServiceName = onServiceName
+    }
+
+    /// Schneller Vorfilter für den Log-Empfänger: nur Zeilen, die der Parser auswertet.
+    public static func isRelevant(_ message: String) -> Bool {
+        message.contains("EIT") || message.contains("SDT") || message.contains("event id")
+            || message.contains("short event") || message.contains("text='")
+            || message.contains("service id") || message.contains("name=")
+    }
+
+    /// Verarbeitet eine einzelne Protokollzeile einer Quelle.
+    public func processLine(_ rawLine: String, source: Int = 0) {
         let line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
         if line.isEmpty { return }
 
-        // 1. Neuer EIT-Abschnitt für einen Sender
-        if line.contains("new EIT") {
-            finalizeCurrentEventLocked()
-            if let serviceID = extractInt(after: "service_id", in: line) {
-                activeServiceID = serviceID
-            }
-            return
-        }
+        var finished: EPGProgram?
+        var serviceName: (Int, String)?
 
-        // 2. Neues Event innerhalb des EIT-Abschnitts
-        if line.contains("event id") {
-            finalizeCurrentEventLocked()
-            guard let eventID = extractInt(after: "event id", in: line) else { return }
-            pendingEventID = eventID
-
-            if let startTimeSeconds = extractInt64(after: "start_time", in: line) {
-                // start_time ist ein UNIX-Zeitstempel (UTC)
-                pendingStartTime = Date(timeIntervalSince1970: TimeInterval(startTimeSeconds))
-            }
-            if let durationSeconds = extractInt(after: "duration", in: line) {
-                pendingDuration = TimeInterval(durationSeconds)
-            }
-            if let running = extractInt(after: "running", in: line) {
-                // Status 4 = läuft jetzt (running)
-                pendingRunning = (running == 4)
-            }
-            return
-        }
-
-        // 3. Kurztitel und Untertitel (Short Event Descriptor)
-        if line.contains("- short event lang=") {
-            if let (title, subtitle) = parseShortEvent(line) {
-                pendingTitle = title
-                pendingSubtitle = subtitle.isEmpty ? nil : subtitle
-            }
-            return
-        }
-
-        // 4. Ausführlicher Beschreibungstext (Extended Event Descriptor)
-        if line.contains("- text='") || line.contains("text='") {
-            if let text = extractQuoted(after: "text='", in: line) {
-                if !text.isEmpty {
-                    pendingDescriptions.append(text)
-                }
-            }
-            return
-        }
-    }
-
-    /// Schließt das aktuelle Event ab, falls vorhanden.
-    public func flush() {
         lock.lock()
-        defer { lock.unlock() }
-        finalizeCurrentEventLocked()
-    }
+        var state = states[source] ?? SourceState()
 
-    private func finalizeCurrentEventLocked() {
-        guard let serviceID = activeServiceID,
-              let eventID = pendingEventID,
-              let title = pendingTitle, !title.isEmpty,
-              let startTime = pendingStartTime,
-              let duration = pendingDuration else {
-            resetPendingLocked()
-            return
+        if line.hasPrefix("new SDT") {
+            finished = finalize(&state)
+            state.serviceID = nil
+            state.sdtServiceID = nil
+        } else if line.hasPrefix("new EIT") {
+            finished = finalize(&state)
+            state.sdtServiceID = nil
+            state.serviceID = Self.int(after: "service_id", in: line)
+        } else if line.hasPrefix("* service id") {
+            finished = finalize(&state)
+            state.serviceID = nil
+            state.sdtServiceID = Self.int(after: "service id", in: line)
+        } else if line.hasPrefix("- type="), let sid = state.sdtServiceID,
+                  let range = line.range(of: " name=") {
+            let name = Self.cleanName(String(line[range.upperBound...]))
+            if !name.isEmpty { serviceName = (sid, name) }
+        } else if line.hasPrefix("* event id") {
+            finished = finalize(&state)
+            if state.serviceID != nil, let eventID = Self.int(after: "event id", in: line) {
+                state.eventID = eventID
+                if let start = Self.int64(after: "start_time", in: line) {
+                    state.startTime = Date(timeIntervalSince1970: TimeInterval(start))
+                }
+                if let duration = Self.int(after: "duration", in: line) {
+                    state.duration = TimeInterval(duration)
+                }
+                // Running Status 4 = läuft gerade
+                state.running = Self.int(after: "running", in: line) == 4
+            }
+        } else if line.hasPrefix("- short event"), state.eventID != nil {
+            if let (title, subtitle) = Self.parseShortEvent(line) {
+                state.title = title
+                state.subtitle = (subtitle.isEmpty || subtitle == "(null)" || subtitle == "null") ? nil : subtitle
+            }
+        } else if line.hasPrefix("- text='"), state.eventID != nil {
+            if let text = Self.quoted(after: "text='", in: line), !text.isEmpty {
+                state.descriptions.append(text)
+            }
         }
 
-        let fullDesc = pendingDescriptions.joined(separator: " ").trimmingCharacters(in: .whitespacesAndNewlines)
-        let program = EPGProgram(
+        states[source] = state
+        lock.unlock()
+
+        // Rückrufe außerhalb der Sperre, damit sie den Parser wieder aufrufen dürfen.
+        if let (sid, name) = serviceName { onServiceName?(sid, name) }
+        if let finished { onProgramParsed?(finished) }
+    }
+
+    /// Schließt die offene Sendung einer Quelle ab, z. B. wenn eine VLC-Instanz endet.
+    public func flush(source: Int = 0) {
+        lock.lock()
+        var state = states[source] ?? SourceState()
+        let finished = finalize(&state)
+        states[source] = nil
+        lock.unlock()
+        if let finished { onProgramParsed?(finished) }
+    }
+
+    /// Schließt alle offenen Sendungen ab.
+    public func flushAll() {
+        lock.lock()
+        let sources = Array(states.keys)
+        lock.unlock()
+        sources.forEach { flush(source: $0) }
+    }
+
+    private func finalize(_ state: inout SourceState) -> EPGProgram? {
+        defer { state.resetEvent() }
+        guard let serviceID = state.serviceID,
+              let eventID = state.eventID,
+              let title = state.title, !title.isEmpty,
+              let startTime = state.startTime,
+              let duration = state.duration else {
+            return nil
+        }
+        let description = state.descriptions.joined(separator: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return EPGProgram(
             eventID: eventID,
             serviceID: serviceID,
             title: title,
-            subtitle: pendingSubtitle,
-            description: fullDesc.isEmpty ? nil : fullDesc,
+            subtitle: state.subtitle,
+            description: description.isEmpty ? nil : description,
             startDate: startTime,
             duration: duration,
-            isRunningStatus: pendingRunning
+            isRunningStatus: state.running
         )
-
-        resetPendingLocked()
-        onProgramParsed?(program)
-    }
-
-    private func resetPendingLocked() {
-        pendingEventID = nil
-        pendingStartTime = nil
-        pendingDuration = nil
-        pendingRunning = false
-        pendingTitle = nil
-        pendingSubtitle = nil
-        pendingDescriptions.removeAll()
     }
 
     // MARK: Parsing-Hilfen
 
-    private func extractInt(after prefix: String, in text: String) -> Int? {
-        guard let range = text.range(of: prefix) else { return nil }
-        let after = text[range.upperBound...].drop(while: { $0 == " " || $0 == "=" || $0 == ":" })
-        let digits = after.prefix { $0.isNumber }
-        return Int(digits)
+    /// Entfernt DVB-Steuerzeichen (Hervorhebung 0x86/0x87 und deren Unicode-Entsprechungen).
+    static func cleanName(_ raw: String) -> String {
+        let removed = raw.unicodeScalars.filter { scalar in
+            !(0x80...0x9F).contains(scalar.value) && scalar.value != 0xE086 && scalar.value != 0xE087
+        }
+        return String(String.UnicodeScalarView(removed)).trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    private func extractInt64(after prefix: String, in text: String) -> Int64? {
+    static func int(after prefix: String, in text: String) -> Int? {
+        int64(after: prefix, in: text).map { Int($0) }
+    }
+
+    static func int64(after prefix: String, in text: String) -> Int64? {
         guard let range = text.range(of: prefix) else { return nil }
         let after = text[range.upperBound...].drop(while: { $0 == " " || $0 == "=" || $0 == ":" })
-        let digits = after.prefix { $0.isNumber }
+        let digits = after.prefix { $0.isNumber || $0 == "-" }
         return Int64(digits)
     }
 
-    private func parseShortEvent(_ line: String) -> (String, String)? {
-        // Format: "- short event lang=deu 'Titel' : 'Untertitel'"
+    /// Format: `- short event lang=deu 'Titel' : 'Untertitel'`. Titel und Untertitel dürfen selbst
+    /// Apostrophe enthalten (z. B. „Grey's Anatomy“), daher wird am Trenner `' : '` geteilt.
+    static func parseShortEvent(_ line: String) -> (String, String)? {
         guard let firstQuote = line.firstIndex(of: "'") else { return nil }
-        let rest1 = line[line.index(after: firstQuote)...]
-        guard let secondQuote = rest1.firstIndex(of: "'") else { return nil }
-        let title = String(rest1[..<secondQuote])
-
-        let rest2 = rest1[rest1.index(after: secondQuote)...]
-        guard let thirdQuote = rest2.firstIndex(of: "'") else {
-            return (title, "")
+        let body = line[line.index(after: firstQuote)...]
+        if let separator = body.range(of: "' : '") {
+            let title = String(body[..<separator.lowerBound])
+            var subtitle = body[separator.upperBound...]
+            if subtitle.hasSuffix("'") { subtitle = subtitle.dropLast() }
+            let subStr = String(subtitle)
+            let cleanSub = (subStr == "(null)" || subStr == "null") ? "" : subStr
+            return (title, cleanSub)
         }
-        let rest3 = rest2[rest2.index(after: thirdQuote)...]
-        guard let fourthQuote = rest3.firstIndex(of: "'") else {
-            return (title, "")
-        }
-        let subtitle = String(rest3[..<fourthQuote])
-        return (title, subtitle)
+        guard let lastQuote = body.lastIndex(of: "'") else { return (String(body), "") }
+        return (String(body[..<lastQuote]), "")
     }
 
-    private func extractQuoted(after prefix: String, in text: String) -> String? {
+    static func quoted(after prefix: String, in text: String) -> String? {
         guard let range = text.range(of: prefix) else { return nil }
         let after = text[range.upperBound...]
-        guard let endQuote = after.lastIndex(of: "'") else {
-            return String(after)
+        let content: String
+        if let endQuote = after.lastIndex(of: "'") {
+            content = String(after[..<endQuote])
+        } else {
+            content = String(after)
         }
-        return String(after[..<endQuote])
+        return (content == "(null)" || content == "null") ? nil : content
     }
 }

@@ -11,7 +11,31 @@ struct RootView: View {
             Color.black.ignoresSafeArea()
             PlayerSurface(player: player.mediaPlayer)
                 .ignoresSafeArea()
-            OverlayLayer(model: model, player: player)
+            // Timeshift: Mitschnitt-Wiedergabe liegt über dem stumm weiterlaufenden Live-Bild.
+            PlayerSurface(player: player.replayPlayer)
+                .ignoresSafeArea()
+                .opacity(player.isReplaying ? 1 : 0)
+                .allowsHitTesting(false)
+            if let replay = model.activeHLSReplay {
+                HLSReplayPlayerView(url: replay.url, startDate: replay.startDate) {
+                    model.hlsReplayClosed()
+                }
+                .ignoresSafeArea()
+            } else if let url = model.activeMediathekURL {
+                MediathekPlayer(url: url, subtitleURL: model.activeMediathekSubtitle) {
+                    model.mediathekPlayClosed()
+                }
+                .ignoresSafeArea()
+            } else {
+                Color.clear
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        if model.overlay == .none {
+                            model.handle(.back)
+                        }
+                    }
+                OverlayLayer(model: model, player: player)
+            }
         }
         .modifier(RemoteInputModifier(model: model))
         .preferredColorScheme(.dark)
@@ -25,51 +49,17 @@ struct RootView: View {
         .fullScreenCover(isPresented: $model.showMediathek, onDismiss: { model.mediathekClosed() }) {
             MediathekView(settings: model.settings)
         }
-        .fullScreenCover(isPresented: $model.showEPGOverview) {
+        .fullScreenCover(isPresented: $model.showEPGOverview, onDismiss: { model.epgOverviewClosed() }) {
             EPGOverviewView(model: model, player: player)
-        }
-        .fullScreenCover(isPresented: Binding(
-            get: { model.activeHLSReplay != nil },
-            set: { if !$0 { model.hlsReplayClosed() } }
-        )) {
-            if let replay = model.activeHLSReplay {
-                HLSReplayPlayerView(url: replay.url, startDate: replay.startDate)
-            }
-        }
-        .fullScreenCover(isPresented: Binding(
-            get: { model.activeMediathekURL != nil },
-            set: { if !$0 { model.mediathekPlayClosed() } }
-        )) {
-            if let url = model.activeMediathekURL {
-                MediathekPlayer(url: url)
-            }
         }
         #else
         .sheet(isPresented: $model.showMediathek, onDismiss: { model.mediathekClosed() }) {
             MediathekView(settings: model.settings)
-                .frame(minWidth: 1100, minHeight: 720)
+                .frame(minWidth: 1000, maxWidth: .infinity, minHeight: 650, maxHeight: .infinity)
         }
-        .sheet(isPresented: $model.showEPGOverview) {
+        .sheet(isPresented: $model.showEPGOverview, onDismiss: { model.epgOverviewClosed() }) {
             EPGOverviewView(model: model, player: player)
-                .frame(minWidth: 1100, minHeight: 720)
-        }
-        .sheet(isPresented: Binding(
-            get: { model.activeHLSReplay != nil },
-            set: { if !$0 { model.hlsReplayClosed() } }
-        )) {
-            if let replay = model.activeHLSReplay {
-                HLSReplayPlayerView(url: replay.url, startDate: replay.startDate)
-                    .frame(minWidth: 1100, minHeight: 720)
-            }
-        }
-        .sheet(isPresented: Binding(
-            get: { model.activeMediathekURL != nil },
-            set: { if !$0 { model.mediathekPlayClosed() } }
-        )) {
-            if let url = model.activeMediathekURL {
-                MediathekPlayer(url: url)
-                    .frame(minWidth: 1100, minHeight: 720)
-            }
+                .frame(minWidth: 1050, idealWidth: 1250, maxWidth: .infinity, minHeight: 650, idealHeight: 780, maxHeight: .infinity)
         }
         #endif
         .sheet(isPresented: Binding(
@@ -78,15 +68,27 @@ struct RootView: View {
         )) {
             if let dialog = model.searchResultDialog {
                 MediathekSearchResultsView(title: dialog.title, results: dialog.results) { url in
-                    model.playMediathekResult(url: url)
+                    let subtitle = dialog.results.first { $0.bestPlaybackURL == url }?.subtitleURL
+                    model.playMediathekResult(url: url, subtitleURL: subtitle)
                 }
                 #if os(macOS)
-                .frame(minWidth: 800, minHeight: 600)
+                .frame(minWidth: 600, maxWidth: .infinity, minHeight: 380, maxHeight: .infinity)
                 #endif
             }
         }
         .task { await model.load() }
         .onChange(of: player.nowPlaying) { _, _ in model.programChanged() }
+        .onChange(of: player.currentProgram) { _, _ in model.programChanged() }
+        .onChange(of: player.status) { oldStatus, newStatus in
+            if oldStatus != .playing && newStatus == .playing {
+                model.showBanner()
+            }
+            #if os(tvOS)
+            if newStatus == .playing, model.settings.match50Hz {
+                DisplayCriteria.request50Hz()
+            }
+            #endif
+        }
         .onChange(of: scenePhase) { _, phase in
             switch phase {
             case .background: player.stop()
@@ -94,13 +96,6 @@ struct RootView: View {
             default: break
             }
         }
-        #if os(tvOS)
-        .onChange(of: player.status) { _, status in
-            if status == .playing, model.settings.match50Hz {
-                DisplayCriteria.request50Hz()
-            }
-        }
-        #endif
     }
 }
 
@@ -130,8 +125,6 @@ struct OverlayLayer: View {
         } else if case .reconnecting(let seconds) = player.status {
             StatusCard(title: "Verbindung unterbrochen", message: "Neuer Versuch in \(seconds) s …",
                        hint: "Bleibt das Bild weg: Sind alle 4 Tuner der FRITZ!Box belegt?", busy: true)
-        } else if player.status == .connecting {
-            ProgressView().scaleEffect(1.5)
         }
 
         if model.overlay == .none {
@@ -139,6 +132,7 @@ struct OverlayLayer: View {
                 TimeshiftBar(model: model, player: player)
             } else if model.bannerVisible {
                 InfoBanner(model: model, player: player)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
 
@@ -147,10 +141,22 @@ struct OverlayLayer: View {
             EmptyView()
         case .info(let selection):
             InfoPanel(model: model, player: player, selection: selection)
-        case .channelList(let selectedID, let moving):
-            ChannelListOverlay(model: model, player: player, selectedID: selectedID, moving: moving)
+        case .channelList(let selectedID):
+            ChannelListOverlay(model: model, player: player, selectedID: selectedID)
         case .directEntry(let digits, let key):
             DirectEntryOverlay(model: model, digits: digits, key: key)
+        }
+
+        if let feedback = player.jumpFeedback {
+            Text(feedback)
+                .font(.system(size: 32, weight: .bold))
+                .foregroundStyle(Color.white)
+                .padding(.horizontal, 24)
+                .padding(.vertical, 12)
+                .background(Color.black.opacity(0.75), in: Capsule())
+                .overlay(Capsule().stroke(Color.white.opacity(0.3), lineWidth: 1.5))
+                .shadow(color: .black.opacity(0.5), radius: 8)
+                .transition(.scale.combined(with: .opacity))
         }
     }
 }

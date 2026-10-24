@@ -17,6 +17,16 @@ struct FritzTVApp: App {
                 .frame(minWidth: 960, minHeight: 540)
             #endif
         }
+        #if os(macOS)
+        .commands {
+            CommandGroup(replacing: .appSettings) {
+                Button("Einstellungen…") {
+                    model.showSettings = true
+                }
+                .keyboardShortcut(",", modifiers: .command)
+            }
+        }
+        #endif
     }
 }
 

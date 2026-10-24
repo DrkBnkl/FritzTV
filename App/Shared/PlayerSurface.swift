@@ -21,7 +21,11 @@ struct PlayerSurface: NSViewRepresentable {
         return view
     }
 
-    func updateNSView(_ nsView: NSView, context: Context) {}
+    func updateNSView(_ nsView: NSView, context: Context) {
+        if (player.drawable as? NSView) != nsView {
+            player.drawable = nsView
+        }
+    }
 }
 #else
 struct PlayerSurface: UIViewRepresentable {
@@ -34,6 +38,10 @@ struct PlayerSurface: UIViewRepresentable {
         return view
     }
 
-    func updateUIView(_ uiView: UIView, context: Context) {}
+    func updateUIView(_ uiView: UIView, context: Context) {
+        if (player.drawable as? UIView) != uiView {
+            player.drawable = uiView
+        }
+    }
 }
 #endif
