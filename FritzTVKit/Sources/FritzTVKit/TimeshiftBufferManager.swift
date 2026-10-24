@@ -54,8 +54,38 @@ public final class TimeshiftBufferManager: @unchecked Sendable {
     /// Neuer Pfad für eine Timeshift-Aufnahmedatei eines Senders.
     public func newSegmentURL(channelKey: String) -> URL {
         let timestamp = Int(Date().timeIntervalSince1970)
-        let filename = "timeshift_\(channelKey)_\(timestamp).ts"
+        // Nur unkritische Zeichen im Dateinamen (er landet ungeschützt in der sout-Option).
+        let safeKey = String(channelKey.map { $0.isLetter || $0.isNumber || $0 == "-" ? $0 : "_" })
+        let filename = "timeshift_\(safeKey)_\(timestamp).ts"
         return bufferDirectory.appendingPathComponent(filename)
+    }
+
+    /// Höchstgröße der Mitschnittdatei: 4 GB (FAT32-Grenze wie beim dream Player), höchstens die
+    /// Hälfte des freien Speichers und immer mit 200 MB Reserve. 0 = Timeshift nicht möglich.
+    public func recordingLimitBytes() -> Int64 {
+        guard let values = try? bufferDirectory.resourceValues(forKeys: [.volumeAvailableCapacityKey]),
+              let available = values.volumeAvailableCapacity else {
+            return Self.maxSegmentSizeBytes
+        }
+        return Self.recordingLimit(availableBytes: Int64(available))
+    }
+
+    /// Rechenregel für `recordingLimitBytes`, getrennt testbar.
+    public static func recordingLimit(availableBytes: Int64) -> Int64 {
+        let usable = min(availableBytes / 2, availableBytes - minFreeSpaceReserveBytes)
+        return max(0, min(maxSegmentSizeBytes, usable))
+    }
+
+    /// Größe einer Datei im Puffer (0, wenn es sie nicht gibt).
+    public func fileSize(at url: URL) -> Int64 {
+        guard let size = (try? url.resourceValues(forKeys: [.fileSizeKey]))?.fileSize else { return 0 }
+        return Int64(size)
+    }
+
+    /// libVLC-Option: Bild anzeigen und gleichzeitig den Rohstream in eine TS-Datei schreiben
+    /// (eine RTSP-Sitzung, ein Tuner).
+    public static func soutDisplayAndRecordOption(destination: URL) -> String {
+        ":sout=#duplicate{dst=display,dst=std{access=file,mux=ts,dst=\(destination.path)}}"
     }
 
     /// Erzeugt die libVLC-Option für das Speichern des Rohstreams in eine TS-Datei.

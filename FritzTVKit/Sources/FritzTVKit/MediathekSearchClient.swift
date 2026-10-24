@@ -11,6 +11,12 @@ public struct MediathekSearchResult: Identifiable, Sendable, Codable, Hashable {
     public let duration: Int
     public let urlVideo: String
     public let urlVideoHD: String?
+    /// Untertitel (meist TTML), falls der Sender welche anbietet.
+    public let urlSubtitle: String?
+
+    public var subtitleURL: URL? {
+        urlSubtitle.flatMap { $0.isEmpty ? nil : URL(string: $0) }
+    }
 
     public var bestPlaybackURL: URL? {
         if let hd = urlVideoHD, !hd.isEmpty, let url = URL(string: hd) {
@@ -29,10 +35,11 @@ public struct MediathekSearchResult: Identifiable, Sendable, Codable, Hashable {
         case duration
         case urlVideo = "url_video"
         case urlVideoHD = "url_video_hd"
+        case urlSubtitle = "url_subtitle"
     }
 
     public init(id: String, channel: String, topic: String, title: String, description: String,
-                timestamp: Int, duration: Int, urlVideo: String, urlVideoHD: String?) {
+                timestamp: Int, duration: Int, urlVideo: String, urlVideoHD: String?, urlSubtitle: String? = nil) {
         self.id = id
         self.channel = channel
         self.topic = topic
@@ -42,6 +49,7 @@ public struct MediathekSearchResult: Identifiable, Sendable, Codable, Hashable {
         self.duration = duration
         self.urlVideo = urlVideo
         self.urlVideoHD = urlVideoHD
+        self.urlSubtitle = urlSubtitle
     }
 
     /// Nachsichtig: Fehlt ein Nebenfeld (Beschreibung, Thema, Dauer), bleibt der Treffer erhalten.
@@ -66,6 +74,7 @@ public struct MediathekSearchResult: Identifiable, Sendable, Codable, Hashable {
         self.timestamp = number(.timestamp)
         self.duration = number(.duration)
         self.urlVideoHD = string(.urlVideoHD)
+        self.urlSubtitle = string(.urlSubtitle)
     }
 
     /// Sendername, wie MediathekViewWeb ihn führt, zu einem Sender der Senderliste.
@@ -123,6 +132,14 @@ public struct MediathekSearchClient: Sendable {
         }
 
         return Self.decodeResults(from: data)
+    }
+
+    /// Untertitel zu einem Mediathek-Video suchen (z. B. für Filme aus press2arr, die nur den
+    /// Video-Link kennen): Treffer mit demselben Video-Link.
+    public func subtitleURL(forVideo videoURL: URL, title: String, channel: String? = nil) async -> URL? {
+        let results = await search(title: title, channel: channel, limit: 25)
+        let wanted = videoURL.absoluteString
+        return results.first { [$0.urlVideo, $0.urlVideoHD].contains(wanted) }?.subtitleURL
     }
 
     /// Wertet die Antwort aus; unvollständige Einträge werden einzeln übersprungen.

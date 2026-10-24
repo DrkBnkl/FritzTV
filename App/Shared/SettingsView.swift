@@ -5,6 +5,7 @@ struct SettingsView: View {
     @ObservedObject var model: AppModel
     @ObservedObject var settings: AppSettings
     @Environment(\.dismiss) private var dismiss
+    @AppStorage("mediathekSubtitles") private var mediathekSubtitles = false
 
     private let cachingValues = [500, 1000, 2000, 3000, 5000]
     private let delayValues = Array(stride(from: -500, through: 500, by: 25))
@@ -34,6 +35,7 @@ struct SettingsView: View {
 
                 Section {
                     TextField("press2arr-Adresse", text: $settings.press2arrAddress)
+                    Toggle("Untertitel in Mediathek-Videos", isOn: $mediathekSubtitles)
                 } header: {
                     Text("Mediathek")
                 } footer: {

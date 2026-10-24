@@ -44,7 +44,7 @@ Grundsatz: keine Wischgesten, alles über Tasten und Klicks.
 - Links/Rechts springt 10 s, gedrückt halten spult, Spulen bis ganz rechts führt zurück ins Live-Bild.
 - Pufferlänge einstellbar, Ziel 60–90 Minuten (HD grob 3–4 GB/h, SD etwa 1,5 GB/h).
 - Ein Senderwechsel leert den Puffer (die Box liefert nur einen Stream pro Gerät).
-- Prototyp mit VLCs eingebautem Timeshift, Zielarchitektur mit eigenem Empfang und Ringpuffer.
+- Umgesetzt (24.10.2026, noch ungetestet): Der Live-Player zeigt das Bild und schreibt den Strom gleichzeitig in eine TS-Datei (`:sout=#duplicate{dst=display,dst=std{access=file,mux=ts,…}}`, eine RTSP-Sitzung). Anhalten oder Zurückspulen startet einen zweiten Player auf dieser Datei; das Live-Bild läuft stumm weiter. Aufholen bis zum Dateiende oder „Live“ schaltet zurück. Grenze: 4 GB, höchstens 50 % des freien Speichers, 200 MB Reserve; bei Erreichen beginnt der Puffer neu. Liefert ein Sender mit Mitschnitt kein Bild (z. B. fehlendes sout-Modul), folgt ein letzter Versuch ohne; klappt der, bleibt der Mitschnitt für die Sitzung aus.
 - Vorbild dream Player (APK untersucht 24.10.2026): eine zweite, unsichtbare VLC-Instanz schreibt den RTSP-Stream unverändert als TS-Datei mit (`:sout=#duplicate{dst=std{access=file,mux=ts,dst=…}}`), die sichtbare spielt die wachsende Datei ab. Neue Datei bei 4 GB (FAT32-Grenze), Abbruch mit Meldung, wenn weniger als die Hälfte des freien Speichers bzw. 200 MB Reserve bleiben. Für uns übertragbar mit VLCKit; auf dem Apple TV ist der Cache-Speicher begrenzt und kann vom System geleert werden.
 - Aufnahmen sind ausdrücklich nicht gewünscht.
 
@@ -72,7 +72,7 @@ Grundsatz: keine Wischgesten, alles über Tasten und Klicks.
 - Dolby Digital (AC3) unverändert an Soundbar/AV-Receiver durchreichen.
 - Audiodeskription standardmäßig meiden; Standardsprache Deutsch.
 - Tonverzögerung einstellbar (Startwert −125 ms wie im dream Player, am eigenen Gerät justieren).
-- DVB-Untertitel; Videotext-Untertitel (Tafel 150/777) sofern VLCKit sie auf tvOS darstellt – zu prüfen.
+- DVB-Untertitel; Videotext-Untertitel (Tafel 150/777) über die Untertitelauswahl. Videotext als eigene Ansicht ist mit VLCKit 3 nicht möglich (siehe unten).
 
 ## Sendungsinfo
 
@@ -121,7 +121,10 @@ Stand 24.10.2026: Alle Punkte 1 bis 9 sind programmiert und nach einer Durchsich
 - **Senderlogos:** Vollständig integriert (Quelle: AVM-Logoserver `http://tv.avm.de/tvapp/logos/<name>.png`) mit lokalem Disk-/Memory-Cache (`URLCache`) in Senderliste, Info-Banner, Sendungsinfo, Top Shelf und Programmübersicht.
 - **Hintergrund-EPG-Scan:** `BackgroundEPGScanner` durchsucht fremde Multiplexe automatisch mit einer unsichtbaren VLC-Instanz, sobald freie Tuner an der Box vorhanden sind.
 - **Mediathek:** Serien-Kategorie und „🎲 Überrasch mich“-Zufallsauswahl in `MediathekView` und `Press2arrClient` ergänzt.
-- **Timeshift-Speicher:** `TimeshiftBufferManager` prüft vor dem Start die Reserve von 200 MB freiem Speicher und räumt alte Pufferdateien beim Umschalten weg. Noch offen: Mitschnitt in eine Datei nach dem Vorbild des dream Players (statt VLC-Timeshift), Aufteilung bei 4 GB, Grenze von 50 % des freien Platzes.
+- **Timeshift-Speicher:** `TimeshiftBufferManager` berechnet die Grenze des Mitschnitts (4 GB, 50 % des freien Platzes, 200 MB Reserve) und räumt alte Pufferdateien beim Umschalten weg.
+- **Geänderte PIDs:** Kommt nach 6 s kein Bild, vergleicht der Player die Spur-IDs von VLC (im TS-Demuxer = PIDs aus der PMT) mit den PIDs im RTSP-Link, ergänzt fehlende und verbindet einmal neu (wie die FRITZ!App TV).
+- **Untertitel in Mediathek-Videos:** TTML/EBU-TT-D und WebVTT (`SubtitleParser`, inkl. Zeitcode-Versatz 10:00:00), Quelle `url_subtitle` von MediathekViewWeb; für Filme aus press2arr über den passenden Treffer bei MediathekViewWeb. Anzeige über dem Apple-Player, Schalter in Einstellungen › Mediathek.
+- **Videotext als eigene Ansicht:** mit VLCKit 3 nicht machbar – die öffentliche Schnittstelle kann keine Videotextseite wählen (`libvlc_video_set_teletext` ist nicht freigegeben). Wäre nur mit eigenem Videotext-Decoder möglich wie im dream Player. Videotext-Untertitel (Tafel 150/777) gehen weiter über die Untertitelauswahl.
 - **Deployment-Skript:** `scripts/deploy-tvos.sh` für wöchentliches, bequemes Neuaufspielen auf das Apple TV per `xcrun devicectl`, ohne Daten- oder Einstellungsverlust.
 
 ## Nicht gewünscht oder nicht machbar

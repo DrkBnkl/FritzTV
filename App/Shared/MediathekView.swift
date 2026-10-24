@@ -388,11 +388,11 @@ struct MovieDetailView: View {
         .task { await loadDetail() }
         #if os(tvOS)
         .fullScreenCover(item: $playing) { item in
-            MediathekPlayer(url: item.url)
+            MediathekPlayer(url: item.url, title: movie.title)
         }
         #else
         .sheet(item: $playing) { item in
-            MediathekPlayer(url: item.url)
+            MediathekPlayer(url: item.url, title: movie.title)
                 .frame(minWidth: 1000, minHeight: 600)
         }
         #endif
@@ -499,17 +499,48 @@ struct MovieDetailView: View {
 /// Spielt einen Mediathek-Film direkt von den Servern der Sender (MP4) mit Apples Player.
 struct MediathekPlayer: View {
     let url: URL
+    /// Untertitel-Datei (TTML/WebVTT), falls bekannt.
+    var subtitleURL: URL? = nil
+    /// Titel zum Nachschlagen der Untertitel bei MediathekViewWeb, wenn `subtitleURL` fehlt.
+    var title: String? = nil
+    var channel: String? = nil
+
     @State private var player = AVPlayer()
+    @State private var cues: [SubtitleCue] = []
+    @State private var caption: String?
+    @State private var timeObserver: Any?
+    @AppStorage("mediathekSubtitles") private var showSubtitles = false
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         VideoPlayer(player: player)
             .ignoresSafeArea()
+            .overlay(alignment: .bottom) {
+                if showSubtitles, let caption {
+                    Text(caption)
+                        .font(UI.font(38, .semibold))
+                        .multilineTextAlignment(.center)
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, UI.s(24))
+                        .padding(.vertical, UI.s(10))
+                        .background(Color.black.opacity(0.7), in: RoundedRectangle(cornerRadius: UI.s(10)))
+                        .padding(.bottom, UI.s(90))
+                        .allowsHitTesting(false)
+                }
+            }
             .onAppear {
                 player.replaceCurrentItem(with: AVPlayerItem(url: url))
                 player.play()
+                // Untertitel zur Abspielposition nachführen (viermal pro Sekunde)
+                timeObserver = player.addPeriodicTimeObserver(forInterval: CMTime(value: 1, timescale: 4),
+                                                              queue: .main) { time in
+                    caption = SubtitleParser.text(at: time.seconds, in: cues)
+                }
             }
+            .task { await loadSubtitles() }
             .onDisappear {
+                if let timeObserver { player.removeTimeObserver(timeObserver) }
+                timeObserver = nil
                 player.pause()
                 player.replaceCurrentItem(with: nil)
             }
@@ -520,5 +551,19 @@ struct MediathekPlayer: View {
                     .padding()
             }
             #endif
+    }
+
+    private func loadSubtitles() async {
+        guard showSubtitles else { return }
+        var source = subtitleURL
+        if source == nil, let title, !title.isEmpty {
+            source = await MediathekSearchClient().subtitleURL(forVideo: url, title: title, channel: channel)
+        }
+        guard let source, let (data, _) = try? await URLSession.shared.data(from: source) else {
+            DebugLog.log("Mediathek: keine Untertitel gefunden")
+            return
+        }
+        cues = SubtitleParser.parse(data)
+        DebugLog.log("Mediathek: \(cues.count) Untertitel geladen")
     }
 }

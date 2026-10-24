@@ -59,6 +59,8 @@ final class AppModel: ObservableObject {
     @Published var showEPGOverview = false
     @Published var activeHLSReplay: (url: URL, startDate: Date?)?
     @Published var activeMediathekURL: URL?
+    /// Untertitel zum laufenden Mediathek-Video aus der Suche, falls vorhanden.
+    private(set) var activeMediathekSubtitle: URL?
     @Published var searchResultDialog: (title: String, results: [MediathekSearchResult])?
 
     let settings: AppSettings
@@ -457,7 +459,8 @@ final class AppModel: ObservableObject {
         }
     }
 
-    func playMediathekResult(url: URL) {
+    func playMediathekResult(url: URL, subtitleURL: URL? = nil) {
+        activeMediathekSubtitle = subtitleURL
         player.stop()
         searchResultDialog = nil
         activeMediathekURL = url

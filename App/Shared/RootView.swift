@@ -11,6 +11,11 @@ struct RootView: View {
             Color.black.ignoresSafeArea()
             PlayerSurface(player: player.mediaPlayer)
                 .ignoresSafeArea()
+            // Timeshift: Mitschnitt-Wiedergabe liegt über dem stumm weiterlaufenden Live-Bild.
+            PlayerSurface(player: player.replayPlayer)
+                .ignoresSafeArea()
+                .opacity(player.isReplaying ? 1 : 0)
+                .allowsHitTesting(false)
             OverlayLayer(model: model, player: player)
         }
         .modifier(RemoteInputModifier(model: model))
@@ -41,7 +46,7 @@ struct RootView: View {
             set: { if !$0 { model.mediathekPlayClosed() } }
         )) {
             if let url = model.activeMediathekURL {
-                MediathekPlayer(url: url)
+                MediathekPlayer(url: url, subtitleURL: model.activeMediathekSubtitle)
             }
         }
         #else
@@ -67,7 +72,7 @@ struct RootView: View {
             set: { if !$0 { model.mediathekPlayClosed() } }
         )) {
             if let url = model.activeMediathekURL {
-                MediathekPlayer(url: url)
+                MediathekPlayer(url: url, subtitleURL: model.activeMediathekSubtitle)
                     .frame(minWidth: 1100, minHeight: 720)
             }
         }
@@ -78,7 +83,8 @@ struct RootView: View {
         )) {
             if let dialog = model.searchResultDialog {
                 MediathekSearchResultsView(title: dialog.title, results: dialog.results) { url in
-                    model.playMediathekResult(url: url)
+                    let subtitle = dialog.results.first { $0.bestPlaybackURL == url }?.subtitleURL
+                    model.playMediathekResult(url: url, subtitleURL: subtitle)
                 }
                 #if os(macOS)
                 .frame(minWidth: 800, minHeight: 600)

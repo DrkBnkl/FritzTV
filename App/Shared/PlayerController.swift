@@ -49,9 +49,12 @@ final class PlayerController: ObservableObject {
     @Published private(set) var hasSubtitles = false
     @Published private(set) var stats = PlaybackStatistics()
     /// Zeitversatz zum Live-Bild aus Sprüngen und beendeten Pausen.
-    @Published private(set) var behindLive: TimeInterval = 0
     /// Gesetzt, solange das Bild angehalten ist.
     @Published private(set) var pausedSince: Date?
+    /// Zweiter Player für Timeshift: spielt die Mitschnittdatei, solange nicht live geschaut wird.
+    let replayPlayer = VLCMediaPlayer()
+    /// Gesetzt, solange der Mitschnitt statt des Live-Bilds zu sehen ist.
+    @Published private(set) var isReplaying = false
 
     var onVariantSuccess: ((_ variantKey: String, _ channelID: String, _ failedEarlierIDs: [String]) -> Void)?
     var onAllCandidatesFailed: ((_ channelName: String) -> Void)?
@@ -94,14 +97,30 @@ final class PlayerController: ObservableObject {
     /// Fehlgeschlagene Varianten in der aktuellen Sitzung vor einem erfolgreichen Bild.
     private var failedInThisSessionForCurrent: [String] = []
     private var retryTask: Task<Void, Never>?
+
+    // Timeshift über Mitschnitt in eine Datei (Vorbild dream Player)
+    /// Datei, in die der Live-Player gerade mitschreibt.
+    private var recordingURL: URL?
+    /// Beginn des Mitschnitts (erste Daten); Grundlage für die Position in der Datei.
+    private var recordingStartedAt: Date?
+    private var recordingLimit: Int64 = 0
+    private var lastRecordingCheck = Date.distantPast
+    /// Mitschreiben verhindert die Wiedergabe (z. B. fehlt das sout-Modul): für diese Sitzung aus.
+    private var recordingDisabledForSession = false
+    /// Nach dem Fehlschlag aller Varianten ein letzter Versuch ohne Mitschnitt.
+    private var triedWithoutRecording = false
+    /// Position im Mitschnitt in Sekunden ab Dateianfang, gemessen mit eigener Uhr
+    /// (unabhängig von den Zeitstempeln im TS-Strom).
+    private var replayAnchor: (fileSeconds: Double, at: Date, paused: Bool) = (0, .distantPast, true)
+    private var replayPausePending = false
+
+    /// Ergänzte RTSP-Links nach PID-Änderungen, je Variante (Sitzung).
+    private var pidOverrides: [String: URL] = [:]
+    /// Varianten, für die in dieser Sitzung schon PIDs ergänzt wurden (nur ein Versuch je Variante).
+    private var pidCheckDone: Set<String> = []
     /// Variante, die in dieser Sitzung zuletzt Bild geliefert hat, je Sender.
     private var workingVariant: [String: String] = [:]
     private var currentVariantKey = ""
-
-    private var timeshiftDirectory: URL {
-        FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("Timeshift", isDirectory: true)
-    }
 
     // MARK: Abspielen
 
@@ -122,6 +141,7 @@ final class PlayerController: ObservableObject {
         candidateIndex = 0
         failedCandidates = 0
         failedInThisSessionForCurrent = []
+        triedWithoutRecording = false
         self.channel = ordered[0]
         self.options = options
         retryTask?.cancel()
@@ -135,7 +155,10 @@ final class PlayerController: ObservableObject {
         retryTask?.cancel()
         reconnectTask?.cancel()
         reconnectTask = nil
+        stopReplay()
         mediaPlayer.stop()
+        recordingURL = nil
+        recordingStartedAt = nil
         TimeshiftBufferManager.shared.cleanup()
         status = .idle
         wasPlaying = false
@@ -145,6 +168,7 @@ final class PlayerController: ObservableObject {
         monitorTask?.cancel()
         reconnectTask?.cancel()
         reconnectTask = nil
+        stopReplay()
         mediaPlayer.stop()
         wasPlaying = false
         status = .failed(title: title, message: message, hint: hint)
@@ -162,8 +186,9 @@ final class PlayerController: ObservableObject {
         guard let channel, let options else { return }
         monitorTask?.cancel()
         mediaPlayer.stop()
-        behindLive = 0
-        pausedSince = nil
+        stopReplay()
+        recordingURL = nil
+        recordingStartedAt = nil
         nowPlaying = nil
         vlcTitle = nil
         currentProgram = nil
@@ -172,20 +197,14 @@ final class PlayerController: ObservableObject {
         stats = PlaybackStatistics()
         refreshEPGPrograms()
 
-        let media = VLCMedia(url: channel.streamURL)
+        let media = VLCMedia(url: pidOverrides[channel.id] ?? channel.streamURL)
         media.addOption(":network-caching=\(options.networkCachingMs)")
         if options.rtspTCP || forceTCP {
             media.addOption(":rtsp-tcp")
         }
         DebugLog.log("Öffne Stream per \(options.rtspTCP || forceTCP ? "TCP" : "UDP"), Puffer \(options.networkCachingMs) ms")
-        if options.timeshift {
-            let safety = TimeshiftBufferManager.shared.checkStorageSafety()
-            if safety.isSafe {
-                try? FileManager.default.createDirectory(at: TimeshiftBufferManager.shared.bufferDirectory, withIntermediateDirectories: true)
-                media.addOption(":input-timeshift-path=\(TimeshiftBufferManager.shared.bufferDirectory.path)")
-            } else {
-                DebugLog.log("Timeshift deaktiviert: \(safety.reason ?? "Speicher voll")")
-            }
+        if options.timeshift && !recordingDisabledForSession && !triedWithoutRecording {
+            startRecording(on: media, channel: channel)
         }
         mediaPlayer.media = media
         mediaPlayer.setDeinterlaceFilter(options.deinterlace && !channel.isHD ? "yadif" : nil)
@@ -231,6 +250,13 @@ final class PlayerController: ObservableObject {
             if !wasPlaying {
                 wasPlaying = true
                 failedCandidates = 0
+                if recordingURL != nil {
+                    recordingStartedAt = Date()
+                } else if triedWithoutRecording && options?.timeshift == true && !recordingDisabledForSession {
+                    // Erst ohne Mitschnitt kam Bild: das Mitschreiben war schuld.
+                    recordingDisabledForSession = true
+                    DebugLog.log("Timeshift-Mitschnitt verhindert die Wiedergabe – für diese Sitzung abgeschaltet")
+                }
                 if let channel {
                     workingVariant[currentVariantKey] = channel.id
                     onVariantSuccess?(currentVariantKey, channel.id, failedInThisSessionForCurrent)
@@ -264,6 +290,31 @@ final class PlayerController: ObservableObject {
         if Date().timeIntervalSince(lastEPGRefresh) > 15 {
             refreshEPGPrograms()
         }
+        pollTimeshift()
+        checkForChangedPIDs()
+    }
+
+    /// Kommt nach einigen Sekunden kein Bild (oder gar nichts), prüfen, ob die PMT Spuren nennt,
+    /// die der RTSP-Link nicht anfordert, und den Sender einmal mit ergänzten PIDs neu öffnen.
+    private func checkForChangedPIDs() {
+        guard let channel, channel.kind == .tv, !pidCheckDone.contains(channel.id) else { return }
+        let elapsed = Date().timeIntervalSince(openedAt)
+        let noPicture = mediaPlayer.videoSize.width == 0 && !mediaPlayer.hasVideoOut
+        guard elapsed > 6, noPicture else { return }
+
+        let trackIDs = (indexes(mediaPlayer.videoTrackIndexes)
+                        + indexes(mediaPlayer.audioTrackIndexes)
+                        + indexes(mediaPlayer.videoSubTitlesIndexes)).map(Int.init)
+        let missing = channel.missingPIDs(trackIDs: trackIDs)
+        guard !missing.isEmpty else {
+            if elapsed > 11 { pidCheckDone.insert(channel.id) }
+            return
+        }
+        pidCheckDone.insert(channel.id)
+        guard let url = channel.streamURL(addingPIDs: missing) else { return }
+        pidOverrides[channel.id] = url
+        DebugLog.log("PIDs geändert bei \(channel.name): ergänze \(missing) und verbinde neu")
+        scheduleReconnect(after: 1)
     }
 
     /// Titel der laufenden Sendung, wie VLC ihn für das ausgewählte Programm meldet.
@@ -337,7 +388,17 @@ final class PlayerController: ObservableObject {
             return
         }
         
-        // Alle Varianten wurden erfolglos probiert
+        // Alle Varianten wurden erfolglos probiert. Lief der Mitschnitt mit, einmal ohne ihn
+        // versuchen: Fehlt VLC das Modul zum Mitschreiben, käme sonst nie ein Bild.
+        if recordingURL != nil && !triedWithoutRecording {
+            triedWithoutRecording = true
+            failedCandidates = 0
+            candidateIndex = 0
+            channel = candidates.first
+            DebugLog.log("Keine Variante liefert Bild – letzter Versuch ohne Timeshift-Mitschnitt")
+            scheduleReconnect(after: 1)
+            return
+        }
         let channelName = channel?.displayName ?? "Sender"
         DebugLog.log("Keine Variante von \(channelName) liefert Bild.")
         setFailed(
@@ -393,47 +454,145 @@ final class PlayerController: ObservableObject {
         }
     }
 
-    // MARK: Timeshift (Prototyp mit dem eingebauten Timeshift von VLC)
+    // MARK: Timeshift über Mitschnitt in eine Datei
+    //
+    // Der Live-Player zeigt das Bild und schreibt den Strom gleichzeitig in eine TS-Datei
+    // (eine RTSP-Sitzung, ein Tuner). Anhalten oder Zurückspulen startet den zweiten Player auf
+    // dieser Datei; der Live-Player läuft stumm weiter und schreibt mit. „Live“ oder Aufholen bis
+    // zum Dateiende schaltet zurück.
+
+    private func startRecording(on media: VLCMedia, channel: Channel) {
+        let manager = TimeshiftBufferManager.shared
+        manager.cleanup()
+        try? FileManager.default.createDirectory(at: manager.bufferDirectory, withIntermediateDirectories: true)
+        let limit = manager.recordingLimitBytes()
+        guard limit >= 500 * 1024 * 1024 else {
+            DebugLog.log("Timeshift aus: zu wenig freier Speicher (\(limit / 1_048_576) MB nutzbar)")
+            return
+        }
+        let url = manager.newSegmentURL(channelKey: channel.groupKey)
+        media.addOption(TimeshiftBufferManager.soutDisplayAndRecordOption(destination: url))
+        recordingURL = url
+        recordingLimit = limit
+        lastRecordingCheck = Date()
+        DebugLog.log("Timeshift-Mitschnitt nach \(url.lastPathComponent), höchstens \(limit / 1_048_576) MB")
+    }
 
     var canTimeshift: Bool {
-        options?.timeshift == true && (status == .playing || status == .paused)
+        options?.timeshift == true && recordingURL != nil && recordingStartedAt != nil && status == .playing
+    }
+
+    /// Länge des bisherigen Mitschnitts in Sekunden.
+    private var recordedSeconds: Double {
+        recordingStartedAt.map { Date().timeIntervalSince($0) } ?? 0
+    }
+
+    /// Aktuelle Position im Mitschnitt in Sekunden ab Dateianfang.
+    private var replayPosition: Double {
+        replayAnchor.paused ? replayAnchor.fileSeconds
+                            : replayAnchor.fileSeconds + Date().timeIntervalSince(replayAnchor.at)
     }
 
     /// Aktueller Rückstand zum Live-Bild in Sekunden.
     var currentBehind: TimeInterval {
-        behindLive + (pausedSince.map { Date().timeIntervalSince($0) } ?? 0)
+        isReplaying ? max(0, recordedSeconds - replayPosition) : 0
     }
 
-    var isTimeshifted: Bool { pausedSince != nil || behindLive > 0.5 }
+    var isTimeshifted: Bool { isReplaying }
 
     func togglePause() {
-        guard canTimeshift else { return }
-        if let since = pausedSince {
-            behindLive += Date().timeIntervalSince(since)
-            pausedSince = nil
-            mediaPlayer.play()
-        } else {
-            pausedSince = Date()
-            mediaPlayer.pause()
+        if isReplaying {
+            if replayAnchor.paused {
+                replayAnchor = (replayPosition, Date(), false)
+                pausedSince = nil
+                replayPausePending = false
+                replayPlayer.play()
+            } else {
+                replayAnchor = (replayPosition, Date(), true)
+                pausedSince = Date()
+                replayPlayer.pause()
+            }
+        } else if canTimeshift {
+            startReplay(behind: 0, paused: true)
         }
     }
 
     func jump(seconds: Int) {
-        guard canTimeshift else { return }
+        let step = Double(seconds)
         if seconds < 0 {
-            mediaPlayer.jumpBackward(Int32(-seconds))
-            behindLive += Double(-seconds)
-        } else if currentBehind <= Double(seconds) {
-            goLive()
-        } else {
-            mediaPlayer.jumpForward(Int32(seconds))
-            behindLive -= Double(seconds)
+            if isReplaying {
+                let target = max(0, replayPosition + step)
+                replayPlayer.jumpBackward(Int32(replayPosition - target))
+                replayAnchor = (target, Date(), replayAnchor.paused)
+            } else if canTimeshift {
+                startReplay(behind: -step, paused: false)
+            }
+        } else if isReplaying {
+            if currentBehind <= step + 1 {
+                goLive()
+            } else {
+                replayPlayer.jumpForward(Int32(seconds))
+                replayAnchor = (replayPosition + step, Date(), replayAnchor.paused)
+            }
         }
     }
 
     func goLive() {
-        guard isTimeshifted else { return }
-        restart()
+        guard isReplaying else { return }
+        DebugLog.log("Timeshift: zurück zu Live")
+        stopReplay()
+    }
+
+    private func startReplay(behind: Double, paused: Bool) {
+        guard let url = recordingURL, let options else { return }
+        // 1 s Abstand zum Dateiende: VLC puffert, die Datei hinkt dem Bild leicht hinterher.
+        let position = max(0, recordedSeconds - behind - 1)
+        let media = VLCMedia(url: url)
+        media.addOption(":start-time=\(String(format: "%.1f", position))")
+        media.addOption(":file-caching=300")
+        replayPlayer.media = media
+        replayPlayer.setDeinterlaceFilter(options.deinterlace && channel?.isHD == false ? "yadif" : nil)
+        replayPlayer.play()
+        replayAnchor = (position, Date(), paused)
+        replayPausePending = paused
+        pausedSince = paused ? Date() : nil
+        mediaPlayer.audio?.isMuted = true
+        isReplaying = true
+        DebugLog.log("Timeshift: Wiedergabe aus dem Mitschnitt ab \(Int(position)) s (\(Int(behind)) s hinter Live)")
+    }
+
+    private func stopReplay() {
+        replayPausePending = false
+        pausedSince = nil
+        if isReplaying || replayPlayer.media != nil {
+            replayPlayer.stop()
+        }
+        mediaPlayer.audio?.isMuted = false
+        isReplaying = false
+    }
+
+    /// Läuft mit der Überwachung zweimal pro Sekunde.
+    private func pollTimeshift() {
+        if isReplaying {
+            // Angehalten starten: erst pausieren, wenn VLC wirklich spielt.
+            if replayPausePending && replayPlayer.isPlaying {
+                replayPausePending = false
+                replayPlayer.pause()
+            }
+            // Bis zum Dateiende aufgeholt: zurück zum Live-Bild.
+            let state = replayPlayer.state
+            if state == .ended || state == .error || (!replayAnchor.paused && currentBehind < 1) {
+                goLive()
+            }
+        }
+
+        // Größe des Mitschnitts prüfen (alle 10 s).
+        guard let url = recordingURL, Date().timeIntervalSince(lastRecordingCheck) > 10 else { return }
+        lastRecordingCheck = Date()
+        if TimeshiftBufferManager.shared.fileSize(at: url) > recordingLimit {
+            DebugLog.log("Timeshift-Mitschnitt hat die Grenze von \(recordingLimit / 1_048_576) MB erreicht – Puffer wird neu begonnen")
+            restart()
+        }
     }
 
     // MARK: Ton und Untertitel
