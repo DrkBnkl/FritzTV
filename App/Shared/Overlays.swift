@@ -429,7 +429,6 @@ struct ChannelListOverlay: View {
         let current = (isCurrent ? player.currentProgram : nil)
             ?? player.epgStore.currentProgram(forChannelNames: entry.group.epgNames)
         let next = player.epgStore.nextProgram(forChannelNames: entry.group.epgNames)
-        let prime = primeProgram(for: entry)
 
         return VStack(alignment: .leading, spacing: UI.s(24)) {
             // Sender-Kopfzeile
@@ -535,47 +534,8 @@ struct ChannelListOverlay: View {
                 .background(Color.white.opacity(0.04), in: RoundedRectangle(cornerRadius: UI.s(16)))
             }
 
-            // 20:15 HIGHLIGHT (nur anzeigen, solange die Sendung heute noch nicht vorüber ist)
-            if let prime {
-                VStack(alignment: .leading, spacing: UI.s(8)) {
-                    Text("HEUTE 20:15")
-                        .font(UI.font(20, .bold))
-                        .foregroundStyle(Color.yellow)
-                    Text(prime.title)
-                        .font(UI.font(26, .bold))
-                        .foregroundStyle(UI.text)
-                        .lineLimit(1)
-                    let sub = (prime.subtitle ?? prime.description)?.trimmingCharacters(in: .whitespacesAndNewlines)
-                    if let sub, !sub.isEmpty, sub != "(null)" {
-                        Text(sub)
-                            .font(UI.font(20))
-                            .foregroundStyle(UI.secondary)
-                            .lineLimit(2)
-                    }
-                }
-                .padding(UI.s(20))
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(Color.yellow.opacity(0.08), in: RoundedRectangle(cornerRadius: UI.s(16)))
-                .overlay(RoundedRectangle(cornerRadius: UI.s(16)).stroke(Color.yellow.opacity(0.2), lineWidth: 1))
-            }
-
             Spacer(minLength: 0)
         }
-    }
-
-    private func primeProgram(for entry: LineupEntry) -> EPGProgram? {
-        let calendar = Calendar.current
-        let now = Date()
-        var components = calendar.dateComponents([.year, .month, .day], from: now)
-        components.hour = 20
-        components.minute = 15
-        guard let primeDate = calendar.date(from: components) else { return nil }
-        guard let prog = player.epgStore.schedule(forChannelNames: entry.group.epgNames)?.program(at: primeDate) else {
-            return nil
-        }
-        // Nur einblenden, wenn die 20:15-Sendung noch nicht vorbei ist
-        guard prog.endDate > now else { return nil }
-        return prog
     }
 
     static func formatTime(_ date: Date) -> String {
