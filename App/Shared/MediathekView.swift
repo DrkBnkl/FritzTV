@@ -14,19 +14,21 @@ final class MediathekStore: ObservableObject {
 
     @Published private(set) var state: LoadState = .loading
     @Published private(set) var movies: [MediathekMovie] = []
+    @Published private(set) var currentType: String = "movie"
     /// Lokale Änderungen der Merkliste, bis die Liste neu geladen wird.
     @Published private var bookmarkOverrides: [Int: Bool] = [:]
     private(set) var client: Press2arrClient?
 
-    func load(address: String) async {
+    func load(address: String, type: String = "movie") async {
         state = .loading
+        currentType = type
         do {
             let client = try Press2arrClient(address: address)
             self.client = client
-            movies = try await client.mediathekMovies()
+            movies = try await client.mediathekMovies(type: type)
             bookmarkOverrides = [:]
             state = .ready
-            DebugLog.log("Mediathek: \(movies.count) Filme, Kino \(movies.filter(\.ranInCinema).count), Presse \(movies.filter(\.reviewedInPress).count)")
+            DebugLog.log("Mediathek (\(type)): \(movies.count) Titel, Kino \(movies.filter(\.ranInCinema).count), Presse \(movies.filter(\.reviewedInPress).count)")
         } catch Press2arrClient.ClientError.badAddress {
             state = .failed("Keine gültige press2arr-Adresse. Bitte in den Einstellungen unter „Mediathek“ eintragen.")
         } catch {
@@ -61,12 +63,19 @@ struct MediathekView: View {
     @State private var cinemaOnly = false
     @State private var pressOnly = false
     @State private var sort: MediathekSort = .rating
+    @State private var surpriseMovie: MediathekMovie?
+    @State private var isSeries = false
 
     var body: some View {
         NavigationStack {
             content
                 .navigationDestination(for: MediathekMovie.self) { movie in
                     MovieDetailView(movie: movie, store: store)
+                }
+                .sheet(item: $surpriseMovie) { movie in
+                    NavigationStack {
+                        MovieDetailView(movie: movie, store: store)
+                    }
                 }
                 #if os(macOS)
                 .toolbar {
@@ -130,10 +139,16 @@ struct MediathekView: View {
     private var header: some View {
         VStack(alignment: .leading, spacing: UI.s(20)) {
             Text("Mediathek").font(UI.font(64, .heavy))
-            Text("\(store.movies.count) Spielfilme bei ARD, ZDF, arte, 3sat und Co.")
+            Text("\(store.movies.count) \(isSeries ? "Serien" : "Spielfilme") bei ARD, ZDF, arte, 3sat und Co.")
                 .font(UI.font(28))
                 .foregroundStyle(UI.secondary)
             HStack(spacing: UI.s(24)) {
+                chip(isSeries ? "Kategorie: Serien" : "Kategorie: Filme", on: true) {
+                    isSeries.toggle()
+                    Task {
+                        await store.load(address: settings.press2arrAddress, type: isSeries ? "series" : "movie")
+                    }
+                }
                 chip(cinemaOnly ? "✓ Lief im Kino" : "Lief im Kino", on: cinemaOnly) { cinemaOnly.toggle() }
                 chip(pressOnly ? "✓ In der Presse besprochen" : "In der Presse besprochen", on: pressOnly) { pressOnly.toggle() }
                 if cinemaOnly || pressOnly {
@@ -141,6 +156,12 @@ struct MediathekView: View {
                         let all = MediathekSort.allCases
                         sort = all[((all.firstIndex(of: sort) ?? 0) + 1) % all.count]
                     }
+                }
+                chip("🎲 Überrasch mich!", on: false) {
+                    let candidates = cinemaOnly || pressOnly
+                        ? MediathekShelf.filtered(store.movies, cinema: cinemaOnly, press: pressOnly)
+                        : store.movies
+                    surpriseMovie = candidates.randomElement()
                 }
             }
         }

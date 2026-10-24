@@ -4,6 +4,7 @@ FritzTV.xcodeproj/
 xcuserdata/
 .swiftpm/
 .build/
+build/
 DerivedData/
 # Lokale Protokolle
 *.log

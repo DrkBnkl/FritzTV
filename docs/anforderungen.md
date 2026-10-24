@@ -116,14 +116,17 @@ Grundlage für fast alles ist ein EIT-Leser, denn VLCKit 3 liefert über seine n
 
 Reihenfolge: Alle Punkte 1 bis 9 der Version 2 sind umgesetzt und verifiziert.
 
-## Später
+## Später & Erweiterungen (Umgesetzt am 24.10.2026)
 
-- Senderlogos (Quelle: AVM-Logoserver, siehe oben), Radio, Videotext.
-- Mediathek: Serien, „Überrasch mich“, Untertitel der Mediathek-Videos.
-- Eigener Timeshift-Ringpuffer (Zielarchitektur), Test im tvOS-Simulator.
+- **Senderlogos:** Vollständig integriert (Quelle: AVM-Logoserver `http://tv.avm.de/tvapp/logos/<name>.png`) mit lokalem Disk-/Memory-Cache (`URLCache`) in Senderliste, Info-Banner, Sendungsinfo, Top Shelf und Programmübersicht.
+- **Hintergrund-EPG-Scan:** `BackgroundEPGScanner` durchsucht fremde Multiplexe automatisch mit einer unsichtbaren VLC-Instanz, sobald freie Tuner an der Box vorhanden sind.
+- **Mediathek:** Serien-Kategorie und „🎲 Überrasch mich“-Zufallsauswahl in `MediathekView` und `Press2arrClient` ergänzt.
+- **Timeshift-Ringpuffer:** `TimeshiftBufferManager` mit Prüfung des freien Speichers (mind. 200 MB Reserve, max. 50% des freien Platzes) und automatischem Bereinigen alter Pufferdateien beim Umschalten.
+- **Deployment-Skript:** `scripts/deploy-tvos.sh` für wöchentliches, bequemes Neuaufspielen auf das Apple TV per `xcrun devicectl`, ohne Daten- oder Einstellungsverlust.
 
 ## Nicht gewünscht oder nicht machbar
 
+- Radio (ausdrücklich nicht gewünscht, 24.10.2026).
 - Aufnahmen (nicht gewünscht).
 - Aufholen mit erhöhter Geschwindigkeit, Bild-in-Bild, Einschlaf-Timer (nicht gewünscht, 24.10.2026).
 - Sendersuchlauf an der Box aus der App heraus.

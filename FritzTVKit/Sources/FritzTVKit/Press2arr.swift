@@ -157,10 +157,14 @@ public struct Press2arrClient: Sendable {
         let items: [MediathekMovie]
     }
 
-    /// Alle Spielfilme mit aktuellem Mediathek-Treffer, nach Bewertung sortiert.
+    /// Alle Spielfilme oder Serien mit aktuellem Mediathek-Treffer, nach Bewertung sortiert.
     /// Reihen und Filter bildet die App selbst, so reicht ein Abruf.
-    public func mediathekMovies(limit: Int = 2000) async throws -> [MediathekMovie] {
-        let data = try await get("api/mediathek", query: [URLQueryItem(name: "limit", value: String(limit))])
+    public func mediathekMovies(type: String? = nil, limit: Int = 2000) async throws -> [MediathekMovie] {
+        var query = [URLQueryItem(name: "limit", value: String(limit))]
+        if let type, !type.isEmpty {
+            query.append(URLQueryItem(name: "type", value: type))
+        }
+        let data = try await get("api/mediathek", query: query)
         return try Self.decoder.decode(MediathekResponse.self, from: data).items
     }
 

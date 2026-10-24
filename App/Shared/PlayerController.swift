@@ -125,6 +125,7 @@ final class PlayerController: ObservableObject {
         reconnectTask?.cancel()
         reconnectTask = nil
         mediaPlayer.stop()
+        TimeshiftBufferManager.shared.cleanup()
         status = .idle
         wasPlaying = false
     }
@@ -166,8 +167,13 @@ final class PlayerController: ObservableObject {
         }
         DebugLog.log("Öffne Stream per \(options.rtspTCP || forceTCP ? "TCP" : "UDP"), Puffer \(options.networkCachingMs) ms")
         if options.timeshift {
-            try? FileManager.default.createDirectory(at: timeshiftDirectory, withIntermediateDirectories: true)
-            media.addOption(":input-timeshift-path=\(timeshiftDirectory.path)")
+            let safety = TimeshiftBufferManager.shared.checkStorageSafety()
+            if safety.isSafe {
+                try? FileManager.default.createDirectory(at: TimeshiftBufferManager.shared.bufferDirectory, withIntermediateDirectories: true)
+                media.addOption(":input-timeshift-path=\(TimeshiftBufferManager.shared.bufferDirectory.path)")
+            } else {
+                DebugLog.log("Timeshift deaktiviert: \(safety.reason ?? "Speicher voll")")
+            }
         }
         mediaPlayer.media = media
         mediaPlayer.setDeinterlaceFilter(options.deinterlace && !channel.isHD ? "yadif" : nil)

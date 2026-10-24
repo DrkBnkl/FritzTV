@@ -18,6 +18,9 @@ struct EPGOverviewView: View {
                 Divider().background(Color.white.opacity(0.15))
                 channelList
             }
+            .onAppear {
+                model.triggerEPGScan()
+            }
             .background(Color(red: 0.05, green: 0.05, blue: 0.07).ignoresSafeArea())
             .preferredColorScheme(.dark)
         }
@@ -53,6 +56,16 @@ struct EPGOverviewView: View {
                 #if os(macOS)
                 .keyboardShortcut(.cancelAction)
                 #endif
+
+            if model.epgScanner.isScanning {
+                HStack(spacing: UI.s(8)) {
+                    ProgressView()
+                    Text("Lade EPG: \(model.epgScanner.currentScanningChannel ?? "") …")
+                        .font(UI.font(20))
+                        .foregroundStyle(UI.secondary)
+                }
+                .padding(.leading, UI.s(16))
+            }
         }
         .padding(.horizontal, UI.s(48))
         .padding(.vertical, UI.s(24))
@@ -92,13 +105,14 @@ struct EPGOverviewView: View {
                     Text("\(entry.number)")
                         .font(UI.font(32, .bold))
                         .foregroundStyle(UI.secondary)
-                        .frame(width: UI.s(60), alignment: .leading)
+                        .frame(width: UI.s(50), alignment: .leading)
+                    ChannelLogoView(channelName: entry.group.displayName, height: UI.s(32), maxWidth: UI.s(72))
                     Text(entry.group.displayName)
-                        .font(UI.font(32, .semibold))
+                        .font(UI.font(30, .semibold))
                         .foregroundStyle(UI.text)
                         .lineLimit(1)
                 }
-                .frame(width: UI.s(280), alignment: .leading)
+                .frame(width: UI.s(320), alignment: .leading)
             }
             .buttonStyle(.plain)
 

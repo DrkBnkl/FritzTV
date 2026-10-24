@@ -4,6 +4,12 @@ import SwiftUI
 struct FritzTVApp: App {
     @StateObject private var model = AppModel()
 
+    init() {
+        let memoryCapacity = 50 * 1024 * 1024
+        let diskCapacity = 100 * 1024 * 1024
+        URLCache.shared = URLCache(memoryCapacity: memoryCapacity, diskCapacity: diskCapacity)
+    }
+
     var body: some Scene {
         WindowGroup {
             RootView(model: model, player: model.player)

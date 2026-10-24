@@ -63,6 +63,7 @@ final class AppModel: ObservableObject {
 
     let settings: AppSettings
     let player: PlayerController
+    let epgScanner = BackgroundEPGScanner()
 
     private var catalog: ChannelCatalog?
     private var preferences: LineupPreferences
@@ -523,6 +524,14 @@ final class AppModel: ObservableObject {
 
     func mediathekClosed() {
         resume()
+    }
+
+    // MARK: EPG-Hintergrundscan
+
+    func triggerEPGScan() {
+        guard let catalog else { return }
+        let host = settings.host.isEmpty ? (connectedHost ?? "fritz.box") : settings.host
+        epgScanner.startScanIfNeeded(catalog: catalog, epgStore: player.epgStore, host: host)
     }
 
     // MARK: Senderplätze bearbeiten

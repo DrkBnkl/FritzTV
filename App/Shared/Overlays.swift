@@ -70,7 +70,8 @@ struct InfoBanner: View {
                 HStack(spacing: UI.s(48)) {
                     VStack(spacing: UI.s(4)) {
                         Text("\(entry.number)").font(UI.font(96, .heavy))
-                        Text(entry.group.displayName).font(UI.font(30, .semibold)).lineLimit(1)
+                        ChannelLogoView(channelName: entry.group.displayName, height: UI.s(44), maxWidth: UI.s(180))
+                        Text(entry.group.displayName).font(UI.font(26, .semibold)).lineLimit(1)
                     }
                     .frame(width: UI.s(220))
 
@@ -185,9 +186,12 @@ struct InfoPanel: View {
                 HStack(alignment: .top, spacing: UI.s(48)) {
                     // JETZT
                     VStack(alignment: .leading, spacing: UI.s(10)) {
-                        Text("JETZT · \(model.currentEntry?.number ?? 0) \(model.currentEntry?.group.displayName ?? "")")
-                            .font(UI.font(24, .semibold))
-                            .foregroundStyle(UI.secondary)
+                        HStack(spacing: UI.s(12)) {
+                            ChannelLogoView(channelName: model.currentEntry?.group.displayName ?? "", height: UI.s(28), maxWidth: UI.s(90))
+                            Text("JETZT · \(model.currentEntry?.number ?? 0) \(model.currentEntry?.group.displayName ?? "")")
+                                .font(UI.font(24, .semibold))
+                                .foregroundStyle(UI.secondary)
+                        }
 
                         if let current = player.currentProgram {
                             HStack(spacing: UI.s(16)) {
@@ -421,11 +425,12 @@ struct ChannelListOverlay: View {
 
         let isDead = entry.group.areAllVariantsDead(deadIDs: model.settings.deadChannelIDs)
 
-        return HStack(spacing: UI.s(24)) {
+        return HStack(spacing: UI.s(20)) {
             Text("\(entry.number)")
                 .font(UI.font(32, .bold))
                 .foregroundStyle(quiet)
-                .frame(width: UI.s(72), alignment: .leading)
+                .frame(width: UI.s(60), alignment: .leading)
+            ChannelLogoView(channelName: entry.group.displayName, height: UI.s(32), maxWidth: UI.s(72))
             VStack(alignment: .leading, spacing: UI.s(4)) {
                 Text(entry.group.displayName + (entry.isNew ? " · neu" : ""))
                     .font(UI.font(32, .semibold))
