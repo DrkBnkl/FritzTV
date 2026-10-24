@@ -1,0 +1,102 @@
+name: FritzTV
+options:
+  bundleIdPrefix: de.home
+  createIntermediateGroups: true
+  deploymentTarget:
+    tvOS: "17.0"
+    macOS: "14.0"
+
+packages:
+  FritzTVKit:
+    path: FritzTVKit
+  VLCKitSPM:
+    url: https://github.com/koombea/vlckit-spm
+    from: 3.6.0
+
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    MARKETING_VERSION: "0.1"
+    CURRENT_PROJECT_VERSION: "1"
+    CODE_SIGN_STYLE: Automatic
+
+targets:
+  FritzTV-tvOS:
+    type: application
+    platform: tvOS
+    sources:
+      - path: App/Shared
+      - path: App/tvOS
+    dependencies:
+      - package: FritzTVKit
+      - package: VLCKitSPM
+        product: VLCKitSPM
+    info:
+      path: App/tvOS/Info.plist
+      properties:
+        CFBundleDisplayName: FritzTV
+        UIUserInterfaceStyle: Dark
+        NSLocalNetworkUsageDescription: Zum Abrufen der Sender von deiner FRITZ!Box.
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
+          NSAllowsArbitraryLoadsForMedia: true
+          NSExceptionDomains:
+            fritz.box:
+              NSExceptionAllowsInsecureHTTPLoads: true
+              NSIncludesSubdomains: true
+            fritz.repeater:
+              NSExceptionAllowsInsecureHTTPLoads: true
+              NSIncludesSubdomains: true
+    settings:
+      base:
+        PRODUCT_NAME: FritzTV
+        PRODUCT_BUNDLE_IDENTIFIER: de.home.fritztv
+        TARGETED_DEVICE_FAMILY: "3"
+
+  FritzTV-macOS:
+    type: application
+    platform: macOS
+    sources:
+      - path: App/Shared
+      - path: App/macOS
+    dependencies:
+      - package: FritzTVKit
+      - package: VLCKitSPM
+        product: VLCKitSPM
+    info:
+      path: App/macOS/Info.plist
+      properties:
+        CFBundleDisplayName: FritzTV
+        LSApplicationCategoryType: public.app-category.entertainment
+        NSLocalNetworkUsageDescription: Zum Abrufen der Sender von deiner FRITZ!Box.
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
+          NSAllowsArbitraryLoadsForMedia: true
+          NSExceptionDomains:
+            fritz.box:
+              NSExceptionAllowsInsecureHTTPLoads: true
+              NSIncludesSubdomains: true
+            fritz.repeater:
+              NSExceptionAllowsInsecureHTTPLoads: true
+              NSIncludesSubdomains: true
+    settings:
+      base:
+        PRODUCT_NAME: FritzTV
+        PRODUCT_BUNDLE_IDENTIFIER: de.home.fritztv.mac
+        CODE_SIGN_IDENTITY: "-"
+        ENABLE_HARDENED_RUNTIME: NO
+        ENABLE_APP_SANDBOX: NO
+
+schemes:
+  FritzTV-tvOS:
+    build:
+      targets:
+        FritzTV-tvOS: all
+    run:
+      config: Debug
+  FritzTV-macOS:
+    build:
+      targets:
+        FritzTV-macOS: all
+    run:
+      config: Debug

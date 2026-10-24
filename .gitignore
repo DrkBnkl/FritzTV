@@ -1,0 +1,10 @@
+# Von XcodeGen erzeugt (setup.sh)
+FritzTV.xcodeproj/
+# Xcode / SwiftPM
+xcuserdata/
+.swiftpm/
+.build/
+DerivedData/
+# Lokale Protokolle
+*.log
+.DS_Store
