@@ -252,6 +252,10 @@ final class AppModel: ObservableObject {
 
     private func performTune(to number: Int) {
         guard let entry = lineup?.entry(number: number) else { return }
+        if let old = currentEntry, old.id == entry.id, player.status == .playing {
+            showBanner()
+            return
+        }
         if let old = currentEntry, old.id != entry.id {
             previousKey = Self.key(old)
             settings.recordRecent(key: Self.key(old), currentKey: Self.key(entry))
@@ -576,7 +580,8 @@ final class AppModel: ObservableObject {
     }
 
     func epgOverviewClosed() {
-        resume()
+        // Stream läuft unterbrechungsfrei weiter; keinesfalls resume() aufrufen,
+        // da sonst ein gerade gewählter Sender durch doppelten Start abgebrochen würde.
     }
 
     // MARK: EPG-Hintergrundscan

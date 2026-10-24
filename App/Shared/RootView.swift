@@ -59,7 +59,7 @@ struct RootView: View {
         }
         .sheet(isPresented: $model.showEPGOverview, onDismiss: { model.epgOverviewClosed() }) {
             EPGOverviewView(model: model, player: player)
-                .frame(minWidth: 1050, idealWidth: 1250, maxWidth: .infinity, minHeight: 650, idealHeight: 780, maxHeight: .infinity)
+                .frame(minWidth: 1100, idealWidth: 1320, maxWidth: .infinity, minHeight: 700, idealHeight: 820, maxHeight: .infinity)
         }
         #endif
         .sheet(isPresented: Binding(

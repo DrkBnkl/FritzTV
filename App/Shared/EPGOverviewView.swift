@@ -11,12 +11,12 @@ struct EPGOverviewView: View {
     @FocusState private var isFocused: Bool
     @State private var sheetKeyMonitor: Any?
 
-    // Timeline-Konfiguration
-    private let pointsPerMinute: CGFloat = 3.5
+    // Timeline-Konfiguration mit gut lesbarer, größerer Typografie
+    private let pointsPerMinute: CGFloat = 4.0
     private let totalHours: Int = 24
-    private let rowHeight: CGFloat = 58
-    private let rulerHeight: CGFloat = 38
-    private let channelColumnWidth: CGFloat = 210
+    private let rowHeight: CGFloat = 68
+    private let rulerHeight: CGFloat = 48
+    private let channelColumnWidth: CGFloat = 250
 
     init(model: AppModel, player: PlayerController, scanner: BackgroundEPGScanner? = nil) {
         self.model = model
@@ -156,13 +156,13 @@ struct EPGOverviewView: View {
         HStack(alignment: .center, spacing: 16) {
             HStack(alignment: .firstTextBaseline, spacing: 14) {
                 Text("Programmübersicht")
-                    .font(UI.font(26, .heavy))
+                    .font(UI.font(30, .heavy))
                     .foregroundStyle(.white)
                     .lineLimit(1)
 
                 Text(headerDateString)
-                    .font(UI.font(16, .medium))
-                    .foregroundStyle(Color.white.opacity(0.6))
+                    .font(UI.font(18, .medium))
+                    .foregroundStyle(Color.white.opacity(0.65))
                     .lineLimit(1)
             }
 
@@ -172,12 +172,12 @@ struct EPGOverviewView: View {
                 HStack(spacing: 6) {
                     ProgressView().controlSize(.small)
                     Text("Lade EPG (\(ch)) …")
-                        .font(UI.font(13, .regular))
-                        .foregroundStyle(Color.white.opacity(0.6))
+                        .font(UI.font(15, .regular))
+                        .foregroundStyle(Color.white.opacity(0.65))
                 }
-                .padding(.horizontal, 10)
-                .padding(.vertical, 4)
-                .background(Color.white.opacity(0.06), in: Capsule())
+                .padding(.horizontal, 12)
+                .padding(.vertical, 5)
+                .background(Color.white.opacity(0.08), in: Capsule())
             }
 
             // Schnell-Sprung zu "Jetzt"
@@ -186,25 +186,25 @@ struct EPGOverviewView: View {
                     proxy.scrollTo("timeline_now", anchor: .leading)
                 }
             } label: {
-                HStack(spacing: 6) {
-                    Circle().fill(Color.red).frame(width: 7, height: 7)
+                HStack(spacing: 7) {
+                    Circle().fill(Color.red).frame(width: 8, height: 8)
                     Text("Jetzt")
-                        .font(UI.font(15, .semibold))
+                        .font(UI.font(17, .semibold))
                 }
                 .foregroundStyle(.white)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 7)
-                .background(Color.white.opacity(0.12), in: Capsule())
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
+                .background(Color.white.opacity(0.14), in: Capsule())
             }
             .buttonStyle(.plain)
             .focusable(false)
 
             Text("Esc: Schließen")
-                .font(UI.font(13, .regular))
-                .foregroundStyle(Color.white.opacity(0.4))
+                .font(UI.font(15, .regular))
+                .foregroundStyle(Color.white.opacity(0.45))
         }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 12)
+        .padding(.horizontal, 22)
+        .padding(.vertical, 14)
         .background(Color(red: 0.08, green: 0.08, blue: 0.10))
     }
 
@@ -221,15 +221,15 @@ struct EPGOverviewView: View {
                 // Linke fixierte Senderspalte
                 VStack(alignment: .leading, spacing: 0) {
                     // Eckbereich in Höhe des Zeitstrahls
-                    HStack(spacing: 6) {
+                    HStack(spacing: 8) {
                         Image(systemName: "tv")
-                            .font(.system(size: 13, weight: .bold))
-                            .foregroundStyle(Color.white.opacity(0.5))
+                            .font(.system(size: 15, weight: .bold))
+                            .foregroundStyle(Color.white.opacity(0.55))
                         Text("Sender")
-                            .font(UI.font(13, .bold))
-                            .foregroundStyle(Color.white.opacity(0.5))
+                            .font(UI.font(16, .bold))
+                            .foregroundStyle(Color.white.opacity(0.55))
                     }
-                    .padding(.horizontal, 12)
+                    .padding(.horizontal, 14)
                     .frame(width: channelColumnWidth, height: rulerHeight, alignment: .leading)
                     .background(Color(red: 0.09, green: 0.09, blue: 0.12))
 
@@ -282,16 +282,16 @@ struct EPGOverviewView: View {
         let isCurrent = entry.number == model.currentNumber
         let isSelected = selectedChannelNumber == entry.number
 
-        return HStack(spacing: 8) {
+        return HStack(spacing: 10) {
             Text("\(entry.number)")
-                .font(UI.font(14, .bold))
-                .foregroundStyle(isCurrent ? UI.accent : Color.white.opacity(0.45))
-                .frame(width: 26, alignment: .trailing)
+                .font(UI.font(18, .bold))
+                .foregroundStyle(isCurrent ? UI.accent : Color.white.opacity(0.5))
+                .frame(width: 34, alignment: .trailing)
 
-            ChannelLogoView(channelName: entry.group.displayName, height: 22, maxWidth: 36)
+            ChannelLogoView(channelName: entry.group.displayName, height: 26, maxWidth: 46)
 
             Text(entry.group.displayName)
-                .font(UI.font(14, .semibold))
+                .font(UI.font(17, .semibold))
                 .foregroundStyle(isCurrent ? UI.accent : Color.white)
                 .lineLimit(1)
 
@@ -299,17 +299,17 @@ struct EPGOverviewView: View {
 
             if isCurrent {
                 Text("LÄUFT")
-                    .font(UI.font(9, .heavy))
+                    .font(UI.font(11, .heavy))
                     .foregroundStyle(Color.black)
-                    .padding(.horizontal, 5)
-                    .padding(.vertical, 2)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 3)
                     .background(UI.accent, in: Capsule())
             }
         }
-        .padding(.horizontal, 10)
+        .padding(.horizontal, 12)
         .frame(width: channelColumnWidth, height: rowHeight, alignment: .leading)
         .background(
-            isSelected ? Color.white.opacity(0.12) : (isCurrent ? Color.white.opacity(0.05) : Color.clear)
+            isSelected ? Color.white.opacity(0.14) : (isCurrent ? Color.white.opacity(0.06) : Color.clear)
         )
         .contentShape(Rectangle())
         .onTapGesture {
@@ -326,13 +326,13 @@ struct EPGOverviewView: View {
             if items.isEmpty || (items.count == 1 && items[0].isGap) {
                 HStack {
                     Text("Keine Programmdaten empfangen")
-                        .font(UI.font(12, .regular))
+                        .font(UI.font(14, .regular))
                         .foregroundStyle(Color.white.opacity(0.35))
-                        .padding(.horizontal, 12)
+                        .padding(.horizontal, 14)
                     Spacer()
                 }
-                .frame(width: 300, height: rowHeight - 8)
-                .background(Color.white.opacity(0.03), in: RoundedRectangle(cornerRadius: 6))
+                .frame(width: 340, height: rowHeight - 8)
+                .background(Color.white.opacity(0.03), in: RoundedRectangle(cornerRadius: 8))
                 Spacer(minLength: 0)
             } else {
                 ForEach(items) { item in
@@ -343,11 +343,6 @@ struct EPGOverviewView: View {
                             width: item.width,
                             now: now
                         )
-                        .onTapGesture {
-                            selectedChannelNumber = entry.number
-                            model.tune(to: entry.number)
-                            dismiss()
-                        }
                     } else {
                         Spacer(minLength: item.width)
                             .frame(width: item.width)
@@ -375,24 +370,24 @@ struct EPGOverviewView: View {
                 let isMidnight = Calendar.current.component(.hour, from: date) == 0 && isFullHour
 
                 VStack(alignment: .leading, spacing: 3) {
-                    HStack(alignment: .center, spacing: 4) {
+                    HStack(alignment: .center, spacing: 5) {
                         Rectangle()
-                            .fill(isFullHour ? Color.white.opacity(0.7) : Color.white.opacity(0.3))
-                            .frame(width: isFullHour ? 2 : 1, height: isFullHour ? 11 : 6)
+                            .fill(isFullHour ? Color.white.opacity(0.75) : Color.white.opacity(0.35))
+                            .frame(width: isFullHour ? 2 : 1, height: isFullHour ? 14 : 8)
 
                         if isMidnight {
                             Text(dayName(from: date))
-                                .font(UI.font(11, .bold))
+                                .font(UI.font(13, .bold))
                                 .foregroundStyle(UI.accent)
                         }
 
                         Text(Self.formatTime(date))
-                            .font(UI.font(isFullHour ? 12 : 11, isFullHour ? .bold : .regular))
-                            .foregroundStyle(isFullHour ? Color.white.opacity(0.9) : Color.white.opacity(0.45))
+                            .font(UI.font(isFullHour ? 15 : 13, isFullHour ? .bold : .medium))
+                            .foregroundStyle(isFullHour ? Color.white.opacity(0.95) : Color.white.opacity(0.5))
                     }
                     Spacer(minLength: 0)
                 }
-                .padding(.top, 6)
+                .padding(.top, 8)
                 .frame(width: 30 * pointsPerMinute, height: rulerHeight, alignment: .topLeading)
             }
         }
@@ -410,7 +405,7 @@ struct EPGOverviewView: View {
                     .frame(width: 30 * pointsPerMinute)
                     .overlay(alignment: .leading) {
                         Rectangle()
-                            .fill(isFullHour ? Color.white.opacity(0.06) : Color.white.opacity(0.025))
+                            .fill(isFullHour ? Color.white.opacity(0.07) : Color.white.opacity(0.03))
                             .frame(width: 1)
                     }
             }
@@ -427,23 +422,23 @@ struct EPGOverviewView: View {
             ZStack(alignment: .topLeading) {
                 // Rote vertikale Linie durch alle Senderzeilen
                 Rectangle()
-                    .fill(Color.red.opacity(0.9))
+                    .fill(Color.red.opacity(0.92))
                     .frame(width: 2)
                     .frame(maxHeight: .infinity)
                     .offset(x: xPos - 1)
 
                 // Roter Badge im Zeitstrahl-Kopf
-                HStack(spacing: 4) {
-                    Circle().fill(Color.white).frame(width: 5, height: 5)
-                    Text(Self.formatTime(now))
-                        .font(UI.font(10, .heavy))
+                HStack(spacing: 5) {
+                    Circle().fill(Color.white).frame(width: 6, height: 6)
+                    Text("JETZT \(Self.formatTime(now))")
+                        .font(UI.font(12, .heavy))
                         .foregroundStyle(.white)
                 }
-                .padding(.horizontal, 6)
-                .padding(.vertical, 3)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
                 .background(Color.red, in: Capsule())
-                .shadow(color: .black.opacity(0.5), radius: 3)
-                .offset(x: max(0, xPos - 26), y: 4)
+                .shadow(color: .black.opacity(0.6), radius: 4)
+                .offset(x: max(0, xPos - 40), y: 4)
                 .id("timeline_now")
             }
         }
@@ -489,7 +484,7 @@ struct EPGOverviewView: View {
 
             // Programm-Kachel
             let cardSeconds = effectiveEnd.timeIntervalSince(effectiveStart)
-            let cardWidth = max(26, CGFloat(cardSeconds / 60.0) * pointsPerMinute - 3)
+            let cardWidth = max(36, CGFloat(cardSeconds / 60.0) * pointsPerMinute - 3)
 
             items.append(TimelineItem(
                 id: prog.id,
@@ -571,32 +566,32 @@ private struct ProgramBlockView: View {
     @State private var isHovered = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            HStack(alignment: .center, spacing: 4) {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(alignment: .center, spacing: 6) {
                 Text("\(EPGOverviewView.formatTime(prog.startDate)) – \(EPGOverviewView.formatTime(prog.endDate))")
-                    .font(UI.font(11, .semibold))
-                    .foregroundStyle(isLive ? UI.accent : Color.white.opacity(0.65))
+                    .font(UI.font(13, .bold))
+                    .foregroundStyle(isLive ? UI.accent : Color.white.opacity(0.7))
                     .lineLimit(1)
 
                 if isLive {
                     Text("LIVE")
-                        .font(UI.font(9, .heavy))
+                        .font(UI.font(11, .heavy))
                         .foregroundStyle(Color.black)
-                        .padding(.horizontal, 4)
-                        .padding(.vertical, 1)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 2)
                         .background(UI.accent, in: Capsule())
                 }
             }
 
             Text(prog.title)
-                .font(UI.font(13, .bold))
+                .font(UI.font(16, .bold))
                 .foregroundStyle(Color.white)
                 .lineLimit(1)
 
             if width >= 140, let sub = prog.subtitle ?? prog.description, !sub.isEmpty {
                 Text(sub)
-                    .font(UI.font(11, .regular))
-                    .foregroundStyle(Color.white.opacity(0.55))
+                    .font(UI.font(13, .regular))
+                    .foregroundStyle(Color.white.opacity(0.6))
                     .lineLimit(1)
             }
 
@@ -604,31 +599,31 @@ private struct ProgramBlockView: View {
                 GeometryReader { geo in
                     let progress = prog.progress(at: now)
                     ZStack(alignment: .leading) {
-                        Capsule().fill(Color.white.opacity(0.15))
+                        Capsule().fill(Color.white.opacity(0.18))
                         Capsule().fill(UI.accent)
-                            .frame(width: max(geo.size.width * progress, 4))
+                            .frame(width: max(geo.size.width * progress, 5))
                     }
                 }
-                .frame(height: 3)
-                .padding(.top, 1)
+                .frame(height: 4)
+                .padding(.top, 2)
             }
         }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 5)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
         .frame(width: width, alignment: .leading)
         .frame(maxHeight: .infinity)
         .background(
-            RoundedRectangle(cornerRadius: 7)
+            RoundedRectangle(cornerRadius: 8)
                 .fill(
                     isHovered
-                        ? Color.white.opacity(0.18)
-                        : (isLive ? Color(red: 0.85, green: 0.42, blue: 0.05).opacity(0.25) : Color.white.opacity(0.06))
+                        ? Color.white.opacity(0.2)
+                        : (isLive ? Color(red: 0.85, green: 0.42, blue: 0.05).opacity(0.28) : Color.white.opacity(0.07))
                 )
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 7)
+            RoundedRectangle(cornerRadius: 8)
                 .strokeBorder(
-                    isLive ? UI.accent.opacity(0.8) : (isHovered ? Color.white.opacity(0.4) : Color.white.opacity(0.1)),
+                    isLive ? UI.accent.opacity(0.85) : (isHovered ? Color.white.opacity(0.45) : Color.white.opacity(0.12)),
                     lineWidth: isLive ? 1.5 : 1
                 )
         )
