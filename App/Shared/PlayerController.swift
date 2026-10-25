@@ -216,6 +216,8 @@ final class PlayerController: ObservableObject {
         stopReplay()
         mediaPlayer.audio?.isMuted = true
         mediaPlayer.stop()
+        lastDisplayedPictures = 0
+        lastPictureChangeAt = Date()
         recordingURL = nil
         recordingStartedAt = nil
         recordingLimit = 0
@@ -231,9 +233,6 @@ final class PlayerController: ObservableObject {
         if options.rtspTCP || forceTCP {
             media.addOption(":rtsp-tcp")
         }
-        media.addOption(":input-fast-seek")
-        media.addOption(":sout-mux-caching=0")
-        media.addOption(":avcodec-hurry-up=1")
         DebugLog.log("Öffne Stream per \(options.rtspTCP || forceTCP ? "TCP" : "UDP"), Puffer \(options.networkCachingMs) ms")
         if options.timeshift {
             prepareRecording()
@@ -373,19 +372,22 @@ final class PlayerController: ObservableObject {
             return
         }
 
-        // Nicht in den ersten 3 Sekunden nach Verbindungsaufbau prüfen
-        guard Date().timeIntervalSince(openedAt) > 3.0 else {
+        // Nicht in den ersten 4 Sekunden nach Verbindungsaufbau prüfen
+        guard Date().timeIntervalSince(openedAt) > 4.0 else {
             lastPictureChangeAt = Date()
             return
         }
 
         if let vlcStats = mediaPlayer.media?.statistics {
             let currentPictures = Int(vlcStats.displayedPictures)
+            // Erst prüfen, wenn überhaupt schon Bilder empfangen und angezeigt wurden
+            guard currentPictures > 0 else { return }
+
             if currentPictures > lastDisplayedPictures {
                 lastDisplayedPictures = currentPictures
                 lastPictureChangeAt = Date()
-            } else if Date().timeIntervalSince(lastPictureChangeAt) > 3.5 {
-                DebugLog.log("Stream eingefroren (keine neuen Bilder seit 3.5 s, Stand: \(currentPictures)) – Reconnect")
+            } else if Date().timeIntervalSince(lastPictureChangeAt) > 4.0 {
+                DebugLog.log("Stream eingefroren (keine neuen Bilder seit 4.0 s, Stand: \(currentPictures)) – Reconnect")
                 lastPictureChangeAt = Date()
                 lastDisplayedPictures = 0
                 scheduleReconnect(after: 1)
@@ -682,7 +684,6 @@ final class PlayerController: ObservableObject {
         let position = max(0, recordedSeconds - behind - 1)
         let media = VLCMedia(url: url)
         media.addOption(":file-caching=300")
-        media.addOption(":input-fast-seek")
         replayPlayer.media = media
         replayPlayer.setDeinterlaceFilter(options.deinterlace && channel?.isHD == false ? "yadif" : nil)
         mediaPlayer.audio?.isMuted = true

@@ -11,16 +11,12 @@ struct RootView: View {
             Color.black.ignoresSafeArea()
             PlayerSurface(player: player.mediaPlayer)
                 .ignoresSafeArea()
+                .opacity(model.settings.blackScreenOnZap && player.status.isTransitioning && !player.isReplaying ? 0 : 1)
             // Timeshift: Mitschnitt-Wiedergabe liegt über dem stumm weiterlaufenden Live-Bild.
             PlayerSurface(player: player.replayPlayer)
                 .ignoresSafeArea()
                 .opacity(player.isReplaying ? 1 : 0)
                 .allowsHitTesting(false)
-            // Schwarzer Bildschirm beim Umschalten: Blendet Standbilder des alten Senders aus,
-            // bis der neue Stream decodiert wird.
-            if model.settings.blackScreenOnZap && player.status.isTransitioning && !player.isReplaying {
-                Color.black.ignoresSafeArea()
-            }
             if let replay = model.activeHLSReplay {
                 HLSReplayPlayerView(url: replay.url, startDate: replay.startDate) {
                     model.hlsReplayClosed()
