@@ -64,6 +64,7 @@ Grundsatz: keine Wischgesten, alles über Tasten und Klicks.
 
 - Deinterlacing für SD-Sender (576i, betrifft vor allem die Privaten).
 - Bildwiederholrate an die Quelle anpassen (50 Hz für deutsches TV) über AVDisplayManager.
+- Schwarzer Bildschirm beim Umschalten (Black Screen on Zap): blendet Standbilder des alten Senders beim Umschalten sofort aus, bis der neue Stream decodiert wird (einstellbar, Standard aktiv).
 - Bildformat automatisch, manuell umschaltbar.
 
 ## Ton und Untertitel
@@ -71,7 +72,7 @@ Grundsatz: keine Wischgesten, alles über Tasten und Klicks.
 - Auswahl von Audiospur und Untertiteln.
 - Dolby Digital (AC3) unverändert an Soundbar/AV-Receiver durchreichen.
 - Audiodeskription standardmäßig meiden; Standardsprache Deutsch.
-- Tonverzögerung einstellbar (Startwert −125 ms wie im dream Player, am eigenen Gerät justieren).
+- Tonverzögerung getrennt einstellbar für Stereo/PCM (`audioDelayMs`) und Dolby Digital AC3 (`audioDelayAC3Ms`, Startwerte je −125 ms). Die App erkennt AC3-Spuren automatisch und schaltet die Latenz um.
 - DVB-Untertitel; Videotext-Untertitel (Tafel 150/777) über die Untertitelauswahl. Videotext als eigene Ansicht ist mit VLCKit 3 nicht möglich (siehe unten).
 
 ## Sendungsinfo
@@ -122,10 +123,14 @@ Grundlage für fast alles ist ein EIT-Leser, denn VLCKit 3 liefert über seine n
 8. **Untertitel:** DVB-Untertitel und Videotext-Untertitel (Tafel 150/777). Prüfung ergab: das verwendete Paket `VLCKitSPM` enthält `zvbi 0.2.35` (`vbi_decode_teletext`, `zvbi.c`) für tvOS und macOS. Spurnamen wurden lesbar aufbereitet („Deutsch“, „Videotext (Tafel 150)“, „Dolby Digital“); Verfügbarkeitsstatus `hasSubtitles` signalisiert, wenn keine Untertitel vorliegen.
 9. **Infos zur Bildqualität:** Auflösung (z. B. `1920×1080 (1080p)`), Bitrate (in Mbit/s), verlorene Bilder und Abrisse aus `VLCMediaStats` in der Sendungsinfo. Zusätzlich Signalstärke (dB), Signal-Rausch-Verhältnis SNR (dB) und Tuner-Auslastung der Box über UPnP-SOAP ohne Passwort direkt in der Sendungsinfo integriert.
 
-Stand 24.10.2026: Alle Punkte 1 bis 9 sowie die Erweiterungen sind vollständig implementiert, mit 45 Unit Tests verifiziert und erfolgreich für macOS 14 und tvOS 17 gebaut.
+Stand 25.10.2026: Alle Punkte 1 bis 9 sowie die Erweiterungen sind vollständig implementiert, mit 45 Unit Tests verifiziert und erfolgreich für macOS 14 und tvOS 17 gebaut.
 
-## Später & Erweiterungen (Umgesetzt am 24.10.2026)
+## Später & Erweiterungen (Umgesetzt 24./25.10.2026)
 
+- **Schwarzer Bildschirm beim Zappen (Black Screen on Zap):** Altes Standbild wird beim Umschalten sofort schwarz überblendet, bis der neue Sender decodiert ist; Info-Banner zeigt Sender währenddessen an.
+- **Getrennte Tonverzögerung:** Eigene Justierung für Stereo/PCM (`audioDelayMs`) und Dolby Digital AC3 (`audioDelayAC3Ms`) mit automatischer Umschaltung bei AC3-Spuren.
+- **VLCKit-Tuning für Zapping & Timeshift:** Ergänzung von `:input-fast-seek`, `:sout-mux-caching=0` und `:avcodec-hurry-up=1` zur Beschleunigung von Keyframe-Sprüngen und sofortiger Pufferbereitschaft.
+- **Tuner-Schutz beim EPG-Scan:** `BackgroundEPGScanner` prüft vor jedem Scan, ob mindestens 2 Tuner frei sind (`freeCount >= 2` bei Mehr-Tuner-Boxen), damit andere Haushaltsmitglieder nicht blockiert werden.
 - **Senderlogos:** Vollständig integriert (Quelle: AVM-Logoserver `http://tv.avm.de/tvapp/logos/<name>.png`) mit lokalem Disk-/Memory-Cache (`URLCache`) in Senderliste, Info-Banner, Sendungsinfo, Top Shelf und Programmübersicht.
 - **Hintergrund-EPG-Scan:** `BackgroundEPGScanner` durchsucht fremde Multiplexe automatisch mit einer unsichtbaren VLC-Instanz, sobald freie Tuner an der Box vorhanden sind.
 - **Mediathek:** Serien-Kategorie und „🎲 Überrasch mich“-Zufallsauswahl in `MediathekView` und `Press2arrClient` ergänzt.

@@ -19,9 +19,11 @@ struct SettingsView: View {
         case rtspTCP = 3
         case preferHD = 4
         case deinterlaceSD = 5
-        case timeshift = 6
-        case audioDelay = 7
-        case bannerSeconds = 8
+        case blackScreenOnZap = 6
+        case timeshift = 7
+        case audioDelay = 8
+        case audioDelayAC3 = 9
+        case bannerSeconds = 10
     }
 
     private let cachingValues = [500, 1000, 2000, 3000, 5000]
@@ -95,6 +97,11 @@ struct SettingsView: View {
                         .contentShape(Rectangle())
                         .onTapGesture { focusedIndex = SettingsRow.deinterlaceSD.rawValue }
 
+                    Toggle("Schwarzer Bildschirm beim Umschalten", isOn: $settings.blackScreenOnZap)
+                        .modifier(CursorRowHighlight(selected: focusedIndex == SettingsRow.blackScreenOnZap.rawValue))
+                        .contentShape(Rectangle())
+                        .onTapGesture { focusedIndex = SettingsRow.blackScreenOnZap.rawValue }
+
                     Toggle("Timeshift (Live-Bild anhalten)", isOn: $settings.timeshift)
                         .modifier(CursorRowHighlight(selected: focusedIndex == SettingsRow.timeshift.rawValue))
                         .contentShape(Rectangle())
@@ -104,12 +111,19 @@ struct SettingsView: View {
                     Toggle("Bildwiederholrate auf 50 Hz", isOn: $settings.match50Hz)
                     #endif
 
-                    Picker("Tonverzögerung", selection: $settings.audioDelayMs) {
+                    Picker("Tonverzögerung Stereo", selection: $settings.audioDelayMs) {
                         ForEach(delayValues, id: \.self) { Text("\($0) ms").tag($0) }
                     }
                     .modifier(CursorRowHighlight(selected: focusedIndex == SettingsRow.audioDelay.rawValue))
                     .contentShape(Rectangle())
                     .onTapGesture { focusedIndex = SettingsRow.audioDelay.rawValue }
+
+                    Picker("Tonverzögerung Dolby Digital (AC3)", selection: $settings.audioDelayAC3Ms) {
+                        ForEach(delayValues, id: \.self) { Text("\($0) ms").tag($0) }
+                    }
+                    .modifier(CursorRowHighlight(selected: focusedIndex == SettingsRow.audioDelayAC3.rawValue))
+                    .contentShape(Rectangle())
+                    .onTapGesture { focusedIndex = SettingsRow.audioDelayAC3.rawValue }
 
                     Picker("Sendungsinfo einblenden", selection: $settings.bannerSeconds) {
                         ForEach(bannerValues, id: \.self) { Text("\($0) s").tag($0) }
@@ -217,11 +231,16 @@ struct SettingsView: View {
             settings.preferHD = (delta > 0)
         case .deinterlaceSD:
             settings.deinterlaceSD = (delta > 0)
+        case .blackScreenOnZap:
+            settings.blackScreenOnZap = (delta > 0)
         case .timeshift:
             settings.timeshift = (delta > 0)
         case .audioDelay:
             let next = min(max(settings.audioDelayMs + delta * 25, -500), 500)
             settings.audioDelayMs = next
+        case .audioDelayAC3:
+            let next = min(max(settings.audioDelayAC3Ms + delta * 25, -500), 500)
+            settings.audioDelayAC3Ms = next
         case .bannerSeconds:
             if let idx = bannerValues.firstIndex(of: settings.bannerSeconds) {
                 let nextIdx = min(max(idx + delta, 0), bannerValues.count - 1)
@@ -245,9 +264,11 @@ struct SettingsView: View {
             settings.preferHD.toggle()
         case .deinterlaceSD:
             settings.deinterlaceSD.toggle()
+        case .blackScreenOnZap:
+            settings.blackScreenOnZap.toggle()
         case .timeshift:
             settings.timeshift.toggle()
-        case .audioDelay:
+        case .audioDelay, .audioDelayAC3:
             break
         case .bannerSeconds:
             adjustSetting(delta: 1)

@@ -12,6 +12,8 @@ final class AppSettings: ObservableObject {
     @Published var rtspTCP: Bool { didSet { defaults.set(rtspTCP, forKey: Keys.rtspTCP) } }
     @Published var deinterlaceSD: Bool { didSet { defaults.set(deinterlaceSD, forKey: Keys.deinterlaceSD) } }
     @Published var audioDelayMs: Int { didSet { defaults.set(audioDelayMs, forKey: Keys.audioDelayMs) } }
+    @Published var audioDelayAC3Ms: Int { didSet { defaults.set(audioDelayAC3Ms, forKey: Keys.audioDelayAC3Ms) } }
+    @Published var blackScreenOnZap: Bool { didSet { defaults.set(blackScreenOnZap, forKey: Keys.blackScreenOnZap) } }
     @Published var timeshift: Bool { didSet { defaults.set(timeshift, forKey: Keys.timeshift) } }
     @Published var bannerSeconds: Int { didSet { defaults.set(bannerSeconds, forKey: Keys.bannerSeconds) } }
     /// Adresse von press2arr („Lichtspiel“) auf der NAS für die Mediathek-Seite.
@@ -45,6 +47,8 @@ final class AppSettings: ObservableObject {
             Keys.rtspTCP: false,
             Keys.deinterlaceSD: true,
             Keys.audioDelayMs: -125,
+            Keys.audioDelayAC3Ms: -125,
+            Keys.blackScreenOnZap: true,
             Keys.timeshift: true,
             Keys.bannerSeconds: 15,
             Keys.match50Hz: true,
@@ -56,6 +60,8 @@ final class AppSettings: ObservableObject {
         rtspTCP = defaults.bool(forKey: Keys.rtspTCP)
         deinterlaceSD = defaults.bool(forKey: Keys.deinterlaceSD)
         audioDelayMs = defaults.integer(forKey: Keys.audioDelayMs)
+        audioDelayAC3Ms = defaults.object(forKey: Keys.audioDelayAC3Ms) != nil ? defaults.integer(forKey: Keys.audioDelayAC3Ms) : defaults.integer(forKey: Keys.audioDelayMs)
+        blackScreenOnZap = defaults.object(forKey: Keys.blackScreenOnZap) != nil ? defaults.bool(forKey: Keys.blackScreenOnZap) : true
         timeshift = defaults.bool(forKey: Keys.timeshift)
         let storedBanner = defaults.integer(forKey: Keys.bannerSeconds)
         bannerSeconds = storedBanner >= 15 ? storedBanner : 15
@@ -95,6 +101,8 @@ final class AppSettings: ObservableObject {
         static let rtspTCP = "rtspTCP"
         static let deinterlaceSD = "deinterlaceSD"
         static let audioDelayMs = "audioDelayMs"
+        static let audioDelayAC3Ms = "audioDelayAC3Ms"
+        static let blackScreenOnZap = "blackScreenOnZap"
         static let timeshift = "timeshift"
         static let bannerSeconds = "bannerSeconds"
         static let match50Hz = "match50Hz"

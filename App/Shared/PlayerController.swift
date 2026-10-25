@@ -14,6 +14,7 @@ struct PlaybackOptions: Equatable {
     var rtspTCP: Bool
     var deinterlace: Bool
     var audioDelayMs: Int
+    var audioDelayAC3Ms: Int
     var timeshift: Bool
 }
 
@@ -24,6 +25,15 @@ enum PlayerStatus: Equatable {
     case paused
     case reconnecting(seconds: Int)
     case failed(title: String, message: String, hint: String?)
+
+    var isTransitioning: Bool {
+        switch self {
+        case .connecting, .reconnecting, .idle:
+            return true
+        case .playing, .paused, .failed:
+            return false
+        }
+    }
 }
 
 /// Kapselt VLCKit: Abspielen eines RTSP-Streams der FRITZ!Box, Timeshift-Prototyp,
@@ -221,6 +231,9 @@ final class PlayerController: ObservableObject {
         if options.rtspTCP || forceTCP {
             media.addOption(":rtsp-tcp")
         }
+        media.addOption(":input-fast-seek")
+        media.addOption(":sout-mux-caching=0")
+        media.addOption(":avcodec-hurry-up=1")
         DebugLog.log("Öffne Stream per \(options.rtspTCP || forceTCP ? "TCP" : "UDP"), Puffer \(options.networkCachingMs) ms")
         if options.timeshift {
             prepareRecording()
@@ -277,8 +290,8 @@ final class PlayerController: ObservableObject {
                 failedInThisSessionForCurrent = []
                 DebugLog.log("Wiedergabe läuft (\(forceTCP || options?.rtspTCP == true ? "TCP" : "UDP")): Video \(mediaPlayer.videoSize), Tonspuren \(mediaPlayer.audioTrackNames as? [String] ?? [])")
                 selectPreferredAudioTrack()
-                // Die Tonverzögerung greift erst, wenn eine Tonspur aktiv ist.
-                mediaPlayer.currentAudioPlaybackDelay = (options?.audioDelayMs ?? 0) * 1000
+                // Die Tonverzögerung greift erst, wenn eine Tonspur aktiv ist (getrennt für AC3/Stereo).
+                applyAudioDelay()
                 if !isReplaying {
                     // Entmuten erst nach Spurwahl und einer kurzen Einpendelzeit (200 ms),
                     // damit unvollständige Audio-Frames zu Beginn und der Spurwechsel nicht krächzen/knacken.
@@ -669,6 +682,7 @@ final class PlayerController: ObservableObject {
         let position = max(0, recordedSeconds - behind - 1)
         let media = VLCMedia(url: url)
         media.addOption(":file-caching=300")
+        media.addOption(":input-fast-seek")
         replayPlayer.media = media
         replayPlayer.setDeinterlaceFilter(options.deinterlace && channel?.isHD == false ? "yadif" : nil)
         mediaPlayer.audio?.isMuted = true
@@ -725,7 +739,7 @@ final class PlayerController: ObservableObject {
                     if mediaPlayer.currentVideoSubTitleIndex >= 0 {
                         replayPlayer.currentVideoSubTitleIndex = mediaPlayer.currentVideoSubTitleIndex
                     }
-                    replayPlayer.currentAudioPlaybackDelay = (options?.audioDelayMs ?? 0) * 1000
+                    applyAudioDelay()
                 }
                 // Bei MPEG-TS greift ein Sprung erst, nachdem VLC PMT und PCR-PID gelesen hat.
                 if let targetSeconds = replaySeekPending {
@@ -793,7 +807,32 @@ final class PlayerController: ObservableObject {
         if isReplaying {
             replayPlayer.currentAudioTrackIndex = nextTrack
         }
+        applyAudioDelay()
         refreshTrackNames()
+    }
+
+    // MARK: Tonverzögerung
+
+    /// Ermittelt die passende Tonverzögerung (in ms) anhand der aktuell gewählten Tonspur (AC3 vs. Stereo/PCM).
+    private func currentTargetAudioDelay() -> Int {
+        guard let options else { return 0 }
+        let rawAudio = trackName(current: mediaPlayer.currentAudioTrackIndex,
+                                 names: mediaPlayer.audioTrackNames,
+                                 indexes: mediaPlayer.audioTrackIndexes) ?? ""
+        let isAC3 = rawAudio.localizedCaseInsensitiveContains("ac3")
+            || rawAudio.localizedCaseInsensitiveContains("dolby")
+            || rawAudio.localizedCaseInsensitiveContains("a52")
+            || rawAudio.localizedCaseInsensitiveContains("eac3")
+        return isAC3 ? options.audioDelayAC3Ms : options.audioDelayMs
+    }
+
+    /// Setzt die Tonverzögerung für den Haupt- und Replay-Player.
+    func applyAudioDelay() {
+        let delayMicroseconds = currentTargetAudioDelay() * 1000
+        mediaPlayer.currentAudioPlaybackDelay = delayMicroseconds
+        if isReplaying {
+            replayPlayer.currentAudioPlaybackDelay = delayMicroseconds
+        }
     }
 
     func cycleSubtitle() {

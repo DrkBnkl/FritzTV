@@ -274,6 +274,7 @@ final class AppModel: ObservableObject {
             rtspTCP: settings.rtspTCP,
             deinterlace: settings.deinterlaceSD,
             audioDelayMs: settings.audioDelayMs,
+            audioDelayAC3Ms: settings.audioDelayAC3Ms,
             timeshift: settings.timeshift
         )
     }

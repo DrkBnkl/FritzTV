@@ -78,10 +78,11 @@ final class BackgroundEPGScanner: ObservableObject {
                     continue
                 }
 
-                // Prüfen, ob noch mindestens ein Tuner der FRITZ!Box frei ist
+                // Prüfen, ob genügend Tuner der FRITZ!Box frei sind (mind. 2 bei Multi-Tuner-Boxen, damit andere Haushaltsmitglieder nicht blockiert werden)
                 if let status = await FritzBoxTunerClient().fetchStatus(host: host) {
-                    if status.freeCount < 1 {
-                        DebugLog.log("EPG-Hintergrundscan pausiert: alle Tuner belegt (\(status.usedCount)/\(status.totalTuners))")
+                    let requiredFree = status.totalTuners > 1 ? 2 : 1
+                    if status.freeCount < requiredFree {
+                        DebugLog.log("EPG-Hintergrundscan pausiert: nicht genügend freie Tuner (\(status.freeCount) frei, benötigt \(requiredFree) von \(status.totalTuners))")
                         break
                     }
                 }
