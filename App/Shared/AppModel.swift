@@ -61,6 +61,7 @@ final class AppModel: ObservableObject {
     @Published private(set) var loadState: LoadState = .loading
     @Published private(set) var lineup: ChannelLineup?
     @Published private(set) var currentNumber = 1
+    private var playingNumber: Int?
     @Published private(set) var previousKey: String?
     @Published private(set) var connectedHost: String?
     @Published private(set) var bannerVisible = false
@@ -248,14 +249,16 @@ final class AppModel: ObservableObject {
 
     private func performTune(to number: Int) {
         guard let entry = lineup?.entry(number: number) else { return }
-        if let old = currentEntry, old.id == entry.id, player.status == .playing {
+        if let playingNumber, playingNumber == entry.number, player.status == .playing {
+            currentNumber = entry.number
             showBanner()
             return
         }
-        if let old = currentEntry, old.id != entry.id {
-            previousKey = Self.key(old)
-            settings.recordRecent(key: Self.key(old), currentKey: Self.key(entry))
+        if let oldNumber = playingNumber, let oldEntry = lineup?.entry(number: oldNumber), oldEntry.id != entry.id {
+            previousKey = Self.key(oldEntry)
+            settings.recordRecent(key: Self.key(oldEntry), currentKey: Self.key(entry))
         }
+        playingNumber = entry.number
         currentNumber = entry.number
         settings.lastChannelKey = Self.key(entry)
         let candidates = entry.group.candidates(preferHD: settings.preferHD, deadIDs: settings.deadChannelIDs)
@@ -292,6 +295,7 @@ final class AppModel: ObservableObject {
 
     func resume() {
         guard let entry = currentEntry else { return }
+        playingNumber = entry.number
         let candidates = entry.group.candidates(preferHD: settings.preferHD, deadIDs: settings.deadChannelIDs)
         if let target = candidates.first, let freq = target.tuning?.frequencyMHz {
             epgScanner.yieldIfScanning(frequency: freq)
@@ -355,6 +359,10 @@ final class AppModel: ObservableObject {
         case .up: zap(+1)
         case .down: zap(-1)
         case .select:
+            if zapDebounceTask != nil {
+                tune(to: currentNumber)
+                return
+            }
             if case .failed = player.status {
                 tune(to: currentNumber)
             } else if player.status == .idle {

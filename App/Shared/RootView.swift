@@ -11,7 +11,11 @@ struct RootView: View {
             Color.black.ignoresSafeArea()
             PlayerSurface(player: player.mediaPlayer)
                 .ignoresSafeArea()
-                .opacity(model.settings.blackScreenOnZap && player.status.isTransitioning && !player.isReplaying ? 0 : 1)
+            // Schwarzer Bildschirm beim Umschalten: Blendet Standbilder des alten Senders aus,
+            // bis der neue Stream decodiert wird.
+            if model.settings.blackScreenOnZap && player.status.isTransitioning && !player.isReplaying {
+                Color.black.ignoresSafeArea()
+            }
             // Timeshift: Mitschnitt-Wiedergabe liegt über dem stumm weiterlaufenden Live-Bild.
             PlayerSurface(player: player.replayPlayer)
                 .ignoresSafeArea()
