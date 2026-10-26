@@ -66,6 +66,8 @@ targets:
         PRODUCT_NAME: FritzTV
         PRODUCT_BUNDLE_IDENTIFIER: de.home.fritztv
         TARGETED_DEVICE_FAMILY: "3"
+        # Icon aus App/tvOS/Assets.xcassets (erzeugt mit scripts/make-icons.py)
+        ASSETCATALOG_COMPILER_APPICON_NAME: "App Icon & Top Shelf Image"
 
   FritzTV-macOS:
     type: application
@@ -104,6 +106,7 @@ targets:
       base:
         PRODUCT_NAME: FritzTV
         PRODUCT_BUNDLE_IDENTIFIER: de.home.fritztv.mac
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         CODE_SIGN_IDENTITY: "-"
         ENABLE_HARDENED_RUNTIME: NO
         ENABLE_APP_SANDBOX: NO

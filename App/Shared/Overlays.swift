@@ -336,19 +336,10 @@ struct ChannelListOverlay: View {
     var body: some View {
         HStack(spacing: 0) {
             VStack(alignment: .leading, spacing: UI.s(16)) {
-                HStack(alignment: .firstTextBaseline) {
-                    Text("Sender").font(UI.font(44, .heavy))
-                    Spacer()
-                    Text("\(model.lineup?.entries.count ?? 0) Plätze · \(model.lineup?.hiddenGroups.count ?? 0) ausgeblendet")
-                        .font(UI.font(24))
-                        .foregroundStyle(UI.secondary)
-                }
-                .padding(.horizontal, UI.s(24))
-
                 ScrollViewReader { proxy in
                     ScrollView(.vertical, showsIndicators: false) {
                         VStack(alignment: .leading, spacing: UI.s(8)) {
-                            specialRow("Programmübersicht (EPG)", selected: selectedID == "epgOverview") {
+                            specialRow("Programmübersicht", selected: selectedID == "epgOverview") {
                                 model.openEPGOverview()
                             }
                             .id("epgOverview")
