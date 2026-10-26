@@ -1,5 +1,8 @@
 import SwiftUI
 import FritzTVKit
+#if os(tvOS)
+import UIKit
+#endif
 
 struct RootView: View {
     @ObservedObject var model: AppModel
@@ -101,6 +104,7 @@ struct RootView: View {
         .onChange(of: player.nowPlaying) { _, _ in model.programChanged() }
         .onChange(of: player.currentProgram) { _, _ in model.programChanged() }
         .onChange(of: player.status) { oldStatus, newStatus in
+            KeepAwake.update(for: newStatus)
             if oldStatus != .playing && newStatus == .playing {
                 model.showBanner()
             }
@@ -206,5 +210,39 @@ struct EPGPreviewPlacement: ViewModifier {
             .ignoresSafeArea()
             // Über die Programmübersicht legen; die Ansicht bleibt dieselbe (nur Lage und Größe ändern sich).
             .zIndex(frame == nil ? 0 : 5)
+    }
+}
+
+/// Hält Bildschirm wach, solange live gespielt wird. VLC meldet dem System – anders als Apples
+/// eigene Player – keine laufende Wiedergabe, sonst springt nach einigen Minuten der
+/// Bildschirmschoner (Apple TV) bzw. der Ruhezustand des Displays (Mac) an.
+/// Angehalten (Timeshift) darf der Bildschirmschoner wie üblich kommen.
+@MainActor
+enum KeepAwake {
+    #if os(macOS)
+    private static var activity: NSObjectProtocol?
+    #endif
+
+    static func update(for status: PlayerStatus) {
+        let awake: Bool
+        switch status {
+        case .playing, .connecting, .reconnecting:
+            awake = true
+        case .idle, .paused, .failed:
+            awake = false
+        }
+        #if os(tvOS)
+        if UIApplication.shared.isIdleTimerDisabled != awake {
+            UIApplication.shared.isIdleTimerDisabled = awake
+        }
+        #elseif os(macOS)
+        if awake, activity == nil {
+            activity = ProcessInfo.processInfo.beginActivity(
+                options: [.idleDisplaySleepDisabled, .userInitiated], reason: "Live-TV läuft")
+        } else if !awake, let current = activity {
+            ProcessInfo.processInfo.endActivity(current)
+            activity = nil
+        }
+        #endif
     }
 }
