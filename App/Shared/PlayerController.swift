@@ -352,7 +352,7 @@ final class PlayerController: ObservableObject {
 
         let trackIDs = (indexes(mediaPlayer.videoTrackIndexes)
                         + indexes(mediaPlayer.audioTrackIndexes)
-                        + indexes(mediaPlayer.videoSubTitlesIndexes)).map(Int.init)
+                        + indexes(mediaPlayer.videoSubTitlesIndexes)).map { Int($0) }
         let missing = channel.missingPIDs(trackIDs: trackIDs)
         guard !missing.isEmpty else {
             if elapsed > 11 { pidCheckDone.insert(channel.id) }
