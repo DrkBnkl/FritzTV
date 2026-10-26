@@ -159,7 +159,12 @@ struct EPGOverviewView: View {
 
             if model.epgScanner.isScanning, let ch = model.epgScanner.currentScanningChannel {
                 HStack(spacing: 6) {
+                    #if os(macOS)
                     ProgressView().controlSize(.small)
+                    #else
+                    // `controlSize` gibt es auf tvOS nicht.
+                    ProgressView().scaleEffect(0.6)
+                    #endif
                     Text("Lade EPG (\(ch)) …")
                         .font(UI.font(15, .regular))
                         .foregroundStyle(Color.white.opacity(0.65))
