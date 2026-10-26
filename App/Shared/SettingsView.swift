@@ -12,20 +12,21 @@ struct SettingsView: View {
     @State private var keyMonitor: Any?
     #endif
 
+    /// Zeilen für die Tastatursteuerung auf dem Mac (Reihenfolge = Reihenfolge auf dem Bildschirm).
     enum SettingsRow: Int, CaseIterable {
-        case channelManager = 0
-        case reloadList = 1
-        case networkCaching = 2
-        case rtspTCP = 3
-        case preferHD = 4
-        case deinterlaceSD = 5
-        case blackScreenOnZap = 6
-        case timeshift = 7
-        case timeshiftMinutes = 8
-        case audioDelay = 9
-        case audioDelayAC3 = 10
-        case bannerSeconds = 11
-        case backTarget = 12
+        case backTarget = 0
+        case bannerSeconds = 1
+        case channelManager = 2
+        case reloadList = 3
+        case networkCaching = 4
+        case rtspTCP = 5
+        case preferHD = 6
+        case deinterlaceSD = 7
+        case blackScreenOnZap = 8
+        case timeshift = 9
+        case timeshiftMinutes = 10
+        case audioDelay = 11
+        case audioDelayAC3 = 12
     }
 
     private let cachingValues = [500, 1000, 2000, 3000, 5000]
@@ -36,19 +37,30 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack {
             Form {
+                Section("Bedienung") {
+                    Picker("Zurück-Taste (\(UI.back)) öffnet", selection: $settings.backTarget) {
+                        ForEach(BackTarget.allCases) { Text($0.title).tag($0) }
+                    }
+                    .cursorRow(.backTarget, focusedIndex: $focusedIndex)
+
+                    Picker("Sendungsinfo einblenden", selection: $settings.bannerSeconds) {
+                        ForEach(bannerValues, id: \.self) { Text("\($0) s").tag($0) }
+                    }
+                    .cursorRow(.bannerSeconds, focusedIndex: $focusedIndex)
+                }
+
                 Section("Sendersortierung") {
                     NavigationLink(destination: ChannelManagerView(model: model), isActive: $showChannelManager) {
                         HStack {
                             Label("Sender sortieren & ausblenden", systemImage: "list.number")
                             Spacer()
                             Text("\(model.lineup?.entries.count ?? 0) aktiv · \(model.lineup?.hiddenGroups.count ?? 0) ausgeblendet")
+                                #if os(macOS)
                                 .foregroundStyle(.secondary)
+                                #endif
                         }
                     }
-                    .modifier(CursorRowHighlight(selected: focusedIndex == SettingsRow.channelManager.rawValue))
-                    .contentShape(Rectangle())
-                    .onTapGesture {
-                        focusedIndex = SettingsRow.channelManager.rawValue
+                    .cursorRow(.channelManager, focusedIndex: $focusedIndex) {
                         showChannelManager = true
                     }
 
@@ -65,22 +77,16 @@ struct SettingsView: View {
                     Button("Senderliste neu laden") {
                         Task { await model.load() }
                     }
-                    .modifier(CursorRowHighlight(selected: focusedIndex == SettingsRow.reloadList.rawValue))
-                    .contentShape(Rectangle())
-                    .onTapGesture { focusedIndex = SettingsRow.reloadList.rawValue }
+                    .cursorRow(.reloadList, focusedIndex: $focusedIndex)
 
                     Picker("Netzwerkpuffer", selection: $settings.networkCaching) {
                         Text("Automatisch").tag(0)
                         ForEach(cachingValues, id: \.self) { Text("\($0) ms").tag($0) }
                     }
-                    .modifier(CursorRowHighlight(selected: focusedIndex == SettingsRow.networkCaching.rawValue))
-                    .contentShape(Rectangle())
-                    .onTapGesture { focusedIndex = SettingsRow.networkCaching.rawValue }
+                    .cursorRow(.networkCaching, focusedIndex: $focusedIndex)
 
                     Toggle("RTP über TCP", isOn: $settings.rtspTCP)
-                        .modifier(CursorRowHighlight(selected: focusedIndex == SettingsRow.rtspTCP.rawValue))
-                        .contentShape(Rectangle())
-                        .onTapGesture { focusedIndex = SettingsRow.rtspTCP.rawValue }
+                        .cursorRow(.rtspTCP, focusedIndex: $focusedIndex)
                 } header: {
                     Text("Verbindung")
                 } footer: {
@@ -91,32 +97,22 @@ struct SettingsView: View {
 
                 Section("Wiedergabe") {
                     Toggle("HD bevorzugen", isOn: $settings.preferHD)
-                        .modifier(CursorRowHighlight(selected: focusedIndex == SettingsRow.preferHD.rawValue))
-                        .contentShape(Rectangle())
-                        .onTapGesture { focusedIndex = SettingsRow.preferHD.rawValue }
+                        .cursorRow(.preferHD, focusedIndex: $focusedIndex)
 
                     Toggle("Deinterlacing für SD-Sender", isOn: $settings.deinterlaceSD)
-                        .modifier(CursorRowHighlight(selected: focusedIndex == SettingsRow.deinterlaceSD.rawValue))
-                        .contentShape(Rectangle())
-                        .onTapGesture { focusedIndex = SettingsRow.deinterlaceSD.rawValue }
+                        .cursorRow(.deinterlaceSD, focusedIndex: $focusedIndex)
 
                     Toggle("Schwarzer Bildschirm beim Umschalten", isOn: $settings.blackScreenOnZap)
-                        .modifier(CursorRowHighlight(selected: focusedIndex == SettingsRow.blackScreenOnZap.rawValue))
-                        .contentShape(Rectangle())
-                        .onTapGesture { focusedIndex = SettingsRow.blackScreenOnZap.rawValue }
+                        .cursorRow(.blackScreenOnZap, focusedIndex: $focusedIndex)
 
                     Toggle("Timeshift (Live-Bild anhalten)", isOn: $settings.timeshift)
-                        .modifier(CursorRowHighlight(selected: focusedIndex == SettingsRow.timeshift.rawValue))
-                        .contentShape(Rectangle())
-                        .onTapGesture { focusedIndex = SettingsRow.timeshift.rawValue }
+                        .cursorRow(.timeshift, focusedIndex: $focusedIndex)
 
                     Picker("Timeshift-Puffer", selection: $settings.timeshiftMinutes) {
                         ForEach(timeshiftMinuteValues, id: \.self) { Text("\($0) Min.").tag($0) }
                     }
                     .disabled(!settings.timeshift)
-                    .modifier(CursorRowHighlight(selected: focusedIndex == SettingsRow.timeshiftMinutes.rawValue))
-                    .contentShape(Rectangle())
-                    .onTapGesture { focusedIndex = SettingsRow.timeshiftMinutes.rawValue }
+                    .cursorRow(.timeshiftMinutes, focusedIndex: $focusedIndex)
 
                     #if os(tvOS)
                     Toggle("Bildwiederholrate auf 50 Hz", isOn: $settings.match50Hz)
@@ -125,32 +121,19 @@ struct SettingsView: View {
                     Picker("Tonverzögerung Stereo", selection: $settings.audioDelayMs) {
                         ForEach(delayValues, id: \.self) { Text("\($0) ms").tag($0) }
                     }
-                    .modifier(CursorRowHighlight(selected: focusedIndex == SettingsRow.audioDelay.rawValue))
-                    .contentShape(Rectangle())
-                    .onTapGesture { focusedIndex = SettingsRow.audioDelay.rawValue }
+                    .cursorRow(.audioDelay, focusedIndex: $focusedIndex)
 
                     Picker("Tonverzögerung Dolby Digital (AC3)", selection: $settings.audioDelayAC3Ms) {
                         ForEach(delayValues, id: \.self) { Text("\($0) ms").tag($0) }
                     }
-                    .modifier(CursorRowHighlight(selected: focusedIndex == SettingsRow.audioDelayAC3.rawValue))
-                    .contentShape(Rectangle())
-                    .onTapGesture { focusedIndex = SettingsRow.audioDelayAC3.rawValue }
-
-                    Picker("Sendungsinfo einblenden", selection: $settings.bannerSeconds) {
-                        ForEach(bannerValues, id: \.self) { Text("\($0) s").tag($0) }
-                    }
-                    .modifier(CursorRowHighlight(selected: focusedIndex == SettingsRow.bannerSeconds.rawValue))
-                    .contentShape(Rectangle())
-                    .onTapGesture { focusedIndex = SettingsRow.bannerSeconds.rawValue }
-
-                    Picker("Zurück-Taste (\(UI.back)) öffnet", selection: $settings.backTarget) {
-                        ForEach(BackTarget.allCases) { Text($0.title).tag($0) }
-                    }
-                    .modifier(CursorRowHighlight(selected: focusedIndex == SettingsRow.backTarget.rawValue))
-                    .contentShape(Rectangle())
-                    .onTapGesture { focusedIndex = SettingsRow.backTarget.rawValue }
+                    .cursorRow(.audioDelayAC3, focusedIndex: $focusedIndex)
                 }
             }
+            #if os(tvOS)
+            // Auswahl als eigene Seite statt als Aufklapp-Menü: Das Menü erschien auf dem Apple TV
+            // durchsichtig und ohne Inhalt.
+            .pickerStyle(.navigationLink)
+            #endif
             #if os(macOS)
             .formStyle(.grouped)
             #endif
@@ -308,6 +291,26 @@ struct SettingsView: View {
             let index = all.firstIndex(of: settings.backTarget) ?? 0
             settings.backTarget = all[(index + 1) % all.count]
         }
+    }
+}
+
+private extension View {
+    /// Mac: Rahmen für die Tastatursteuerung und Klick zum Auswählen. Apple TV: nichts – dort
+    /// übernimmt der System-Fokus die Hervorhebung. (Rahmen und Klick-Geste lagen auf dem
+    /// Apple TV über der Fokus-Hervorhebung und machten die Schrift schwer lesbar.)
+    func cursorRow(_ row: SettingsView.SettingsRow, focusedIndex: Binding<Int>,
+                   onSelect: (() -> Void)? = nil) -> some View {
+        #if os(macOS)
+        return self
+            .modifier(CursorRowHighlight(selected: focusedIndex.wrappedValue == row.rawValue))
+            .contentShape(Rectangle())
+            .onTapGesture {
+                focusedIndex.wrappedValue = row.rawValue
+                onSelect?()
+            }
+        #else
+        return self
+        #endif
     }
 }
 

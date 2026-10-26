@@ -27,6 +27,16 @@ final class TunerAndCandidatesTests: XCTestCase {
         XCTAssertFalse(ard.areAllVariantsDead(deadIDs: dead386))
     }
 
+    func testDeadHDVariantDoesNotPromoteSD() throws {
+        let catalog = ChannelCatalog(channels: try fixtureChannels())
+        let zdf = try XCTUnwrap(catalog.groups.first { $0.displayName == "ZDF" })
+        let hd = try XCTUnwrap(zdf.candidates(preferHD: true).first)
+        XCTAssertTrue(hd.isHD)
+        // Auch wenn HD einmal als tot gemerkt wurde, bleibt HD bei „HD bevorzugen“ vorn.
+        let withDeadHD = zdf.candidates(preferHD: true, deadIDs: [hd.id])
+        XCTAssertTrue(withDeadHD.first?.isHD == true)
+    }
+
     func testTunerStatusAllBusyCalculation() {
         let freeStatus = TunerStatus(
             totalTuners: 4,

@@ -73,7 +73,9 @@ final class PlayerController: ObservableObject {
     /// Gesetzt, solange der Mitschnitt statt des Live-Bilds zu sehen ist.
     @Published private(set) var isReplaying = false
 
-    var onVariantSuccess: ((_ variantKey: String, _ channelID: String, _ failedEarlierIDs: [String]) -> Void)?
+    /// Bild ist da. `channelID`: zu merkende Variante (nur bei gewünschter Qualität, sonst `nil`);
+    /// `staleIDs`: vorher fehlgeschlagene Varianten auf einer anderen Frequenz (veraltete Einträge).
+    var onVariantSuccess: ((_ variantKey: String, _ channelID: String?, _ staleIDs: [String]) -> Void)?
     var onAllCandidatesFailed: ((_ channelName: String) -> Void)?
 
     init(epgStore: EPGStore = EPGStore(cacheURL: EPGStore.defaultCacheURL)) {
@@ -155,7 +157,10 @@ final class PlayerController: ObservableObject {
         var ordered = list
         currentVariantKey = list.variantKey
         let savedVariant = preferredVariantID ?? workingVariant[currentVariantKey]
-        if let known = savedVariant, let index = ordered.firstIndex(where: { $0.id == known }) {
+        // Gemerkte Variante nur vorziehen, wenn sie die gewünschte Qualität hat: Sonst bliebe ein Sender
+        // nach einem einzigen HD-Aussetzer dauerhaft auf SD.
+        if let known = savedVariant,
+           let index = ordered.firstIndex(where: { $0.id == known && $0.isHD == ordered[0].isHD }) {
             ordered.insert(ordered.remove(at: index), at: 0)
         }
         candidates = ordered
@@ -284,8 +289,16 @@ final class PlayerController: ObservableObject {
                 wasPlaying = true
                 failedCandidates = 0
                 if let channel {
-                    workingVariant[currentVariantKey] = channel.id
-                    onVariantSuccess?(currentVariantKey, channel.id, failedInThisSessionForCurrent)
+                    let preferredQuality = channel.isHD == candidates.first?.isHD
+                    if preferredQuality { workingVariant[currentVariantKey] = channel.id }
+                    // Als tot gelten nur Varianten auf einer anderen Frequenz (alte Einträge nach einem
+                    // Suchlauf). Scheitert eine Variante auf derselben Frequenz, war es ein Aussetzer
+                    // (Tuner belegt, langsamer Start) – sie wird beim nächsten Mal wieder zuerst probiert.
+                    let workingFrequency = channel.tuning?.frequencyMHz
+                    let staleIDs = candidates
+                        .filter { failedInThisSessionForCurrent.contains($0.id) && $0.tuning?.frequencyMHz != workingFrequency }
+                        .map(\.id)
+                    onVariantSuccess?(currentVariantKey, preferredQuality ? channel.id : nil, staleIDs)
                 }
                 failedInThisSessionForCurrent = []
                 DebugLog.log("Wiedergabe läuft (\(forceTCP || options?.rtspTCP == true ? "TCP" : "UDP")): Video \(mediaPlayer.videoSize), Tonspuren \(mediaPlayer.audioTrackNames as? [String] ?? [])")
@@ -706,6 +719,20 @@ final class PlayerController: ObservableObject {
     }
 
     var isTimeshifted: Bool { isReplaying }
+
+    /// Sendung, die gerade zu sehen ist: im Timeshift die Sendung an der zeitversetzten Stelle.
+    var displayedProgram: EPGProgram? {
+        guard isReplaying else { return currentProgram }
+        let at = Date().addingTimeInterval(-currentBehind)
+        return epgStore.currentProgram(forChannelNames: currentEPGNames, at: at) ?? currentProgram
+    }
+
+    /// Sendung nach der gerade zu sehenden.
+    var displayedNextProgram: EPGProgram? {
+        guard isReplaying else { return nextProgram }
+        let at = Date().addingTimeInterval(-currentBehind)
+        return epgStore.nextProgram(forChannelNames: currentEPGNames, at: at) ?? nextProgram
+    }
 
     func togglePause() {
         if isReplaying {

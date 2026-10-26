@@ -106,6 +106,15 @@ final class AppSettings: ObservableObject {
         recentKeys = defaults.stringArray(forKey: Keys.recentKeys) ?? []
         deadChannelIDs = Set(defaults.stringArray(forKey: Keys.deadChannels) ?? [])
         workingVariantIDs = defaults.dictionary(forKey: Keys.workingVariants) as? [String: String] ?? [:]
+        // Einmalig: Bis 26.10.2026 konnte ein einziger Aussetzer eine HD-Variante als „tot“ und SD als
+        // „funktionierend“ festschreiben (z. B. ZDF dauerhaft in SD). Diese Merker zurücksetzen.
+        if !defaults.bool(forKey: Keys.variantResetV2) {
+            deadChannelIDs = []
+            workingVariantIDs = [:]
+            defaults.removeObject(forKey: Keys.deadChannels)
+            defaults.removeObject(forKey: Keys.workingVariants)
+            defaults.set(true, forKey: Keys.variantResetV2)
+        }
     }
 
     /// Fügt einen Sender zur Liste der zuletzt gesehenen Sender hinzu (max. 3, ohne Duplikate und ohne den aktuellen).
@@ -143,6 +152,7 @@ final class AppSettings: ObservableObject {
         static let bannerMigrated = "bannerSecondsMigrated"
         static let bannerSeconds = "bannerSeconds"
         static let backTarget = "backTarget"
+        static let variantResetV2 = "variantStateResetV2"
         static let match50Hz = "match50Hz"
         static let press2arr = "press2arrAddress"
         static let boxUsername = "boxUsername"
