@@ -8,6 +8,8 @@ struct SettingsView: View {
 
     @State private var focusedIndex: Int = 0
     @State private var showChannelManager = false
+    /// Gleicher Schlüssel wie im Mediathek-Player.
+    @AppStorage("mediathekSubtitles") private var mediathekSubtitles = false
     #if os(macOS)
     @State private var keyMonitor: Any?
     #endif
@@ -127,6 +129,16 @@ struct SettingsView: View {
                         ForEach(delayValues, id: \.self) { Text("\($0) ms").tag($0) }
                     }
                     .cursorRow(.audioDelayAC3, focusedIndex: $focusedIndex)
+                }
+
+                Section {
+                    TextField("press2arr-Adresse (z. B. 192.168.178.99:5056)", text: $settings.press2arrAddress)
+                        .autocorrectionDisabled()
+                    Toggle("Untertitel bei Mediathek-Videos", isOn: $mediathekSubtitles)
+                } header: {
+                    Text("Mediathek")
+                } footer: {
+                    Text("Die Spielfilm-Übersicht kommt von press2arr („Lichtspiel“) auf der NAS. Untertitel gibt es, wenn der Sender welche anbietet.")
                 }
             }
             #if os(tvOS)

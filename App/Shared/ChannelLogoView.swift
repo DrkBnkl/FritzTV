@@ -11,6 +11,14 @@ struct ChannelLogoView: View {
     @State private var attempt = 0
 
     var body: some View {
+        // Group, damit `onChange` auch greift, wenn gerade kein Bild angezeigt wird.
+        Group { logo }
+            // Dieselbe Ansicht zeigt nacheinander verschiedene Sender (Infoleiste beim Umschalten):
+            // Ohne Zurücksetzen bliebe nach einem Sender ohne Logo jedes weitere Logo aus.
+            .onChange(of: channelName) { _, _ in attempt = 0 }
+    }
+
+    @ViewBuilder private var logo: some View {
         let urls = ChannelLogo.candidateURLs(for: channelName)
         if attempt < urls.count {
             AsyncImage(url: urls[attempt]) { phase in

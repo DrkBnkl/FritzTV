@@ -541,6 +541,9 @@ struct ChannelListOverlay: View {
                 .overlay(RoundedRectangle(cornerRadius: UI.s(16)).stroke(Color.white.opacity(selected ? 0 : 0.25), lineWidth: UI.s(2)))
         }
         .buttonStyle(.plain)
+        // Die Fernbedienung steuert die Liste über AppModel.handle; auf dem Apple TV dürfen die
+        // Knöpfe den Fokus nicht übernehmen (sonst wirken Klick und Pfeile auf eine andere Zeile).
+        .focusable(false)
     }
 
     private func settingsRow(selected: Bool) -> some View {
@@ -583,6 +586,9 @@ struct ChannelListOverlay: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        // Die Fernbedienung steuert die Liste über AppModel.handle; auf dem Apple TV dürfen die
+        // Knöpfe den Fokus nicht übernehmen (sonst wirken Klick und Pfeile auf eine andere Zeile).
+        .focusable(false)
         .padding(.top, UI.s(14))
         .padding(.bottom, UI.s(8))
     }
@@ -649,6 +655,9 @@ struct ChannelListOverlay: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        // Die Fernbedienung steuert die Liste über AppModel.handle; auf dem Apple TV dürfen die
+        // Knöpfe den Fokus nicht übernehmen (sonst wirken Klick und Pfeile auf eine andere Zeile).
+        .focusable(false)
     }
 }
 

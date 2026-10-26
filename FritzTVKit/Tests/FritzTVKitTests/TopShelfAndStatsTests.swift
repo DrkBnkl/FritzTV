@@ -29,6 +29,10 @@ final class TopShelfAndStatsTests: XCTestCase {
         let defaults = TopShelfStore.defaultChannels
         XCTAssertFalse(defaults.isEmpty)
         XCTAssertEqual(defaults.first?.name, "Das Erste HD")
+        // Schlüssel wie in der Standardbelegung, damit der Top-Shelf-Link den Sender findet
+        for channel in defaults {
+            XCTAssertTrue(DefaultLineup.main.contains(channel.groupKey), channel.groupKey)
+        }
 
         let custom = [
             TopShelfChannel(number: 42, name: "Test Sender HD", groupKey: "test", isHD: true)
