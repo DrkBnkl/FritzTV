@@ -86,8 +86,10 @@ struct RemoteInputModifier: ViewModifier {
             .onChange(of: model.showMediathek) { _, showing in
                 if !showing { focused = true }
             }
-            .onChange(of: model.showEPGOverview) { _, showing in
-                if !showing { focused = true }
+            .onChange(of: model.showEPGOverview) { _, _ in
+                // Die Programmübersicht hat keine eigene Fokussteuerung mehr: Alle Tasten kommen
+                // hier an und laufen über `model.handle`.
+                focused = true
             }
             .onChange(of: model.activeHLSReplay != nil) { _, showing in
                 if !showing { focused = true }

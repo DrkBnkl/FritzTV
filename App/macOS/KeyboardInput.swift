@@ -29,8 +29,9 @@ struct RemoteInputModifier: ViewModifier {
             .onChange(of: model.showMediathek) { _, showing in
                 if !showing { focused = true }
             }
-            .onChange(of: model.showEPGOverview) { _, showing in
-                if !showing { focused = true }
+            .onChange(of: model.showEPGOverview) { _, _ in
+                // Die Programmübersicht hat keine eigene Tastensteuerung mehr: Fokus bleibt hier.
+                focused = true
             }
             .onChange(of: model.activeHLSReplay != nil) { _, showing in
                 if !showing { focused = true }
@@ -120,8 +121,9 @@ struct RemoteInputModifier: ViewModifier {
                 return event
             }
 
-            // Wenn ein Sheet aktiv ist (z. B. Einstellungen, Mediathek, EPG), dem Sheet die Tasten überlassen
-            if model.showSettings || model.showMediathek || model.showEPGOverview {
+            // Wenn ein Sheet aktiv ist (Einstellungen, Mediathek), dem Sheet die Tasten überlassen.
+            // Die Programmübersicht steuert dagegen `model.handle` (wie die Senderliste).
+            if model.showSettings || model.showMediathek {
                 return event
             }
 
