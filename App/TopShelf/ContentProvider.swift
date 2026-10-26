@@ -15,7 +15,14 @@ final class ContentProvider: TVTopShelfContentProvider {
                 item.setImageURL(logoURL, for: .screenScale2x)
             }
 
-            if let url = URL(string: "fritztv://channel/\(ch.number)") {
+            // Nummer plus Senderschlüssel: Die App wählt über den Schlüssel, falls sich die
+            // Platznummern seit dem letzten Speichern verschoben haben.
+            var components = URLComponents()
+            components.scheme = "fritztv"
+            components.host = "channel"
+            components.path = "/\(ch.number)"
+            components.queryItems = [URLQueryItem(name: "key", value: ch.groupKey)]
+            if let url = components.url {
                 item.playAction = TVTopShelfAction(url: url)
                 item.displayAction = TVTopShelfAction(url: url)
             }

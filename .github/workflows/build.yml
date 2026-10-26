@@ -1,0 +1,44 @@
+# Baut FritzTVKit (mit Tests) sowie die Mac- und die Apple-TV-App, ohne zu signieren.
+# Läuft bei Pull Requests auf main und von Hand. macOS-Runner zählen bei privaten Repos
+# zehnfach gegen das Actions-Kontingent, daher nicht bei jedem Push.
+name: Build
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: FritzTVKit testen
+        run: swift test --package-path FritzTVKit
+
+      - name: Xcode-Projekt erzeugen
+        run: |
+          brew install xcodegen
+          xcodegen generate
+
+      - name: Mac-App bauen
+        run: |
+          set -o pipefail
+          xcodebuild -project FritzTV.xcodeproj -scheme FritzTV-macOS \
+            -destination 'generic/platform=macOS' \
+            -skipPackagePluginValidation \
+            CODE_SIGNING_ALLOWED=NO build | xcbeautify --renderer github-actions
+
+      - name: Apple-TV-App bauen (Gerät, ohne Signatur)
+        run: |
+          set -o pipefail
+          xcodebuild -project FritzTV.xcodeproj -scheme FritzTV-tvOS \
+            -destination 'generic/platform=tvOS' \
+            -skipPackagePluginValidation \
+            CODE_SIGNING_ALLOWED=NO build | xcbeautify --renderer github-actions

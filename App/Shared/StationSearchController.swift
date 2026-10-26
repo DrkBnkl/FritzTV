@@ -74,8 +74,7 @@ final class StationSearchController: ObservableObject {
 
     private func client(model: AppModel) -> FritzBoxStationSearch? {
         guard let password = BoxPasswordStore.load(), !password.isEmpty else { return nil }
-        let host = model.settings.host.isEmpty ? (model.connectedHost ?? "fritz.box") : model.settings.host
-        return FritzBoxStationSearch(host: host, username: model.settings.boxUsername, password: password)
+        return FritzBoxStationSearch(host: model.boxHost, username: model.settings.boxUsername, password: password)
     }
 
     /// Prüft nur die Anmeldung, ohne etwas an der Box zu ändern.

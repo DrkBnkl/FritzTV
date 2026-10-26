@@ -2,6 +2,9 @@ import Foundation
 import SwiftUI
 import Network
 import FritzTVKit
+#if os(tvOS)
+import TVServices
+#endif
 
 /// Tasten der Siri Remote bzw. der Mac-Tastatur.
 enum RemoteCommand: Equatable {
@@ -61,11 +64,19 @@ final class AppModel: ObservableObject {
     @Published private(set) var loadState: LoadState = .loading
     @Published private(set) var lineup: ChannelLineup?
     @Published private(set) var currentNumber = 1
-    private var playingNumber: Int?
+    /// Schlüssel des Senders, der gerade abgespielt wird. Ein Schlüssel statt einer Platznummer,
+    /// weil sich Nummern beim Verschieben, Ausblenden oder Neuladen der Liste ändern.
+    private var playingKey: String?
     @Published private(set) var previousKey: String?
     @Published private(set) var connectedHost: String?
     @Published private(set) var bannerVisible = false
-    @Published var overlay: Overlay = .none
+    @Published var overlay: Overlay = .none {
+        didSet {
+            if case .info = overlay { player.collectStats = true } else { player.collectStats = false }
+        }
+    }
+    /// Link (Top Shelf, `fritztv://`), der vor dem Laden der Senderliste ankam.
+    private var pendingDeepLink: URL?
     @Published var showSettings = false
     @Published var showMediathek = false
     @Published var showEPGOverview = false
@@ -115,8 +126,10 @@ final class AppModel: ObservableObject {
         resolvedPlayer.onAllCandidatesFailed = { [weak self] channelName in
             Task { @MainActor in
                 guard let self else { return }
-                let host = self.settings.host.isEmpty ? (self.connectedHost ?? "fritz.box") : self.settings.host
-                if let tunerStatus = await FritzBoxTunerClient().fetchStatus(host: host) {
+                let failedKey = self.playingKey
+                if let tunerStatus = await FritzBoxTunerClient().fetchStatus(host: self.boxHost) {
+                    // Die Abfrage dauert: Inzwischen umgeschaltet oder Bild da? Dann nichts überschreiben.
+                    guard self.playingKey == failedKey, case .failed = self.player.status else { return }
                     if tunerStatus.allTunersBusy {
                         self.player.setFailed(
                             title: "Alle \(tunerStatus.totalTuners) Tuner belegt",
@@ -162,9 +175,9 @@ final class AppModel: ObservableObject {
 
     static func key(_ entry: LineupEntry) -> String { entry.group.variants[0].groupKey }
 
-    static func variantKey(_ list: [Channel]) -> String {
-        guard let first = list.first else { return "" }
-        return "\(first.kind.rawValue):\(first.groupKey):\(first.isHD)"
+    /// Adresse der Box: eigene Eingabe, sonst die beim Laden gefundene.
+    var boxHost: String {
+        settings.host.isEmpty ? (connectedHost ?? "fritz.box") : settings.host
     }
 
     func load() async {
@@ -177,6 +190,10 @@ final class AppModel: ObservableObject {
             rebuildLineup()
             loadState = .ready
             DebugLog.log("Senderliste von \(result.host): \(result.catalog.groups.count) Gruppen, \(lineup?.entries.count ?? 0) sichtbare Plätze")
+            if let link = pendingDeepLink {
+                pendingDeepLink = nil
+                if handleDeepLink(url: link) { return }
+            }
             let start = lineup?.entries.first { Self.key($0) == settings.lastChannelKey }?.number ?? 1
             tune(to: start)
         } catch let error as FritzBoxClient.ClientError {
@@ -198,7 +215,8 @@ final class AppModel: ObservableObject {
         let rebuilt = ChannelLineup(catalog: catalog, preferences: preferences)
         lineup = rebuilt
         syncTopShelf()
-        if let number = rebuilt.entries.first(where: { Self.key($0) == settings.lastChannelKey })?.number {
+        let anchorKey = playingKey ?? settings.lastChannelKey
+        if let number = rebuilt.entries.first(where: { Self.key($0) == anchorKey })?.number {
             currentNumber = number
         } else {
             currentNumber = min(max(currentNumber, 1), max(rebuilt.entries.count, 1))
@@ -211,11 +229,16 @@ final class AppModel: ObservableObject {
             TopShelfChannel(
                 number: entry.number,
                 name: entry.group.displayName,
-                groupKey: entry.group.key,
+                groupKey: Self.key(entry),
                 isHD: entry.group.hd != nil
             )
         }
-        TopShelfStore.save(channels: Array(top))
+        if TopShelfStore.save(channels: Array(top)) {
+            #if os(tvOS)
+            // Sonst zeigt das Top Shelf die alte Reihenfolge, bis tvOS es von selbst neu lädt.
+            TVTopShelfContentProvider.topShelfContentDidChange()
+            #endif
+        }
     }
 
     private func savePreferences() {
@@ -241,34 +264,51 @@ final class AppModel: ObservableObject {
         zapDebounceTask = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(350))
             guard let self, !Task.isCancelled else { return }
-            await MainActor.run {
-                self.performTune(to: next.number)
-            }
+            // Erledigt: sonst gilt der nächste Klick weiter als „Umschalten bestätigen“
+            // statt die Sendungsinfo zu öffnen.
+            self.zapDebounceTask = nil
+            self.performTune(to: next.number)
         }
     }
 
     private func performTune(to number: Int) {
         guard let entry = lineup?.entry(number: number) else { return }
-        if let playingNumber, playingNumber == entry.number, player.status == .playing {
-            currentNumber = entry.number
-            showBanner()
-            return
+        let key = Self.key(entry)
+        if playingKey == key {
+            switch player.status {
+            case .failed, .idle:
+                break   // neu versuchen
+            default:
+                // Läuft schon (auch angehalten im Timeshift oder beim Verbinden): nicht neu starten.
+                currentNumber = entry.number
+                showBanner()
+                return
+            }
         }
-        if let oldNumber = playingNumber, let oldEntry = lineup?.entry(number: oldNumber), oldEntry.id != entry.id {
-            previousKey = Self.key(oldEntry)
-            settings.recordRecent(key: Self.key(oldEntry), currentKey: Self.key(entry))
+        if let oldKey = playingKey, oldKey != key {
+            previousKey = oldKey
+            settings.recordRecent(key: oldKey, currentKey: key)
         }
-        playingNumber = entry.number
         currentNumber = entry.number
-        settings.lastChannelKey = Self.key(entry)
-        let candidates = entry.group.candidates(preferHD: settings.preferHD, deadIDs: settings.deadChannelIDs)
-        if let target = candidates.first, let freq = target.tuning?.frequencyMHz {
+        settings.lastChannelKey = key
+        play(entry)
+        showBanner()
+    }
+
+    /// Spielt einen Senderplatz mit allen Varianten, die gemerkte funktionierende zuerst.
+    private func play(_ entry: LineupEntry) {
+        playingKey = Self.key(entry)
+        let candidates = currentCandidates(for: entry)
+        if let freq = candidates.first?.tuning?.frequencyMHz {
             epgScanner.yieldIfScanning(frequency: freq)
         }
-        let preferredID = settings.workingVariantIDs[Self.variantKey(candidates)]
+        let preferredID = settings.workingVariantIDs[candidates.variantKey]
         DebugLog.log("Umschalten auf \(entry.number) \(entry.group.displayName): \(candidates.count) Variante(n), zuerst \(candidates.first?.streamURL.absoluteString ?? "-") \(playbackOptions())")
         player.play(candidates: candidates, options: playbackOptions(), preferredVariantID: preferredID)
-        showBanner()
+    }
+
+    private func currentCandidates(for entry: LineupEntry) -> [Channel] {
+        entry.group.candidates(preferHD: settings.preferHD, deadIDs: settings.deadChannelIDs)
     }
 
     func playbackOptions() -> PlaybackOptions {
@@ -278,30 +318,33 @@ final class AppModel: ObservableObject {
             deinterlace: settings.deinterlaceSD,
             audioDelayMs: settings.audioDelayMs,
             audioDelayAC3Ms: settings.audioDelayAC3Ms,
-            timeshift: settings.timeshift
+            timeshift: settings.timeshift,
+            timeshiftMinutes: settings.timeshiftMinutes
         )
     }
 
     /// Nach dem Schließen der Einstellungen: Stream nur neu starten, wenn sich etwas geändert hat.
     func applySettings() {
         guard let entry = currentEntry else { return }
-        let candidates = entry.group.candidates(preferHD: settings.preferHD, deadIDs: settings.deadChannelIDs)
+        let candidates = currentCandidates(for: entry)
         let sameChannel = player.channel.map { current in candidates.contains { $0.id == current.id } } ?? false
         if !sameChannel || candidates.first?.isHD != player.channel?.isHD || playbackOptions() != player.options {
-            let preferredID = settings.workingVariantIDs[Self.variantKey(candidates)]
-            player.play(candidates: candidates, options: playbackOptions(), preferredVariantID: preferredID)
+            play(entry)
         }
     }
 
     func resume() {
         guard let entry = currentEntry else { return }
-        playingNumber = entry.number
-        let candidates = entry.group.candidates(preferHD: settings.preferHD, deadIDs: settings.deadChannelIDs)
-        if let target = candidates.first, let freq = target.tuning?.frequencyMHz {
-            epgScanner.yieldIfScanning(frequency: freq)
-        }
-        let preferredID = settings.workingVariantIDs[Self.variantKey(candidates)]
-        player.play(candidates: candidates, options: playbackOptions(), preferredVariantID: preferredID)
+        play(entry)
+    }
+
+    /// App kommt in den Vordergrund. Nur fortsetzen, wenn der Stream wirklich angehalten wurde
+    /// (Hintergrund) – nicht nach kurzem `inactive` (z. B. Kontrollzentrum), sonst wären
+    /// Timeshift-Puffer und Position weg – und nicht, solange ein anderer Player offen ist.
+    func returnedToForeground() {
+        guard loadState == .ready, player.status == .idle,
+              activeHLSReplay == nil, activeMediathekURL == nil, !showMediathek else { return }
+        resume()
     }
 
     // MARK: Infoleiste
@@ -592,13 +635,12 @@ final class AppModel: ObservableObject {
 
     func triggerEPGScan() {
         guard let catalog else { return }
-        let host = settings.host.isEmpty ? (connectedHost ?? "fritz.box") : settings.host
         let activeFreq = player.channel?.tuning?.frequencyMHz
         epgScanner.startScanIfNeeded(
             lineup: lineup,
             catalog: catalog,
             epgStore: player.epgStore,
-            host: host,
+            host: boxHost,
             activeFrequency: activeFreq,
             deadIDs: settings.deadChannelIDs
         )
@@ -691,13 +733,17 @@ final class AppModel: ObservableObject {
     func toggleChannelVisibility(key: String) {
         if preferences.hidden.contains(key) {
             preferences.hidden.remove(key)
+            savePreferences()
         } else {
+            let hidesPlaying = playingKey == key
             preferences.hidden.insert(key)
-            if let current = currentEntry, Self.key(current) == key {
-                tune(to: min(currentNumber, max((lineup?.entries.count ?? 1) - 1, 1)))
+            // Erst die neue Liste bauen, dann umschalten: Mit der alten Liste stünde unter
+            // derselben Nummer noch der gerade ausgeblendete Sender.
+            savePreferences()
+            if hidesPlaying {
+                tune(to: currentNumber)
             }
         }
-        savePreferences()
     }
 
     func unhideAllChannels() {
@@ -713,7 +759,7 @@ final class AppModel: ObservableObject {
     // MARK: Tuner-Status & Bildqualität
 
     func refreshTunerStats() {
-        let host = settings.host.isEmpty ? (connectedHost ?? "fritz.box") : settings.host
+        let host = boxHost
         Task { [weak self] in
             guard let self else { return }
             if let status = await FritzBoxTunerClient().fetchStatus(host: host) {
@@ -749,6 +795,12 @@ final class AppModel: ObservableObject {
 
         guard let target else { return false }
 
+        // Senderliste noch nicht geladen (Kaltstart über das Top Shelf): nach dem Laden ausführen.
+        guard loadState == .ready, let lineup else {
+            pendingDeepLink = url
+            return true
+        }
+
         // Aktive Overlays oder Unterseiten schließen
         overlay = .none
         showSettings = false
@@ -758,10 +810,21 @@ final class AppModel: ObservableObject {
         activeMediathekURL = nil
         searchResultDialog = nil
 
-        if let number = Int(target) {
+        // Top Shelf schickt zusätzlich den Senderschlüssel (`?key=…`): Er stimmt auch dann noch,
+        // wenn sich die Platznummern seit dem letzten Speichern verschoben haben.
+        let keyParameter = URLComponents(url: url, resolvingAgainstBaseURL: false)?
+            .queryItems?.first { $0.name == "key" }?.value
+        if let keyParameter, let entry = lineup.entries.first(where: { Self.key($0) == keyParameter }) {
+            tune(to: entry.number)
+            return true
+        }
+        if let entry = lineup.entries.first(where: { Self.key($0) == target }) {
+            tune(to: entry.number)
+            return true
+        } else if let number = Int(target) {
             tune(to: number)
             return true
-        } else if let entry = lineup?.entries.first(where: {
+        } else if let entry = lineup.entries.first(where: {
             $0.group.key.localizedCaseInsensitiveContains(target) ||
             $0.group.displayName.localizedCaseInsensitiveContains(target)
         }) {

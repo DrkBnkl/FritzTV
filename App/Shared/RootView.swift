@@ -94,7 +94,7 @@ struct RootView: View {
         .onChange(of: scenePhase) { _, phase in
             switch phase {
             case .background: player.stop()
-            case .active: model.resume()
+            case .active: model.returnedToForeground()
             default: break
             }
         }
@@ -124,7 +124,9 @@ struct OverlayLayer: View {
         if case .failed(let title, let message, let hint) = player.status {
             StatusCard(title: title, message: message,
                        hint: hint ?? "\(UI.upDown): anderer Sender · \(UI.back): Senderliste", busy: false)
-        } else if case .reconnecting(let seconds) = player.status {
+        } else if case .reconnecting(let seconds) = player.status, !player.isReplaying {
+            // Beim zeitversetzten Schauen läuft die Wiedergabe aus dem Puffer weiter; das
+            // Neuverbinden im Hintergrund braucht dann keine Meldung über dem Bild.
             StatusCard(title: "Verbindung unterbrochen", message: "Neuer Versuch in \(seconds) s …",
                        hint: "Bleibt das Bild weg: Sind alle 4 Tuner der FRITZ!Box belegt?", busy: true)
         }

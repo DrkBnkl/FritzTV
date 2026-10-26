@@ -79,11 +79,19 @@ public struct FritzBoxTunerClient: Sendable {
         } else {
             numbers = Array(1...count)          // 1 … count
         }
-        for number in numbers {
-            if let info = await fetchTunerInfo(host: host, tunerNumber: number) {
-                tuners.append(info)
+        // Übrige Tuner gleichzeitig abfragen.
+        let client = self
+        let others = await withTaskGroup(of: TunerInfo?.self, returning: [TunerInfo].self) { group in
+            for number in numbers {
+                group.addTask { await client.fetchTunerInfo(host: host, tunerNumber: number) }
             }
+            var collected: [TunerInfo] = []
+            for await info in group {
+                if let info { collected.append(info) }
+            }
+            return collected
         }
+        tuners += others.sorted { $0.tunerNumber < $1.tunerNumber }
         return TunerStatus(totalTuners: count, tuners: tuners)
     }
 

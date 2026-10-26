@@ -17,7 +17,8 @@ public final class EPGStore: @unchecked Sendable {
     private var programsByService: [Int: [Int: EPGProgram]] = [:]
     private var serviceIDByName: [String: Int] = [:]
     private let cacheURL: URL?
-    private var saveTask: Task<Void, Never>?
+    /// Gesetzt, solange ein Speichervorgang geplant ist (geschützt durch `lock`).
+    private var savePending = false
 
     public static var defaultCacheURL: URL? {
         FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first?
@@ -44,12 +45,21 @@ public final class EPGStore: @unchecked Sendable {
 
     // MARK: Speichern und Laden
 
+    /// Fasst viele Änderungen zu einem Speichervorgang nach 3 Sekunden zusammen.
+    /// Wird aus VLC-Threads aufgerufen, daher nur unter der Sperre (und nie, während sie gehalten wird).
     private func scheduleSave() {
         guard let url = cacheURL else { return }
-        saveTask?.cancel()
-        saveTask = Task.detached(priority: .background) { [weak self] in
-            try? await Task.sleep(for: .seconds(3))
-            guard !Task.isCancelled, let self else { return }
+        lock.lock()
+        let alreadyPending = savePending
+        savePending = true
+        lock.unlock()
+        guard !alreadyPending else { return }
+        DispatchQueue.global(qos: .background).asyncAfter(deadline: .now() + 3) { [weak self] in
+            guard let self else { return }
+            self.lock.lock()
+            self.savePending = false
+            self.lock.unlock()
+            self.pruneExpired()
             self.saveToFile(url)
         }
     }
@@ -89,17 +99,24 @@ public final class EPGStore: @unchecked Sendable {
         let wanted = Self.normalize(title)
         guard !wanted.isEmpty else { return false }
         lock.lock()
-        defer { lock.unlock() }
-        if channelNames.contains(where: { serviceIDByName[Self.normalize($0)] != nil }) { return false }
+        if channelNames.contains(where: { serviceIDByName[Self.normalize($0)] != nil }) {
+            lock.unlock()
+            return false
+        }
         let matches = programsByService.compactMap { sid, map -> Int? in
             let schedule = EPGChannelSchedule(serviceID: sid, programs: Array(map.values))
             guard let current = schedule.currentProgram(at: date) else { return nil }
             return Self.normalize(current.title) == wanted ? sid : nil
         }
-        guard matches.count == 1, let sid = matches.first else { return false }
+        guard matches.count == 1, let sid = matches.first else {
+            lock.unlock()
+            return false
+        }
         for name in channelNames {
             serviceIDByName[Self.normalize(name)] = sid
         }
+        lock.unlock()
+        // Erst nach dem Freigeben der Sperre: scheduleSave sperrt selbst.
         scheduleSave()
         return true
     }

@@ -111,9 +111,7 @@ struct InfoBanner: View {
     }
 
     static func formatTime(_ date: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "HH:mm"
-        return formatter.string(from: date)
+        UI.timeFormatter.string(from: date)
     }
 }
 
@@ -314,9 +312,7 @@ struct InfoPanel: View {
     }
 
     static func formatTime(_ date: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "HH:mm"
-        return formatter.string(from: date)
+        UI.timeFormatter.string(from: date)
     }
 }
 
@@ -539,9 +535,7 @@ struct ChannelListOverlay: View {
     }
 
     static func formatTime(_ date: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "HH:mm"
-        return formatter.string(from: date)
+        UI.timeFormatter.string(from: date)
     }
 
     private func specialRow(_ title: String, selected: Bool, action: @escaping () -> Void) -> some View {

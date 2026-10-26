@@ -159,7 +159,12 @@ struct EPGOverviewView: View {
 
             if model.epgScanner.isScanning, let ch = model.epgScanner.currentScanningChannel {
                 HStack(spacing: 6) {
+                    #if os(macOS)
                     ProgressView().controlSize(.small)
+                    #else
+                    // `controlSize` gibt es auf tvOS nicht.
+                    ProgressView().scaleEffect(0.6)
+                    #endif
                     Text("Lade EPG (\(ch)) …")
                         .font(UI.font(15, .regular))
                         .foregroundStyle(Color.white.opacity(0.65))
@@ -584,9 +589,7 @@ struct EPGOverviewView: View {
     }
 
     static func formatTime(_ date: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "HH:mm"
-        return formatter.string(from: date)
+        UI.timeFormatter.string(from: date)
     }
 
     private func dayName(from date: Date) -> String {

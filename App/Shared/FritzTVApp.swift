@@ -49,6 +49,14 @@ enum UI {
     static let upDown = "Hoch/Runter"
     #endif
 
+    /// Uhrzeit „HH:mm“. Einmal angelegt: DateFormatter zu erzeugen ist teuer, und die
+    /// Uhrzeiten werden bei jedem Neuzeichnen der Overlays formatiert.
+    static let timeFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "HH:mm"
+        return formatter
+    }()
+
     static func s(_ value: CGFloat) -> CGFloat { value * scale }
     static func font(_ size: CGFloat, _ weight: Font.Weight = .regular) -> Font {
         .system(size: size * scale, weight: weight)

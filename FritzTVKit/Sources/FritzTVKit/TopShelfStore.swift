@@ -37,12 +37,16 @@ public struct TopShelfStore: Sendable {
         TopShelfChannel(number: 8, name: "ZDFneo HD", groupKey: "zdfneo", isHD: true)
     ]
 
-    public static func save(channels: [TopShelfChannel]) {
-        guard let data = try? JSONEncoder().encode(channels) else { return }
+    /// Speichert die Sender. Gibt `true` zurück, wenn sich etwas geändert hat
+    /// (dann muss die App das Top Shelf zum Neuladen auffordern).
+    @discardableResult
+    public static func save(channels: [TopShelfChannel]) -> Bool {
+        guard let data = try? JSONEncoder().encode(channels) else { return false }
+        let groupDefaults = UserDefaults(suiteName: sharedSuiteName)
+        let previous = groupDefaults?.data(forKey: userDefaultsKey) ?? UserDefaults.standard.data(forKey: userDefaultsKey)
         UserDefaults.standard.set(data, forKey: userDefaultsKey)
-        if let groupDefaults = UserDefaults(suiteName: sharedSuiteName) {
-            groupDefaults.set(data, forKey: userDefaultsKey)
-        }
+        groupDefaults?.set(data, forKey: userDefaultsKey)
+        return previous != data
     }
 
     public static func load() -> [TopShelfChannel] {

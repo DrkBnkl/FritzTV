@@ -21,14 +21,16 @@ struct SettingsView: View {
         case deinterlaceSD = 5
         case blackScreenOnZap = 6
         case timeshift = 7
-        case audioDelay = 8
-        case audioDelayAC3 = 9
-        case bannerSeconds = 10
+        case timeshiftMinutes = 8
+        case audioDelay = 9
+        case audioDelayAC3 = 10
+        case bannerSeconds = 11
     }
 
     private let cachingValues = [500, 1000, 2000, 3000, 5000]
     private let delayValues = Array(stride(from: -500, through: 500, by: 25))
-    private let bannerValues = [8, 10, 15, 20, 30]
+    private let bannerValues = [7, 8, 10, 15, 20, 30]
+    private let timeshiftMinuteValues = [30, 60, 90, 120]
 
     var body: some View {
         NavigationStack {
@@ -106,6 +108,14 @@ struct SettingsView: View {
                         .modifier(CursorRowHighlight(selected: focusedIndex == SettingsRow.timeshift.rawValue))
                         .contentShape(Rectangle())
                         .onTapGesture { focusedIndex = SettingsRow.timeshift.rawValue }
+
+                    Picker("Timeshift-Puffer", selection: $settings.timeshiftMinutes) {
+                        ForEach(timeshiftMinuteValues, id: \.self) { Text("\($0) Min.").tag($0) }
+                    }
+                    .disabled(!settings.timeshift)
+                    .modifier(CursorRowHighlight(selected: focusedIndex == SettingsRow.timeshiftMinutes.rawValue))
+                    .contentShape(Rectangle())
+                    .onTapGesture { focusedIndex = SettingsRow.timeshiftMinutes.rawValue }
 
                     #if os(tvOS)
                     Toggle("Bildwiederholrate auf 50 Hz", isOn: $settings.match50Hz)
@@ -235,6 +245,8 @@ struct SettingsView: View {
             settings.blackScreenOnZap = (delta > 0)
         case .timeshift:
             settings.timeshift = (delta > 0)
+        case .timeshiftMinutes:
+            settings.timeshiftMinutes = Self.step(timeshiftMinuteValues, from: settings.timeshiftMinutes, by: delta)
         case .audioDelay:
             let next = min(max(settings.audioDelayMs + delta * 25, -500), 500)
             settings.audioDelayMs = next
@@ -242,11 +254,16 @@ struct SettingsView: View {
             let next = min(max(settings.audioDelayAC3Ms + delta * 25, -500), 500)
             settings.audioDelayAC3Ms = next
         case .bannerSeconds:
-            if let idx = bannerValues.firstIndex(of: settings.bannerSeconds) {
-                let nextIdx = min(max(idx + delta, 0), bannerValues.count - 1)
-                settings.bannerSeconds = bannerValues[nextIdx]
-            }
+            settings.bannerSeconds = Self.step(bannerValues, from: settings.bannerSeconds, by: delta)
         }
+    }
+
+    /// Nächster Wert einer Auswahlliste; ein Wert außerhalb der Liste springt zum nächstgelegenen.
+    private static func step(_ values: [Int], from current: Int, by delta: Int) -> Int {
+        guard !values.isEmpty else { return current }
+        let index = values.firstIndex(of: current)
+            ?? values.indices.min { abs(values[$0] - current) < abs(values[$1] - current) } ?? 0
+        return values[min(max(index + delta, 0), values.count - 1)]
     }
 
     private func activateSetting() {
@@ -268,6 +285,8 @@ struct SettingsView: View {
             settings.blackScreenOnZap.toggle()
         case .timeshift:
             settings.timeshift.toggle()
+        case .timeshiftMinutes:
+            adjustSetting(delta: 1)
         case .audioDelay, .audioDelayAC3:
             break
         case .bannerSeconds:
