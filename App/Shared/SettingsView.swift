@@ -171,6 +171,12 @@ struct SettingsView: View {
             }
             #endif
         }
+        #if os(tvOS)
+        // Deckender Hintergrund: Sonst scheint das Fernsehbild stark durch und die Einträge
+        // sind kaum lesbar.
+        .background(Color(red: 0.06, green: 0.07, blue: 0.09).ignoresSafeArea())
+        .presentationBackground(Color(red: 0.06, green: 0.07, blue: 0.09))
+        #endif
         #if os(macOS)
         .frame(minWidth: 500, idealWidth: 620, maxWidth: .infinity, minHeight: 400, idealHeight: 560, maxHeight: .infinity)
         .onAppear { setupKeyMonitor() }
