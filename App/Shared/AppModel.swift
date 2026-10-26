@@ -80,6 +80,9 @@ final class AppModel: ObservableObject {
     @Published var showSettings = false
     @Published var showMediathek = false
     @Published var showEPGOverview = false
+    /// Ausgewählter Sender in der Programmübersicht (Senderschlüssel). Die Auswahl verwaltet die
+    /// App selbst wie bei der Senderliste: Alle Tasten laufen über `handle`, auf Apple TV und Mac gleich.
+    @Published private(set) var epgSelectedKey: String?
     @Published var activeHLSReplay: (url: URL, startDate: Date?)?
     @Published var activeMediathekURL: URL?
     /// Untertitel zum laufenden Mediathek-Video aus der Suche, falls vorhanden.
@@ -385,6 +388,11 @@ final class AppModel: ObservableObject {
             break
         }
 
+        if showEPGOverview {
+            handleEPG(command)
+            return
+        }
+
         switch overlay {
         case .none:
             handleLive(command)
@@ -496,8 +504,48 @@ final class AppModel: ObservableObject {
 
     func openEPGOverview() {
         overlay = .none
+        bannerVisible = false
+        epgSelectedKey = playingKey ?? currentEntry.map(Self.key)
         showEPGOverview = true
         triggerEPGScan()
+    }
+
+    func closeEPGOverview() {
+        showEPGOverview = false
+        epgScanner.stop()
+    }
+
+    /// Schaltet auf den Sender (Mausklick bzw. ohne Angabe die aktuelle Auswahl) und schließt die Übersicht.
+    func tuneFromEPG(key: String? = nil) {
+        let target = key ?? epgSelectedKey
+        closeEPGOverview()
+        guard let target, let entry = lineup?.entries.first(where: { Self.key($0) == target }) else { return }
+        tune(to: entry.number)
+    }
+
+    private func handleEPG(_ command: RemoteCommand) {
+        guard let entries = lineup?.entries, !entries.isEmpty else {
+            if command == .back { closeEPGOverview() }
+            return
+        }
+        let index = entries.firstIndex { Self.key($0) == epgSelectedKey }
+        switch command {
+        case .up, .down:
+            let step = command == .up ? -1 : 1
+            let next = index.map { min(max($0 + step, 0), entries.count - 1) } ?? 0
+            epgSelectedKey = Self.key(entries[next])
+        case .select, .playPause:
+            tuneFromEPG()
+        case .back:
+            closeEPGOverview()
+        case .digit(let digit):
+            // Ziffer: zum Senderplatz springen (einstellige Plätze direkt)
+            if let entry = lineup?.entry(number: digit) {
+                epgSelectedKey = Self.key(entry)
+            }
+        case .left, .right:
+            break
+        }
     }
 
     private func handleList(_ command: RemoteCommand, selectedID: String) {
@@ -625,10 +673,6 @@ final class AppModel: ObservableObject {
 
     func mediathekClosed() {
         resume()
-    }
-
-    func epgOverviewClosed() {
-        epgScanner.stop()
     }
 
     // MARK: EPG-Hintergrundscan

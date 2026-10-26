@@ -5,11 +5,7 @@ import FritzTVKit
 struct EPGOverviewView: View {
     @ObservedObject var model: AppModel
     @ObservedObject var player: PlayerController
-    @Environment(\.dismiss) private var dismiss
 
-    @State private var selectedChannelNumber: Int?
-    @FocusState private var isFocused: Bool
-    @State private var sheetKeyMonitor: Any?
     @State private var horizontalProxy: ScrollViewProxy?
 
     // Timeline-Konfiguration mit gut lesbarer, größerer Typografie
@@ -22,7 +18,11 @@ struct EPGOverviewView: View {
     init(model: AppModel, player: PlayerController, scanner: BackgroundEPGScanner? = nil) {
         self.model = model
         self.player = player
-        _selectedChannelNumber = State(initialValue: model.currentNumber)
+    }
+
+    /// Platznummer des ausgewählten Senders (Auswahl liegt im Modell, siehe `AppModel.handleEPG`).
+    private var selectedChannelNumber: Int? {
+        entries.first { AppModel.key($0) == model.epgSelectedKey }?.number
     }
 
     private var entries: [LineupEntry] {
@@ -61,82 +61,10 @@ struct EPGOverviewView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(red: 0.05, green: 0.05, blue: 0.07).ignoresSafeArea())
-        .focusable()
-        .focused($isFocused)
-        .focusEffectDisabled()
-        .onAppear {
-            isFocused = true
-            if selectedChannelNumber == nil {
-                selectedChannelNumber = model.currentNumber
-            }
-            #if os(macOS)
-            if sheetKeyMonitor == nil {
-                sheetKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
-                    switch event.keyCode {
-                    case 126: // Up
-                        selectPreviousChannel()
-                        return nil
-                    case 125: // Down
-                        selectNextChannel()
-                        return nil
-                    case 36, 76: // Return / Enter
-                        tuneSelected()
-                        return nil
-                    case 53: // Escape
-                        close()
-                        return nil
-                    default:
-                        return event
-                    }
-                }
-            }
-            #endif
-        }
-        .onDisappear {
-            #if os(macOS)
-            if let sheetKeyMonitor {
-                NSEvent.removeMonitor(sheetKeyMonitor)
-                self.sheetKeyMonitor = nil
-            }
-            #endif
-        }
-            #if os(macOS)
-            .onKeyPress(.upArrow) {
-                selectPreviousChannel()
-                return .handled
-            }
-            .onKeyPress(.downArrow) {
-                selectNextChannel()
-                return .handled
-            }
-            .onKeyPress(.return) {
-                tuneSelected()
-                return .handled
-            }
-            .onKeyPress(.space) {
-                tuneSelected()
-                return .handled
-            }
-            .onKeyPress(.escape) {
-                close()
-                return .handled
-            }
-            #elseif os(tvOS)
-            .onMoveCommand { direction in
-                switch direction {
-                case .up: selectPreviousChannel()
-                case .down: selectNextChannel()
-                default: break
-                }
-            }
-            .onPlayPauseCommand {
-                tuneSelected()
-            }
-            .onExitCommand {
-                close()
-            }
-            #endif
-            .preferredColorScheme(.dark)
+        // Keine eigene Fokus- oder Tastensteuerung: Fernbedienung und Tastatur laufen wie bei der
+        // Senderliste über `AppModel.handle`. Zwei konkurrierende Steuerungen führten dazu, dass
+        // Hoch/Runter im Hintergrund den Live-Sender wechselte statt die Auswahl zu bewegen.
+        .preferredColorScheme(.dark)
     }
 
     // MARK: - Header Bar
@@ -293,8 +221,8 @@ struct EPGOverviewView: View {
                     }
                 }
             }
-            .onChange(of: selectedChannelNumber) { _, newNum in
-                if let newNum {
+            .onChange(of: model.epgSelectedKey) { _, _ in
+                if let newNum = selectedChannelNumber {
                     withAnimation(.easeOut(duration: 0.15)) {
                         verticalProxy.scrollTo("channel_\(newNum)", anchor: .center)
                     }
@@ -346,9 +274,7 @@ struct EPGOverviewView: View {
         )
         .contentShape(Rectangle())
         .onTapGesture {
-            selectedChannelNumber = entry.number
-            model.tune(to: entry.number)
-            close()
+            model.tuneFromEPG(key: AppModel.key(entry))
         }
     }
 
@@ -387,9 +313,7 @@ struct EPGOverviewView: View {
         .background(entry.number == selectedChannelNumber ? Color.white.opacity(0.08) : Color.clear)
         .contentShape(Rectangle())
         .onTapGesture {
-            selectedChannelNumber = entry.number
-            model.tune(to: entry.number)
-            close()
+            model.tuneFromEPG(key: AppModel.key(entry))
         }
     }
 
@@ -546,46 +470,8 @@ struct EPGOverviewView: View {
         return items
     }
 
-    // MARK: - Navigation Helpers
-
-    private func selectNextChannel() {
-        guard !entries.isEmpty else { return }
-        if let current = selectedChannelNumber,
-           let index = entries.firstIndex(where: { $0.number == current }) {
-            let nextIndex = min(index + 1, entries.count - 1)
-            selectedChannelNumber = entries[nextIndex].number
-        } else {
-            selectedChannelNumber = entries.first?.number
-        }
-    }
-
-    private func selectPreviousChannel() {
-        guard !entries.isEmpty else { return }
-        if let current = selectedChannelNumber,
-           let index = entries.firstIndex(where: { $0.number == current }) {
-            let prevIndex = max(index - 1, 0)
-            selectedChannelNumber = entries[prevIndex].number
-        } else {
-            selectedChannelNumber = entries.first?.number
-        }
-    }
-
-    private func tuneSelected() {
-        guard let num = selectedChannelNumber else { return }
-        model.tune(to: num)
-        close()
-    }
-
     private func close() {
-        #if os(macOS)
-        if let sheetKeyMonitor {
-            NSEvent.removeMonitor(sheetKeyMonitor)
-            self.sheetKeyMonitor = nil
-        }
-        #endif
-        model.showEPGOverview = false
-        model.epgOverviewClosed()
-        dismiss()
+        model.closeEPGOverview()
     }
 
     static func formatTime(_ date: Date) -> String {
