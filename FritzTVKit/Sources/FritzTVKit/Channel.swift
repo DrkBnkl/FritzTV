@@ -63,3 +63,12 @@ public struct Channel: Identifiable, Hashable, Sendable {
         displayName.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: Locale(identifier: "de_DE"))
     }
 }
+
+public extension Array where Element == Channel {
+    /// Schlüssel für die gemerkte funktionierende Variante: Sender plus gewünschte Qualität.
+    /// Gilt für eine Kandidatenliste, wie `ChannelGroup.candidates` sie liefert.
+    var variantKey: String {
+        guard let first else { return "" }
+        return "\(first.kind.rawValue):\(first.groupKey):\(first.isHD)"
+    }
+}

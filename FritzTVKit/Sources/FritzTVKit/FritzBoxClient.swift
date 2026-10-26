@@ -32,19 +32,38 @@ public struct FritzBoxClient: Sendable {
 
     /// Lädt alle Listen vom ersten erreichbaren Host.
     /// Fehlende einzelne Listen (z. B. kein Radio) werden übersprungen.
+    /// Die drei Listen eines Hosts werden gleichzeitig geladen: Ist ein Host nicht erreichbar
+    /// (z. B. `fritz.box` über VPN), dauert der Wechsel zum nächsten nur einmal 5 s statt dreimal.
     public func loadCatalog() async throws -> (host: String, catalog: ChannelCatalog) {
         for host in hosts {
+            let session = self.session
+            let results = await withTaskGroup(
+                of: (index: Int, reached: Bool, data: Data?).self,
+                returning: [(index: Int, reached: Bool, data: Data?)].self
+            ) { group in
+                for (index, playlist) in Self.playlists.enumerated() {
+                    let path = playlist.path
+                    group.addTask {
+                        guard let url = URL(string: "http://\(host)\(path)") else { return (index, false, nil) }
+                        var request = URLRequest(url: url)
+                        request.timeoutInterval = 5
+                        guard let (data, response) = try? await session.data(for: request) else {
+                            return (index, false, nil)
+                        }
+                        let ok = (response as? HTTPURLResponse)?.statusCode == 200
+                        return (index, true, ok ? data : nil)
+                    }
+                }
+                var collected: [(index: Int, reached: Bool, data: Data?)] = []
+                for await result in group { collected.append(result) }
+                return collected.sorted { $0.index < $1.index }
+            }
+            let reachedHost = results.contains { $0.reached }
+            // Reihenfolge der Listen beibehalten (HD vor SD), damit die Positionen stimmen.
             var channels: [Channel] = []
-            var reachedHost = false
-            for playlist in Self.playlists {
-                guard let url = URL(string: "http://\(host)\(playlist.path)") else { continue }
-                var request = URLRequest(url: url)
-                request.timeoutInterval = 5
-                guard let result = try? await session.data(for: request) else { continue }
-                let (data, response) = result
-                reachedHost = true
-                guard (response as? HTTPURLResponse)?.statusCode == 200 else { continue }
-                channels += M3UParser.parse(data: data, kind: playlist.kind)
+            for result in results {
+                guard let data = result.data else { continue }
+                channels += M3UParser.parse(data: data, kind: Self.playlists[result.index].kind)
             }
             if reachedHost {
                 guard !channels.isEmpty else { throw ClientError.noChannels }

@@ -62,11 +62,17 @@ public final class EITLogParser: @unchecked Sendable {
     }
 
     /// Schneller Vorfilter für den Log-Empfänger: nur Zeilen, die der Parser auswertet.
+    /// Prüft nur den Zeilenanfang (wie `processLine`) statt die ganze Meldung zu durchsuchen:
+    /// Auf Debug-Stufe kommen sehr viele Meldungen, fast alle sind irrelevant.
     public static func isRelevant(_ message: String) -> Bool {
-        message.contains("EIT") || message.contains("SDT") || message.contains("event id")
-            || message.contains("short event") || message.contains("text='")
-            || message.contains("service id") || message.contains("name=")
+        let line = message.drop(while: \.isWhitespace)
+        guard let first = line.first, first == "n" || first == "*" || first == "-" else { return false }
+        return relevantPrefixes.contains { line.hasPrefix($0) }
     }
+
+    private static let relevantPrefixes = [
+        "new SDT", "new EIT", "* service id", "* event id", "- type=", "- short event", "- text='"
+    ]
 
     /// Verarbeitet eine einzelne Protokollzeile einer Quelle.
     public func processLine(_ rawLine: String, source: Int = 0) {

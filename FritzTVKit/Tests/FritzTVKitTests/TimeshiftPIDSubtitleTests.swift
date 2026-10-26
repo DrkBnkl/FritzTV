@@ -17,6 +17,30 @@ final class TimeshiftPIDSubtitleTests: XCTestCase {
         XCTAssertEqual(TimeshiftBufferManager.recordingLimit(availableBytes: 150 * mb), 0)
     }
 
+    func testBufferLimitHasNoFileSizeCap() {
+        let gb: Int64 = 1024 * 1024 * 1024
+        let mb: Int64 = 1024 * 1024
+        // Gesamtpuffer aus mehreren Abschnitten: keine 4-GB-Grenze, nur die Hälfte des freien Platzes
+        XCTAssertEqual(TimeshiftBufferManager.bufferLimit(availableBytes: 100 * gb), 50 * gb)
+        XCTAssertEqual(TimeshiftBufferManager.bufferLimit(availableBytes: 300 * mb), 100 * mb)
+        XCTAssertEqual(TimeshiftBufferManager.bufferLimit(availableBytes: 150 * mb), 0)
+    }
+
+    func testCleanupKeepsListedFiles() throws {
+        let manager = TimeshiftBufferManager()
+        manager.cleanup()
+        defer { manager.cleanup() }
+        try FileManager.default.createDirectory(at: manager.bufferDirectory, withIntermediateDirectories: true)
+        let keep = manager.bufferDirectory.appendingPathComponent("a.ts")
+        let drop = manager.bufferDirectory.appendingPathComponent("b.ts")
+        try Data([1]).write(to: keep)
+        try Data([2]).write(to: drop)
+        let keptPath = try XCTUnwrap(manager.recordingFiles().first { $0.lastPathComponent == "a.ts" }).path
+        manager.cleanup(keeping: [keptPath])
+        XCTAssertEqual(manager.recordingFiles().map(\.lastPathComponent), ["a.ts"])
+        XCTAssertEqual(manager.latestRecordingURL(excluding: [keptPath]), nil)
+    }
+
     func testSoutOptionDisplaysAndRecords() throws {
         let url = URL(fileURLWithPath: "/tmp/Timeshift/timeshift_das_erste_1.ts")
         XCTAssertEqual(TimeshiftBufferManager.soutDisplayAndRecordOption(destination: url),

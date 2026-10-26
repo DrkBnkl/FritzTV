@@ -584,9 +584,7 @@ struct EPGOverviewView: View {
     }
 
     static func formatTime(_ date: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "HH:mm"
-        return formatter.string(from: date)
+        UI.timeFormatter.string(from: date)
     }
 
     private func dayName(from date: Date) -> String {

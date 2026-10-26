@@ -16,6 +16,8 @@ struct PlaybackOptions: Equatable {
     var audioDelayMs: Int
     var audioDelayAC3Ms: Int
     var timeshift: Bool
+    /// Pufferlänge für Timeshift in Minuten.
+    var timeshiftMinutes: Int
 }
 
 enum PlayerStatus: Equatable {
@@ -58,6 +60,11 @@ final class PlayerController: ObservableObject {
     @Published private(set) var subtitleName = "Aus"
     @Published private(set) var hasSubtitles = false
     @Published private(set) var stats = PlaybackStatistics()
+    /// Statistiken nur sammeln, solange sie zu sehen sind (Sendungsinfo). Sonst würde jede
+    /// Aktualisierung zweimal pro Sekunde alle Ansichten neu zeichnen, die den Player beobachten.
+    var collectStats = false {
+        didSet { if collectStats && !oldValue { updatePlaybackStats() } }
+    }
     /// Zeitversatz zum Live-Bild aus Sprüngen und beendeten Pausen.
     /// Gesetzt, solange das Bild angehalten ist.
     @Published private(set) var pausedSince: Date?
@@ -146,7 +153,7 @@ final class PlayerController: ObservableObject {
     func play(candidates list: [Channel], options: PlaybackOptions, preferredVariantID: String? = nil) {
         guard !list.isEmpty else { return }
         var ordered = list
-        currentVariantKey = Self.variantKey(list)
+        currentVariantKey = list.variantKey
         let savedVariant = preferredVariantID ?? workingVariant[currentVariantKey]
         if let known = savedVariant, let index = ordered.firstIndex(where: { $0.id == known }) {
             ordered.insert(ordered.remove(at: index), at: 0)
@@ -170,15 +177,10 @@ final class PlayerController: ObservableObject {
         reconnectTask = nil
         wasPlaying = false
         stopReplay()
-        if recordingActive {
-            mediaPlayer.stopRecording()
-            recordingActive = false
-        }
+        endLiveRecording()
         mediaPlayer.audio?.isMuted = true
         mediaPlayer.stop()
-        recordingURL = nil
-        recordingStartedAt = nil
-        TimeshiftBufferManager.shared.cleanup()
+        discardBuffer()
         status = .idle
     }
 
@@ -188,16 +190,14 @@ final class PlayerController: ObservableObject {
         reconnectTask = nil
         wasPlaying = false
         stopReplay()
-        if recordingActive {
-            mediaPlayer.stopRecording()
-            recordingActive = false
-        }
+        endLiveRecording()
         mediaPlayer.audio?.isMuted = true
         mediaPlayer.stop()
+        discardBuffer()
         status = .failed(title: title, message: message, hint: hint)
     }
 
-    /// Startet den Stream neu, z. B. nach geänderten Einstellungen oder für „zurück zu Live“.
+    /// Startet den Stream neu (leert den Timeshift-Puffer).
     func restart() {
         guard channel != nil else { return }
         reconnectTask?.cancel()
@@ -205,21 +205,20 @@ final class PlayerController: ObservableObject {
         start()
     }
 
-    private func start() {
+    /// Öffnet den Stream. `preserveTimeshift`: Neuverbinden desselben Senders nach einem Abriss –
+    /// bisheriger Puffer und eine laufende Wiedergabe daraus bleiben erhalten.
+    private func start(preserveTimeshift: Bool = false) {
         guard let channel, let options else { return }
         monitorTask?.cancel()
-        if recordingActive {
-            mediaPlayer.stopRecording()
-            recordingActive = false
-        }
+        endLiveRecording()
         wasPlaying = false
-        stopReplay()
+        if !(preserveTimeshift && isReplaying) {
+            stopReplay()
+        }
         mediaPlayer.audio?.isMuted = true
         mediaPlayer.stop()
         lastDisplayedPictures = 0
         lastPictureChangeAt = Date()
-        recordingURL = nil
-        recordingStartedAt = nil
         recordingLimit = 0
         nowPlaying = nil
         vlcTitle = nil
@@ -235,7 +234,9 @@ final class PlayerController: ObservableObject {
         }
         DebugLog.log("Öffne Stream per \(options.rtspTCP || forceTCP ? "TCP" : "UDP"), Puffer \(options.networkCachingMs) ms")
         if options.timeshift {
-            prepareRecording()
+            prepareRecording(keepHistory: preserveTimeshift)
+        } else {
+            discardBuffer()
         }
         mediaPlayer.media = media
         mediaPlayer.setDeinterlaceFilter(options.deinterlace && !channel.isHD ? "yadif" : nil)
@@ -304,20 +305,21 @@ final class PlayerController: ObservableObject {
                     beginNativeRecording()
                 }
             }
-            status = (isReplaying && replayAnchor.paused) ? .paused : .playing
-            updatePlaybackStats()
+            setStatus((isReplaying && replayAnchor.paused) ? .paused : .playing)
+            if collectStats { updatePlaybackStats() }
             refreshTrackNames()
             checkStreamHealth()
         } else if !wasPlaying {
             // Solange noch keine sauberen Daten laufen, Audio stummhalten
             mediaPlayer.audio?.isMuted = true
+            if Date().timeIntervalSince(openedAt) > 12 {
+                // Nach 12 Sekunden ohne Bild und Ton: TCP, nächste Variante oder Fehlermeldung.
+                DebugLog.log("Neu verbinden: nach 12 s keine Daten (Zustand \(state.rawValue))")
+                handleNoData()
+                return
+            }
         } else if state == .paused || (isReplaying && replayAnchor.paused) {
-            status = .paused
-        } else if !wasPlaying, Date().timeIntervalSince(openedAt) > 12 {
-            // Nach 12 Sekunden ohne Bild und Ton neu versuchen.
-            DebugLog.log("Neu verbinden: nach 12 s keine Daten (Zustand \(state.rawValue))")
-            handleNoData()
-            return
+            setStatus(.paused)
         }
 
         if let title = mediaPlayer.media?.metadata(forKey: VLCMetaInformationNowPlaying),
@@ -441,10 +443,10 @@ final class PlayerController: ObservableObject {
         if nowPlaying == nil, let current { nowPlaying = current.title }
     }
 
-    /// Schlüssel für die gemerkte Variante: Sender plus gewünschte Qualität.
-    private static func variantKey(_ list: [Channel]) -> String {
-        guard let first = list.first else { return "" }
-        return "\(first.kind.rawValue):\(first.groupKey):\(first.isHD)"
+    /// Setzt den Status nur bei einer Änderung: Jede Zuweisung an eine `@Published`-Eigenschaft
+    /// löst ein Neuzeichnen aus, auch wenn der Wert gleich bleibt.
+    private func setStatus(_ newStatus: PlayerStatus) {
+        if status != newStatus { status = newStatus }
     }
 
     /// Es kam weder Bild noch Ton. Reihenfolge: erst auf TCP wechseln, dann die nächste Variante
@@ -505,13 +507,12 @@ final class PlayerController: ObservableObject {
         return true
     }
 
+    /// Verbindet denselben Sender neu. Der Timeshift-Puffer bleibt erhalten; schaut man gerade
+    /// zeitversetzt, läuft diese Wiedergabe weiter.
     private func scheduleReconnect(after seconds: Int = 3) {
         guard reconnectTask == nil else { return }
         monitorTask?.cancel()
-        if recordingActive {
-            mediaPlayer.stopRecording()
-            recordingActive = false
-        }
+        endLiveRecording()
         mediaPlayer.audio?.isMuted = true
         mediaPlayer.stop()
         wasPlaying = false
@@ -522,21 +523,71 @@ final class PlayerController: ObservableObject {
                 if Task.isCancelled { return }
             }
             self?.reconnectTask = nil
-            self?.start()
+            self?.start(preserveTimeshift: true)
         }
     }
 
-    // MARK: Timeshift über Mitschnitt in eine Datei
+    // MARK: Timeshift über Mitschnitt in Dateien (Ringpuffer aus Abschnitten)
     //
     // Der Live-Player zeigt das Bild im normalen Dekodiermodus (ohne `:sout`, damit nur eine
     // Tonspur dekodiert wird) und schreibt den Strom gleichzeitig per libVLC-Mitschnitt in eine
     // TS-Datei (eine RTSP-Sitzung, ein Tuner). Anhalten oder Zurückspulen startet den zweiten
-    // Player auf dieser Datei; der Live-Player läuft stumm weiter und schreibt mit. „Live“ oder
-    // Aufholen bis zum Dateiende schaltet zurück.
+    // Player auf diesen Dateien; der Live-Player läuft stumm weiter und schreibt mit. „Live“ oder
+    // Aufholen bis zum Ende schaltet zurück.
+    //
+    // Ringpuffer: Alle 15 Minuten (oder bei 4 GB) beginnt eine neue Datei. Abgeschlossene Abschnitte
+    // bleiben erhalten, bis sie älter als die eingestellte Pufferlänge sind oder der Platz knapp
+    // wird. Ein Abriss der Verbindung beendet nur den laufenden Abschnitt; der bisherige Puffer und
+    // eine laufende Wiedergabe daraus bleiben erhalten. Nur ein Senderwechsel leert den Puffer.
 
-    private func prepareRecording() {
+    private struct RecordingSegment: Equatable {
+        let url: URL
+        let startedAt: Date
+        var endedAt: Date?
+
+        /// Länge in Sekunden (wächst, solange der Abschnitt noch beschrieben wird).
+        var seconds: Double { (endedAt ?? Date()).timeIntervalSince(startedAt) }
+    }
+
+    /// Länge eines Abschnitts, bevor eine neue Datei beginnt.
+    private static let segmentSeconds: Double = 15 * 60
+    /// Mindestgröße einer Datei, bevor sie abgespielt wird.
+    private static let minimumPlayableBytes: Int64 = 65_536
+
+    /// Abgeschlossene Abschnitte, älteste zuerst.
+    private var endedSegments: [RecordingSegment] = []
+    /// Dateien, in die nicht mehr geschrieben wird (zum Erkennen der neuen Mitschnittdatei).
+    private var retiredPaths: Set<String> = []
+    /// Abschnitt, aus dem gerade wiedergegeben wird.
+    private var replaySegment: RecordingSegment?
+    /// Höchstgröße des gesamten Puffers.
+    private var bufferLimit: Int64 = 0
+
+    /// Laufender Abschnitt, sobald seine Datei erkannt ist.
+    private var liveSegment: RecordingSegment? {
+        guard let url = recordingURL, let started = recordingStartedAt else { return nil }
+        return RecordingSegment(url: url, startedAt: started, endedAt: nil)
+    }
+
+    /// Alle abspielbaren Abschnitte in zeitlicher Reihenfolge.
+    private var availableSegments: [RecordingSegment] {
+        var all = endedSegments
+        if let live = liveSegment,
+           TimeshiftBufferManager.shared.fileSize(at: live.url) > Self.minimumPlayableBytes {
+            all.append(live)
+        }
+        return all
+    }
+
+    /// Bereitet den Mitschnitt vor. `keepHistory`: bisherige Abschnitte behalten (Neuverbinden
+    /// desselben Senders), sonst wird der Puffer geleert (Senderwechsel).
+    private func prepareRecording(keepHistory: Bool) {
         let manager = TimeshiftBufferManager.shared
-        manager.cleanup()
+        if keepHistory {
+            pruneSegments()
+        } else {
+            discardBuffer()
+        }
         try? FileManager.default.createDirectory(at: manager.bufferDirectory, withIntermediateDirectories: true)
         let limit = manager.recordingLimitBytes()
         guard limit >= 500 * 1024 * 1024 else {
@@ -545,43 +596,113 @@ final class PlayerController: ObservableObject {
             return
         }
         recordingLimit = limit
+        // Bereits belegter Puffer zählt mit, sonst schrumpft die Grenze bei jedem Neuverbinden.
+        bufferLimit = manager.bufferLimitBytes() + manager.currentBufferSizeInBytes()
         lastRecordingCheck = Date()
+    }
+
+    /// Leert den Puffer vollständig (Senderwechsel, Timeshift aus, Stopp).
+    private func discardBuffer() {
+        endedSegments = []
+        retiredPaths = []
+        TimeshiftBufferManager.shared.cleanup(keeping: replaySegment.map { [$0.url.path] } ?? [])
     }
 
     private func beginNativeRecording() {
         let manager = TimeshiftBufferManager.shared
         try? FileManager.default.createDirectory(at: manager.bufferDirectory, withIntermediateDirectories: true)
+        // Alle vorhandenen Dateien sind ältere Abschnitte; die neue erkennt `pollTimeshift`.
+        retiredPaths.formUnion(manager.recordingFiles().map(\.path))
         _ = mediaPlayer.startRecording(atPath: manager.bufferDirectory.path)
         recordingActive = true
+        recordingURL = nil
         recordingStartedAt = Date()
         lastRecordingCheck = Date()
-        DebugLog.log("Timeshift-Mitschnitt gestartet in \(manager.bufferDirectory.lastPathComponent), höchstens \(recordingLimit / 1_048_576) MB")
+        DebugLog.log("Timeshift-Mitschnitt gestartet in \(manager.bufferDirectory.lastPathComponent), Abschnitt höchstens \(recordingLimit / 1_048_576) MB, Puffer höchstens \(bufferLimit / 1_048_576) MB")
+    }
+
+    /// Beendet den laufenden Abschnitt. Die Datei bleibt als abgeschlossener Abschnitt erhalten.
+    private func endLiveRecording() {
+        if recordingActive {
+            mediaPlayer.stopRecording()
+            recordingActive = false
+        }
+        let manager = TimeshiftBufferManager.shared
+        let now = Date()
+        if let url = recordingURL, let started = recordingStartedAt,
+           manager.fileSize(at: url) > Self.minimumPlayableBytes {
+            endedSegments.append(RecordingSegment(url: url, startedAt: started, endedAt: now))
+        }
+        if let replay = replaySegment, replay.endedAt == nil, replay.url == recordingURL {
+            replaySegment?.endedAt = now
+        }
+        retiredPaths.formUnion(manager.recordingFiles().map(\.path))
+        recordingURL = nil
+        recordingStartedAt = nil
+    }
+
+    /// Neue Datei beginnen, ohne den Live-Empfang zu unterbrechen.
+    private func rotateRecording() {
+        DebugLog.log("Timeshift: neuer Abschnitt")
+        endLiveRecording()
+        beginNativeRecording()
+    }
+
+    /// Entfernt Abschnitte, die älter als die Pufferlänge sind oder über die Größengrenze gehen.
+    /// Der Abschnitt, aus dem gerade wiedergegeben wird, bleibt immer erhalten.
+    private func pruneSegments() {
+        let manager = TimeshiftBufferManager.shared
+        let minutes = max(options?.timeshiftMinutes ?? 90, 1)
+        let keepAfter = Date().addingTimeInterval(-Double(minutes) * 60)
+        let replayURL = replaySegment?.url
+        endedSegments.removeAll { segment in
+            (segment.endedAt ?? Date()) < keepAfter && segment.url != replayURL
+        }
+        if bufferLimit > 0 {
+            var total = endedSegments.reduce(Int64(0)) { $0 + manager.fileSize(at: $1.url) }
+                + (recordingURL.map { manager.fileSize(at: $0) } ?? 0)
+            while total > bufferLimit,
+                  let index = endedSegments.firstIndex(where: { $0.url != replayURL }) {
+                let removed = endedSegments.remove(at: index)
+                total -= manager.fileSize(at: removed.url)
+            }
+        }
+        // Dateien löschen, die zu keinem Abschnitt mehr gehören.
+        var keep = Set(endedSegments.map(\.url.path))
+        if let replayURL { keep.insert(replayURL.path) }
+        if let recordingURL { keep.insert(recordingURL.path) }
+        for file in manager.recordingFiles() where retiredPaths.contains(file.path) && !keep.contains(file.path) {
+            manager.remove(file)
+            retiredPaths.remove(file.path)
+        }
+    }
+
+    /// Erkennt die Datei des laufenden Mitschnitts (VLC wählt den Namen selbst).
+    private func detectRecordingFile() {
+        guard recordingActive, recordingURL == nil else { return }
+        let manager = TimeshiftBufferManager.shared
+        if let url = manager.latestRecordingURL(excluding: retiredPaths), manager.fileSize(at: url) > 0 {
+            recordingURL = url
+            DebugLog.log("Timeshift-Mitschnittdatei erkannt: \(url.lastPathComponent)")
+        }
     }
 
     var canTimeshift: Bool {
-        guard options?.timeshift == true, recordingStartedAt != nil,
-              status == .playing || status == .paused else { return false }
-        if recordingURL == nil {
-            recordingURL = TimeshiftBufferManager.shared.latestRecordingURL()
-        }
-        guard let url = recordingURL else { return false }
-        return TimeshiftBufferManager.shared.fileSize(at: url) > 65_536
+        guard options?.timeshift == true, status == .playing || status == .paused else { return false }
+        detectRecordingFile()
+        return !availableSegments.isEmpty
     }
 
-    /// Länge des bisherigen Mitschnitts in Sekunden.
-    private var recordedSeconds: Double {
-        recordingStartedAt.map { Date().timeIntervalSince($0) } ?? 0
-    }
-
-    /// Aktuelle Position im Mitschnitt in Sekunden ab Dateianfang.
+    /// Aktuelle Position im wiedergegebenen Abschnitt in Sekunden ab Dateianfang.
     private var replayPosition: Double {
         replayAnchor.paused ? replayAnchor.fileSeconds
                             : replayAnchor.fileSeconds + Date().timeIntervalSince(replayAnchor.at)
     }
 
-    /// Aktueller Rückstand zum Live-Bild in Sekunden.
+    /// Aktueller Rückstand zum Live-Bild in Sekunden (Uhrzeit der Position bis jetzt).
     var currentBehind: TimeInterval {
-        isReplaying ? max(0, recordedSeconds - replayPosition) : 0
+        guard isReplaying, let segment = replaySegment else { return 0 }
+        return max(0, Date().timeIntervalSince(segment.startedAt) - replayPosition)
     }
 
     var isTimeshifted: Bool { isReplaying }
@@ -610,6 +731,9 @@ final class PlayerController: ObservableObject {
             startReplay(behind: 0, paused: true)
         } else if status != .playing || !mediaPlayer.isPlaying {
             start()
+        } else {
+            // Läuft, aber (noch) kein Mitschnitt: sichtbar machen statt stumm nichts zu tun.
+            showFeedback(options?.timeshift == true ? "Timeshift startet gleich …" : "Timeshift ist ausgeschaltet")
         }
     }
 
@@ -617,55 +741,46 @@ final class PlayerController: ObservableObject {
     private var lastJumpPressAt = Date.distantPast
     private var lastJumpForward = true
     private var jumpPressCount = 0
-    @Published public private(set) var jumpFeedback: String?
+    /// Kurzer Hinweis in der Bildmitte (Sprungweite, Timeshift-Hinweise).
+    @Published private(set) var jumpFeedback: String?
     private var jumpFeedbackTask: Task<Void, Never>?
 
-    public func jumpProgressive(forward: Bool) {
+    func jumpProgressive(forward: Bool) {
         let step = ProgressiveJump.nextStep(
             forward: forward,
             lastPressAt: &lastJumpPressAt,
             lastDirectionForward: &lastJumpForward,
             pressCount: &jumpPressCount
         )
+        let wasActive = isReplaying || canTimeshift
         jump(seconds: Int(step.stepDelta))
-        jumpFeedback = step.displayText
+        if wasActive || !forward {
+            showFeedback(wasActive ? step.displayText
+                         : (options?.timeshift == true ? "Timeshift startet gleich …" : "Timeshift ist ausgeschaltet"))
+        }
+    }
+
+    func showFeedback(_ text: String) {
+        jumpFeedback = text
         jumpFeedbackTask?.cancel()
-        jumpFeedbackTask = Task {
+        jumpFeedbackTask = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(900))
-            if !Task.isCancelled {
-                await MainActor.run { [weak self] in
-                    self?.jumpFeedback = nil
-                }
-            }
+            guard !Task.isCancelled else { return }
+            self?.jumpFeedback = nil
         }
     }
 
     func jump(seconds: Int) {
         let step = Double(seconds)
-        if seconds < 0 {
-            if isReplaying {
-                let target = max(0, replayPosition + step)
-                if replaySeekPending != nil {
-                    replaySeekPending = target
-                } else {
-                    replayPlayer.jumpBackward(Int32(replayPosition - target))
-                }
-                replayAnchor = (target, Date(), replayAnchor.paused)
-            } else if canTimeshift {
-                startReplay(behind: -step, paused: false)
-            }
-        } else if isReplaying {
-            if currentBehind <= step + 1 {
+        if isReplaying, let segment = replaySegment {
+            let target = segment.startedAt.addingTimeInterval(replayPosition + step)
+            if step > 0, target >= Date().addingTimeInterval(-1) {
                 goLive()
-            } else {
-                let target = replayPosition + step
-                if replaySeekPending != nil {
-                    replaySeekPending = target
-                } else {
-                    replayPlayer.jumpForward(Int32(seconds))
-                }
-                replayAnchor = (target, Date(), replayAnchor.paused)
+                return
             }
+            replay(atWallClock: target, paused: replayAnchor.paused)
+        } else if seconds < 0, canTimeshift {
+            startReplay(behind: -step, paused: false)
         }
     }
 
@@ -676,28 +791,88 @@ final class PlayerController: ObservableObject {
     }
 
     private func startReplay(behind: Double, paused: Bool) {
-        if recordingURL == nil {
-            recordingURL = TimeshiftBufferManager.shared.latestRecordingURL()
+        // 1 s Abstand zum Ende: VLC puffert, die Datei hinkt dem Bild leicht hinterher.
+        replay(atWallClock: Date().addingTimeInterval(-behind - 1), paused: paused)
+    }
+
+    /// Spielt den Puffer ab der angegebenen Uhrzeit. Liegt sie vor dem Puffer, beginnt die
+    /// Wiedergabe am Anfang; liegt sie in einer Lücke (Verbindungsabriss), am nächsten Abschnitt.
+    @discardableResult
+    private func replay(atWallClock target: Date, paused: Bool) -> Bool {
+        detectRecordingFile()
+        let all = availableSegments
+        var chosen: (segment: RecordingSegment, offset: Double)?
+        for segment in all {
+            let end = segment.endedAt ?? Date()
+            if target < segment.startedAt {
+                chosen = (segment, 0)
+                break
+            }
+            if target <= end {
+                chosen = (segment, target.timeIntervalSince(segment.startedAt))
+                break
+            }
         }
-        guard let url = recordingURL, let options else { return }
-        // 1 s Abstand zum Dateiende: VLC puffert, die Datei hinkt dem Bild leicht hinterher.
-        let position = max(0, recordedSeconds - behind - 1)
-        let media = VLCMedia(url: url)
+        if chosen == nil, let last = all.last {
+            chosen = (last, max(0, last.seconds - 1))
+        }
+        guard let chosen else { return false }
+        if isReplaying, replaySegment?.url == chosen.segment.url {
+            seekWithinReplay(to: chosen.offset)
+        } else {
+            openReplay(segment: chosen.segment, position: chosen.offset, paused: paused)
+        }
+        return true
+    }
+
+    private func seekWithinReplay(to target: Double) {
+        if replaySeekPending != nil {
+            replaySeekPending = target
+        } else {
+            let delta = target - replayPosition
+            if delta < 0 {
+                replayPlayer.jumpBackward(Int32((-delta).rounded()))
+            } else if delta > 0 {
+                replayPlayer.jumpForward(Int32(delta.rounded()))
+            }
+        }
+        replayAnchor = (target, Date(), replayAnchor.paused)
+    }
+
+    private func openReplay(segment: RecordingSegment, position: Double, paused: Bool) {
+        guard let options else { return }
+        if isReplaying {
+            replayPlayer.stop()
+        }
+        let media = VLCMedia(url: segment.url)
         media.addOption(":file-caching=300")
         replayPlayer.media = media
         replayPlayer.setDeinterlaceFilter(options.deinterlace && channel?.isHD == false ? "yadif" : nil)
         mediaPlayer.audio?.isMuted = true
         replayPlayer.audio?.isMuted = paused
         replayPlayer.play()
+        replaySegment = segment
         replayAnchor = (position, Date(), paused)
         replaySeekPending = position > 0.5 ? position : nil
         replayPausePending = paused
         replayTracksSynced = false
         replayOpenedAt = Date()
-        pausedSince = paused ? Date() : nil
+        pausedSince = paused ? (pausedSince ?? Date()) : nil
         isReplaying = true
         status = paused ? .paused : .playing
-        DebugLog.log("Timeshift: Wiedergabe aus dem Mitschnitt ab \(Int(position)) s (\(Int(behind)) s hinter Live), angehalten=\(paused)")
+        DebugLog.log("Timeshift: Wiedergabe aus \(segment.url.lastPathComponent) ab \(Int(position)) s (\(Int(currentBehind)) s hinter Live), angehalten=\(paused)")
+    }
+
+    /// Ende eines Abschnitts erreicht: im nächsten Abschnitt weiter oder zurück zu Live.
+    private func continueAfter(_ segment: RecordingSegment) {
+        detectRecordingFile()
+        if let end = segment.endedAt,
+           let next = availableSegments.first(where: { $0.url != segment.url && $0.startedAt >= segment.startedAt }) {
+            // Lücke durch einen Verbindungsabriss überspringen.
+            openReplay(segment: next, position: max(0, end.timeIntervalSince(next.startedAt)), paused: false)
+            return
+        }
+        goLive()
     }
 
     private func stopReplay() {
@@ -710,6 +885,8 @@ final class PlayerController: ObservableObject {
         }
         replayPlayer.audio?.isMuted = false
         isReplaying = false
+        replaySegment = nil
+        pruneSegments()
         if wasPlaying {
             mediaPlayer.audio?.isMuted = false
             status = .playing
@@ -718,13 +895,7 @@ final class PlayerController: ObservableObject {
 
     /// Läuft mit der Überwachung zweimal pro Sekunde.
     private func pollTimeshift() {
-        if recordingActive && recordingURL == nil {
-            if let url = TimeshiftBufferManager.shared.latestRecordingURL(),
-               TimeshiftBufferManager.shared.fileSize(at: url) > 0 {
-                recordingURL = url
-                DebugLog.log("Timeshift-Mitschnittdatei erkannt: \(url.lastPathComponent)")
-            }
-        }
+        detectRecordingFile()
 
         if isReplaying {
             mediaPlayer.audio?.isMuted = true
@@ -766,22 +937,31 @@ final class PlayerController: ObservableObject {
                 }
             }
 
-            // Bis zum Dateiende aufgeholt: zurück zum Live-Bild.
+            // Ende des Abschnitts erreicht: nächster Abschnitt bzw. zurück zum Live-Bild.
             let state = replayPlayer.state
             let openingGrace = Date().timeIntervalSince(replayOpenedAt) < 1.5
-            if state == .ended || state == .error || (!replayAnchor.paused && !openingGrace && currentBehind < 1) {
+            if state == .error {
                 goLive()
+            } else if let segment = replaySegment {
+                let remaining = segment.seconds - replayPosition
+                if state == .ended || (!replayAnchor.paused && !openingGrace && remaining < 1) {
+                    continueAfter(segment)
+                }
             }
         }
 
-        // Größe des Mitschnitts prüfen (alle 10 s).
-        guard let url = recordingURL, recordingLimit > 0,
+        // Abschnitte wechseln und alten Puffer aufräumen (alle 10 s).
+        guard recordingActive, recordingLimit > 0,
               Date().timeIntervalSince(lastRecordingCheck) > 10 else { return }
         lastRecordingCheck = Date()
-        if TimeshiftBufferManager.shared.fileSize(at: url) > recordingLimit {
-            DebugLog.log("Timeshift-Mitschnitt hat die Grenze von \(recordingLimit / 1_048_576) MB erreicht – Puffer wird neu begonnen")
-            restart()
+        if let url = recordingURL, let started = recordingStartedAt {
+            let tooLong = Date().timeIntervalSince(started) >= Self.segmentSeconds
+            let tooBig = TimeshiftBufferManager.shared.fileSize(at: url) >= recordingLimit
+            if tooLong || tooBig {
+                rotateRecording()
+            }
         }
+        pruneSegments()
     }
 
     // MARK: Ton und Untertitel
@@ -850,22 +1030,27 @@ final class PlayerController: ObservableObject {
     }
 
     private func refreshTrackNames() {
+        // Läuft zweimal pro Sekunde: nur bei Änderungen zuweisen (siehe `setStatus`).
         let subIndexes = indexes(mediaPlayer.videoSubTitlesIndexes).filter { $0 >= 0 }
-        hasSubtitles = !subIndexes.isEmpty
+        let newHasSubtitles = !subIndexes.isEmpty
+        if hasSubtitles != newHasSubtitles { hasSubtitles = newHasSubtitles }
         let rawAudio = trackName(current: mediaPlayer.currentAudioTrackIndex,
                                  names: mediaPlayer.audioTrackNames,
                                  indexes: mediaPlayer.audioTrackIndexes) ?? "Standard"
-        audioTrackName = cleanAudioName(rawAudio)
+        let newAudioName = cleanAudioName(rawAudio)
+        if audioTrackName != newAudioName { audioTrackName = newAudioName }
 
         let subtitle = mediaPlayer.currentVideoSubTitleIndex
+        let newSubtitleName: String
         if subtitle < 0 {
-            subtitleName = hasSubtitles ? "Aus" : "Aus (keine vorhanden)"
+            newSubtitleName = newHasSubtitles ? "Aus" : "Aus (keine vorhanden)"
         } else {
             let rawSub = trackName(current: subtitle,
                                   names: mediaPlayer.videoSubTitlesNames,
                                   indexes: mediaPlayer.videoSubTitlesIndexes) ?? "An"
-            subtitleName = cleanSubtitleName(rawSub)
+            newSubtitleName = cleanSubtitleName(rawSub)
         }
+        if subtitleName != newSubtitleName { subtitleName = newSubtitleName }
     }
 
     private static let trackRegex = try? NSRegularExpression(pattern: #"Track\s*\d+\s*-\s*\[(.*?)\]"#)

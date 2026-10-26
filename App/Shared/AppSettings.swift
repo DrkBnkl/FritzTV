@@ -15,6 +15,8 @@ final class AppSettings: ObservableObject {
     @Published var audioDelayAC3Ms: Int { didSet { defaults.set(audioDelayAC3Ms, forKey: Keys.audioDelayAC3Ms) } }
     @Published var blackScreenOnZap: Bool { didSet { defaults.set(blackScreenOnZap, forKey: Keys.blackScreenOnZap) } }
     @Published var timeshift: Bool { didSet { defaults.set(timeshift, forKey: Keys.timeshift) } }
+    /// Länge des Timeshift-Puffers in Minuten.
+    @Published var timeshiftMinutes: Int { didSet { defaults.set(timeshiftMinutes, forKey: Keys.timeshiftMinutes) } }
     @Published var bannerSeconds: Int { didSet { defaults.set(bannerSeconds, forKey: Keys.bannerSeconds) } }
     /// Adresse von press2arr („Lichtspiel“) auf der NAS für die Mediathek-Seite.
     @Published var press2arrAddress: String { didSet { defaults.set(press2arrAddress, forKey: Keys.press2arr) } }
@@ -50,6 +52,7 @@ final class AppSettings: ObservableObject {
             Keys.audioDelayAC3Ms: -125,
             Keys.blackScreenOnZap: true,
             Keys.timeshift: true,
+            Keys.timeshiftMinutes: 90,
             Keys.bannerSeconds: 15,
             Keys.match50Hz: true,
             Keys.press2arr: "192.168.178.99:5056"
@@ -63,8 +66,17 @@ final class AppSettings: ObservableObject {
         audioDelayAC3Ms = defaults.object(forKey: Keys.audioDelayAC3Ms) != nil ? defaults.integer(forKey: Keys.audioDelayAC3Ms) : defaults.integer(forKey: Keys.audioDelayMs)
         blackScreenOnZap = defaults.object(forKey: Keys.blackScreenOnZap) != nil ? defaults.bool(forKey: Keys.blackScreenOnZap) : true
         timeshift = defaults.bool(forKey: Keys.timeshift)
-        let storedBanner = defaults.integer(forKey: Keys.bannerSeconds)
-        bannerSeconds = storedBanner >= 15 ? storedBanner : 15
+        let storedMinutes = defaults.integer(forKey: Keys.timeshiftMinutes)
+        timeshiftMinutes = storedMinutes > 0 ? storedMinutes : 90
+        // Früher wurde jeder Wert unter 15 s bei jedem Start auf 15 s gesetzt, sodass 8 oder 10 s
+        // nie gespeichert blieben. Jetzt nur noch einmalig alte, zu kurze Werte anheben.
+        var storedBanner = defaults.integer(forKey: Keys.bannerSeconds)
+        if !defaults.bool(forKey: Keys.bannerMigrated) {
+            if storedBanner < 15 { storedBanner = 15 }
+            defaults.set(storedBanner, forKey: Keys.bannerSeconds)
+            defaults.set(true, forKey: Keys.bannerMigrated)
+        }
+        bannerSeconds = storedBanner > 0 ? storedBanner : 15
         match50Hz = defaults.bool(forKey: Keys.match50Hz)
         press2arrAddress = defaults.string(forKey: Keys.press2arr) ?? ""
         boxUsername = defaults.string(forKey: Keys.boxUsername) ?? ""
@@ -104,6 +116,8 @@ final class AppSettings: ObservableObject {
         static let audioDelayAC3Ms = "audioDelayAC3Ms"
         static let blackScreenOnZap = "blackScreenOnZap"
         static let timeshift = "timeshift"
+        static let timeshiftMinutes = "timeshiftMinutes"
+        static let bannerMigrated = "bannerSecondsMigrated"
         static let bannerSeconds = "bannerSeconds"
         static let match50Hz = "match50Hz"
         static let press2arr = "press2arrAddress"

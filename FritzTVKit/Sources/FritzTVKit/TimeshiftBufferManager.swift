@@ -76,6 +76,21 @@ public final class TimeshiftBufferManager: @unchecked Sendable {
         return max(0, min(maxSegmentSizeBytes, usable))
     }
 
+    /// Höchstgröße des gesamten Puffers (alle Abschnitte zusammen): höchstens die Hälfte des
+    /// freien Speichers und immer mit 200 MB Reserve, ohne 4-GB-Grenze (die gilt je Datei).
+    public func bufferLimitBytes() -> Int64 {
+        guard let values = try? bufferDirectory.resourceValues(forKeys: [.volumeAvailableCapacityKey]),
+              let available = values.volumeAvailableCapacity else {
+            return Self.maxSegmentSizeBytes
+        }
+        return Self.bufferLimit(availableBytes: Int64(available))
+    }
+
+    /// Rechenregel für `bufferLimitBytes`, getrennt testbar.
+    public static func bufferLimit(availableBytes: Int64) -> Int64 {
+        max(0, min(availableBytes / 2, availableBytes - minFreeSpaceReserveBytes))
+    }
+
     /// Größe einer Datei im Puffer (0, wenn es sie nicht gibt).
     public func fileSize(at url: URL) -> Int64 {
         guard let size = (try? url.resourceValues(forKeys: [.fileSizeKey]))?.fileSize else { return 0 }
@@ -83,16 +98,10 @@ public final class TimeshiftBufferManager: @unchecked Sendable {
     }
 
     /// Liefert die neueste Mitschnittdatei im Pufferverzeichnis (z. B. von `startRecording(atPath:)` angelegt).
-    public func latestRecordingURL() -> URL? {
-        guard let files = try? FileManager.default.contentsOfDirectory(
-            at: bufferDirectory,
-            includingPropertiesForKeys: [.contentModificationDateKey, .fileSizeKey],
-            options: [.skipsHiddenFiles]
-        ) else {
-            return nil
-        }
-        return files
-            .filter { $0.pathExtension.lowercased() == "ts" }
+    /// `excluding`: Pfade älterer Abschnitte, die nicht mehr beschrieben werden.
+    public func latestRecordingURL(excluding: Set<String> = []) -> URL? {
+        recordingFiles()
+            .filter { !excluding.contains($0.path) }
             .max { a, b in
                 let dateA = (try? a.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
                 let dateB = (try? b.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
@@ -111,13 +120,31 @@ public final class TimeshiftBufferManager: @unchecked Sendable {
         ":sout=#duplicate{dst=std{access=file,mux=ts,dst=\(destination.path)}}"
     }
 
+    /// Alle Mitschnittdateien (.ts) im Pufferverzeichnis.
+    public func recordingFiles() -> [URL] {
+        guard let files = try? FileManager.default.contentsOfDirectory(
+            at: bufferDirectory,
+            includingPropertiesForKeys: [.contentModificationDateKey, .fileSizeKey],
+            options: [.skipsHiddenFiles]
+        ) else {
+            return []
+        }
+        return files.filter { $0.pathExtension.lowercased() == "ts" }
+    }
+
     /// Bereinigt alte Timeshift-Dateien beim Senderwechsel oder Beenden.
-    public func cleanup() {
+    /// `keeping`: Dateien, die erhalten bleiben (z. B. der Abschnitt, der gerade wiedergegeben wird).
+    public func cleanup(keeping: Set<String> = []) {
         guard let files = try? FileManager.default.contentsOfDirectory(at: bufferDirectory, includingPropertiesForKeys: nil) else {
             return
         }
-        for file in files {
+        for file in files where !keeping.contains(file.path) {
             try? FileManager.default.removeItem(at: file)
         }
+    }
+
+    /// Löscht eine einzelne Datei des Puffers.
+    public func remove(_ url: URL) {
+        try? FileManager.default.removeItem(at: url)
     }
 }

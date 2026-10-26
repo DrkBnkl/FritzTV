@@ -147,4 +147,13 @@ final class EITLogParserTests: XCTestCase {
         XCTAssertEqual(schedule?.programs.count, 1)
         XCTAssertEqual(schedule?.programs.first?.title, "Jetzt")
     }
+
+    func testRelevanceFilterMatchesParsedLines() {
+        for line in multiplexLines where !line.contains("extended event") {
+            XCTAssertTrue(EITLogParser.isRelevant(line), line)
+        }
+        XCTAssertFalse(EITLogParser.isRelevant("    - extended event lang=deu [0/1]"))
+        XCTAssertFalse(EITLogParser.isRelevant("ts demux: PID 18 discontinuity"))
+        XCTAssertFalse(EITLogParser.isRelevant("decoded picture with name=foo"))
+    }
 }
