@@ -23,7 +23,7 @@ nimmt die App automatisch `192.168.178.1`.
 | --- | --- | --- |
 | Hoch / Runter | ↑ / ↓ | nächster / vorheriger Sender |
 | Klick | Return | Sendungsinfo mit Ton, Untertitel, Einstellungen |
-| Zurück | Esc | Senderliste, Fokus auf dem zuletzt gesehenen Sender |
+| Zurück | Esc | je nach Einstellung: Programmübersicht oder Senderliste (Fokus auf letztem bzw. aktuellem Sender) |
 | Play/Pause | Leertaste | Live-Bild anhalten (Timeshift) |
 | Links / Rechts | ← / → | 10 Sekunden zurück / vor |
 | – | Ziffern | Direktwahl |

@@ -1,5 +1,25 @@
 import Foundation
 
+/// Wohin die Zurück-Taste (Mac: Esc) im Live-Bild führt.
+enum BackTarget: String, CaseIterable, Identifiable {
+    /// Programmübersicht, Auswahl auf dem laufenden Sender.
+    case epg
+    /// Senderliste, Fokus auf dem zuletzt gesehenen Sender (Zurück + Klick = vorheriger Sender).
+    case lastChannel
+    /// Senderliste, Fokus auf dem laufenden Sender.
+    case currentChannel
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .epg: return "Programmübersicht"
+        case .lastChannel: return "Senderliste · letzter Sender"
+        case .currentChannel: return "Senderliste · aktueller Sender"
+        }
+    }
+}
+
 /// Einstellungen der App, gespeichert in UserDefaults.
 final class AppSettings: ObservableObject {
     private let defaults: UserDefaults
@@ -18,6 +38,8 @@ final class AppSettings: ObservableObject {
     /// Länge des Timeshift-Puffers in Minuten.
     @Published var timeshiftMinutes: Int { didSet { defaults.set(timeshiftMinutes, forKey: Keys.timeshiftMinutes) } }
     @Published var bannerSeconds: Int { didSet { defaults.set(bannerSeconds, forKey: Keys.bannerSeconds) } }
+    /// Ziel der Zurück-Taste im Live-Bild.
+    @Published var backTarget: BackTarget { didSet { defaults.set(backTarget.rawValue, forKey: Keys.backTarget) } }
     /// Adresse von press2arr („Lichtspiel“) auf der NAS für die Mediathek-Seite.
     @Published var press2arrAddress: String { didSet { defaults.set(press2arrAddress, forKey: Keys.press2arr) } }
     /// Nur Apple TV: Bildwiederholrate auf 50 Hz umschalten.
@@ -77,6 +99,7 @@ final class AppSettings: ObservableObject {
             defaults.set(true, forKey: Keys.bannerMigrated)
         }
         bannerSeconds = storedBanner > 0 ? storedBanner : 15
+        backTarget = defaults.string(forKey: Keys.backTarget).flatMap(BackTarget.init(rawValue:)) ?? .lastChannel
         match50Hz = defaults.bool(forKey: Keys.match50Hz)
         press2arrAddress = defaults.string(forKey: Keys.press2arr) ?? ""
         boxUsername = defaults.string(forKey: Keys.boxUsername) ?? ""
@@ -119,6 +142,7 @@ final class AppSettings: ObservableObject {
         static let timeshiftMinutes = "timeshiftMinutes"
         static let bannerMigrated = "bannerSecondsMigrated"
         static let bannerSeconds = "bannerSeconds"
+        static let backTarget = "backTarget"
         static let match50Hz = "match50Hz"
         static let press2arr = "press2arrAddress"
         static let boxUsername = "boxUsername"

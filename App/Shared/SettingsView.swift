@@ -25,6 +25,7 @@ struct SettingsView: View {
         case audioDelay = 9
         case audioDelayAC3 = 10
         case bannerSeconds = 11
+        case backTarget = 12
     }
 
     private let cachingValues = [500, 1000, 2000, 3000, 5000]
@@ -141,6 +142,13 @@ struct SettingsView: View {
                     .modifier(CursorRowHighlight(selected: focusedIndex == SettingsRow.bannerSeconds.rawValue))
                     .contentShape(Rectangle())
                     .onTapGesture { focusedIndex = SettingsRow.bannerSeconds.rawValue }
+
+                    Picker("Zurück-Taste (\(UI.back)) öffnet", selection: $settings.backTarget) {
+                        ForEach(BackTarget.allCases) { Text($0.title).tag($0) }
+                    }
+                    .modifier(CursorRowHighlight(selected: focusedIndex == SettingsRow.backTarget.rawValue))
+                    .contentShape(Rectangle())
+                    .onTapGesture { focusedIndex = SettingsRow.backTarget.rawValue }
                 }
             }
             #if os(macOS)
@@ -255,6 +263,10 @@ struct SettingsView: View {
             settings.audioDelayAC3Ms = next
         case .bannerSeconds:
             settings.bannerSeconds = Self.step(bannerValues, from: settings.bannerSeconds, by: delta)
+        case .backTarget:
+            let all = BackTarget.allCases
+            let index = all.firstIndex(of: settings.backTarget) ?? 0
+            settings.backTarget = all[min(max(index + delta, 0), all.count - 1)]
         }
     }
 
@@ -291,6 +303,10 @@ struct SettingsView: View {
             break
         case .bannerSeconds:
             adjustSetting(delta: 1)
+        case .backTarget:
+            let all = BackTarget.allCases
+            let index = all.firstIndex(of: settings.backTarget) ?? 0
+            settings.backTarget = all[(index + 1) % all.count]
         }
     }
 }
