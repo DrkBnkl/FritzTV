@@ -119,7 +119,9 @@ final class AppModel: ObservableObject {
 
         resolvedPlayer.onVariantSuccess = { [weak self] variantKey, workingID, failedEarlier in
             Task { @MainActor in
-                self?.settings.markVariantWorking(variantKey: variantKey, channelID: workingID)
+                if let workingID {
+                    self?.settings.markVariantWorking(variantKey: variantKey, channelID: workingID)
+                }
                 for failed in failedEarlier {
                     self?.settings.markVariantDead(channelID: failed)
                 }
@@ -410,6 +412,13 @@ final class AppModel: ObservableObject {
         case .up: zap(+1)
         case .down: zap(-1)
         case .select:
+            // Im Timeshift immer die Sendungsinfo (nie neu einschalten).
+            if player.isReplaying {
+                bannerVisible = false
+                overlay = .info(selection: 0)
+                refreshTunerStats()
+                return
+            }
             if zapDebounceTask != nil {
                 tune(to: currentNumber)
                 return

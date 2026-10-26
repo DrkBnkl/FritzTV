@@ -113,8 +113,10 @@ public struct MediathekSearchClient: Sendable {
     private func queryInternal(title: String, channel: String? = nil, limit: Int = 10) async -> [MediathekSearchResult] {
         guard let url = URL(string: "https://mediathekviewweb.de/api/query") else { return [] }
 
+        // Titel und Thema: Der EIT-Titel ist oft der Name der Sendereihe („Tatort“), den
+        // MediathekViewWeb als Thema führt, während der Titel dort die Folge nennt.
         var queries: [[String: Any]] = [
-            ["fields": ["title"], "query": title]
+            ["fields": ["title", "topic"], "query": title]
         ]
         if let channel, let mvwChannel = MediathekSearchResult.mediathekChannel(for: channel) {
             queries.append(["fields": ["channel"], "query": mvwChannel])

@@ -646,7 +646,7 @@ struct MediathekPlayer: View {
                     caption = SubtitleParser.text(at: time.seconds, in: cues)
                 }
             }
-            .task { await loadSubtitles() }
+            .task { if showSubtitles { await loadSubtitles() } }
             .onChange(of: showSubtitles) { _, enabled in
                 if enabled && cues.isEmpty {
                     Task { await loadSubtitles() }

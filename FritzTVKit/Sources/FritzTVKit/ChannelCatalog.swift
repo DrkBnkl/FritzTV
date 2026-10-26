@@ -21,19 +21,18 @@ public struct ChannelGroup: Identifiable, Hashable, Sendable {
     /// bevorzugte Qualität zuerst, darin nach Position in der Liste der Box.
     /// Nach einem Sendersuchlauf führt die Box einen Sender oft doppelt, mit alter und neuer
     /// Frequenz. Liefert eine Variante keine Daten, probiert der Player die nächste.
-    /// Tote Einträge (`deadIDs`) werden ans Ende sortiert.
+    /// Tote Einträge (`deadIDs`, z. B. alte Frequenzen) rücken nur innerhalb ihrer Qualität nach
+    /// hinten: Eine als tot gemerkte HD-Variante darf SD nicht dauerhaft nach vorne holen.
     /// Gleiche Links kommen nur einmal vor.
     public func candidates(preferHD: Bool, deadIDs: Set<String> = []) -> [Channel] {
-        let first = variants.filter { $0.isHD == preferHD }.sorted { $0.position < $1.position }
-        let second = variants.filter { $0.isHD != preferHD }.sorted { $0.position < $1.position }
-        var seen = Set<String>()
-        let combined = (first + second).filter { seen.insert($0.id).inserted }
-        if deadIDs.isEmpty {
-            return combined
+        func ordered(_ list: [Channel]) -> [Channel] {
+            let sorted = list.sorted { $0.position < $1.position }
+            return sorted.filter { !deadIDs.contains($0.id) } + sorted.filter { deadIDs.contains($0.id) }
         }
-        let alive = combined.filter { !deadIDs.contains($0.id) }
-        let dead = combined.filter { deadIDs.contains($0.id) }
-        return alive + dead
+        let first = ordered(variants.filter { $0.isHD == preferHD })
+        let second = ordered(variants.filter { $0.isHD != preferHD })
+        var seen = Set<String>()
+        return (first + second).filter { seen.insert($0.id).inserted }
     }
 
     /// Gibt an, ob alle bekannten Varianten dieses Senders als tot markiert wurden.

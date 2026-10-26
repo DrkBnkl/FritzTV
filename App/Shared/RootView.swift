@@ -1,16 +1,25 @@
 import SwiftUI
 import FritzTVKit
+#if os(tvOS)
+import UIKit
+#endif
 
 struct RootView: View {
     @ObservedObject var model: AppModel
     @ObservedObject var player: PlayerController
     @Environment(\.scenePhase) private var scenePhase
+    /// Platz für das Live-Bild in der Programmübersicht (Bildschirmkoordinaten), sonst `nil`.
+    @State private var epgPreviewFrame: CGRect?
+
+    private var previewFrame: CGRect? { model.showEPGOverview ? epgPreviewFrame : nil }
 
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
+            // In der Programmübersicht läuft das Bild verkleinert im Vorschaufenster weiter.
+            // Dieselbe Ansicht wird nur verschoben (kein zweiter Player, kein Neuaufbau).
             PlayerSurface(player: player.mediaPlayer)
-                .ignoresSafeArea()
+                .modifier(EPGPreviewPlacement(frame: previewFrame))
             // Schwarzer Bildschirm beim Umschalten: Blendet Standbilder des alten Senders aus,
             // bis der neue Stream decodiert wird.
             if model.settings.blackScreenOnZap && player.status.isTransitioning && !player.isReplaying {
@@ -18,9 +27,9 @@ struct RootView: View {
             }
             // Timeshift: Mitschnitt-Wiedergabe liegt über dem stumm weiterlaufenden Live-Bild.
             PlayerSurface(player: player.replayPlayer)
-                .ignoresSafeArea()
                 .opacity(player.isReplaying ? 1 : 0)
                 .allowsHitTesting(false)
+                .modifier(EPGPreviewPlacement(frame: previewFrame))
             if let replay = model.activeHLSReplay {
                 HLSReplayPlayerView(url: replay.url, startDate: replay.startDate) {
                     model.hlsReplayClosed()
@@ -36,6 +45,9 @@ struct RootView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .transition(.opacity)
             } else {
+                #if os(macOS)
+                // Mausklick ins Bild öffnet die Senderliste. Nur auf dem Mac: Auf dem Apple TV fing
+                // diese Fläche den Klick der Fernbedienung ab (z. B. im Timeshift).
                 Color.clear
                     .contentShape(Rectangle())
                     .onTapGesture {
@@ -43,17 +55,27 @@ struct RootView: View {
                             model.handle(.back)
                         }
                     }
+                #endif
                 OverlayLayer(model: model, player: player)
             }
         }
+        .onPreferenceChange(EPGPreviewFrameKey.self) { epgPreviewFrame = $0 }
         .modifier(RemoteInputModifier(model: model))
         .preferredColorScheme(.dark)
         .onOpenURL { url in
             model.handleDeepLink(url: url)
         }
+        #if os(tvOS)
+        // Vollbild statt Sheet: Das halbdurchsichtige Sheet lag über dem laufenden Bild und machte
+        // die Einstellungen schwer lesbar.
+        .fullScreenCover(isPresented: $model.showSettings, onDismiss: { model.applySettings() }) {
+            SettingsView(model: model, settings: model.settings)
+        }
+        #else
         .sheet(isPresented: $model.showSettings, onDismiss: { model.applySettings() }) {
             SettingsView(model: model, settings: model.settings)
         }
+        #endif
         #if os(tvOS)
         .fullScreenCover(isPresented: $model.showMediathek, onDismiss: { model.mediathekClosed() }) {
             MediathekView(settings: model.settings)
@@ -82,6 +104,7 @@ struct RootView: View {
         .onChange(of: player.nowPlaying) { _, _ in model.programChanged() }
         .onChange(of: player.currentProgram) { _, _ in model.programChanged() }
         .onChange(of: player.status) { oldStatus, newStatus in
+            KeepAwake.update(for: newStatus)
             if oldStatus != .playing && newStatus == .playing {
                 model.showBanner()
             }
@@ -162,5 +185,64 @@ struct OverlayLayer: View {
                 .shadow(color: .black.opacity(0.5), radius: 8)
                 .transition(.scale.combined(with: .opacity))
         }
+    }
+}
+
+/// Rahmen des Vorschaufensters in der Programmübersicht (Bildschirmkoordinaten).
+struct EPGPreviewFrameKey: PreferenceKey {
+    static let defaultValue: CGRect? = nil
+    static func reduce(value: inout CGRect?, nextValue: () -> CGRect?) {
+        value = nextValue() ?? value
+    }
+}
+
+/// Bildfläche: normalerweise bildschirmfüllend, in der Programmübersicht im Vorschaufenster.
+struct EPGPreviewPlacement: ViewModifier {
+    let frame: CGRect?
+
+    func body(content: Content) -> some View {
+        content
+            .frame(width: frame?.width, height: frame?.height)
+            .clipShape(RoundedRectangle(cornerRadius: frame == nil ? 0 : 12))
+            .frame(maxWidth: .infinity, maxHeight: .infinity,
+                   alignment: frame == nil ? .center : .topLeading)
+            .offset(x: frame?.minX ?? 0, y: frame?.minY ?? 0)
+            .ignoresSafeArea()
+            // Über die Programmübersicht legen; die Ansicht bleibt dieselbe (nur Lage und Größe ändern sich).
+            .zIndex(frame == nil ? 0 : 5)
+    }
+}
+
+/// Hält Bildschirm wach, solange live gespielt wird. VLC meldet dem System – anders als Apples
+/// eigene Player – keine laufende Wiedergabe, sonst springt nach einigen Minuten der
+/// Bildschirmschoner (Apple TV) bzw. der Ruhezustand des Displays (Mac) an.
+/// Angehalten (Timeshift) darf der Bildschirmschoner wie üblich kommen.
+@MainActor
+enum KeepAwake {
+    #if os(macOS)
+    private static var activity: NSObjectProtocol?
+    #endif
+
+    static func update(for status: PlayerStatus) {
+        let awake: Bool
+        switch status {
+        case .playing, .connecting, .reconnecting:
+            awake = true
+        case .idle, .paused, .failed:
+            awake = false
+        }
+        #if os(tvOS)
+        if UIApplication.shared.isIdleTimerDisabled != awake {
+            UIApplication.shared.isIdleTimerDisabled = awake
+        }
+        #elseif os(macOS)
+        if awake, activity == nil {
+            activity = ProcessInfo.processInfo.beginActivity(
+                options: [.idleDisplaySleepDisabled, .userInitiated], reason: "Live-TV läuft")
+        } else if !awake, let current = activity {
+            ProcessInfo.processInfo.endActivity(current)
+            activity = nil
+        }
+        #endif
     }
 }

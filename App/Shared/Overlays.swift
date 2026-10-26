@@ -129,7 +129,7 @@ struct TimeshiftBar: View {
                     HStack {
                         Text("\(model.currentEntry?.number ?? 0) \(model.currentEntry?.group.displayName ?? "")")
                             .font(UI.font(32, .bold))
-                        if let title = player.currentProgram?.title ?? player.nowPlaying {
+                        if let title = player.displayedProgram?.title ?? player.nowPlaying {
                             Text("· \(title)").font(UI.font(32)).lineLimit(1)
                         }
                         Spacer()
@@ -186,12 +186,12 @@ struct InfoPanel: View {
                     VStack(alignment: .leading, spacing: UI.s(10)) {
                         HStack(spacing: UI.s(12)) {
                             ChannelLogoView(channelName: model.currentEntry?.group.displayName ?? "", height: UI.s(28), maxWidth: UI.s(90))
-                            Text("JETZT · \(model.currentEntry?.number ?? 0) \(model.currentEntry?.group.displayName ?? "")")
+                            Text("\(player.isTimeshifted ? "ZEITVERSETZT" : "JETZT") · \(model.currentEntry?.number ?? 0) \(model.currentEntry?.group.displayName ?? "")")
                                 .font(UI.font(24, .semibold))
                                 .foregroundStyle(UI.secondary)
                         }
 
-                        if let current = player.currentProgram {
+                        if let current = player.displayedProgram {
                             HStack(spacing: UI.s(16)) {
                                 Text("\(Self.formatTime(current.startDate)) – \(Self.formatTime(current.endDate))")
                                     .font(UI.font(26, .bold))
@@ -237,7 +237,7 @@ struct InfoPanel: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
 
                     // DANACH
-                    if let next = player.nextProgram {
+                    if let next = player.displayedNextProgram {
                         VStack(alignment: .leading, spacing: UI.s(8)) {
                             Text("DANACH · Ab \(Self.formatTime(next.startDate))")
                                 .font(UI.font(24, .semibold))
@@ -541,6 +541,9 @@ struct ChannelListOverlay: View {
                 .overlay(RoundedRectangle(cornerRadius: UI.s(16)).stroke(Color.white.opacity(selected ? 0 : 0.25), lineWidth: UI.s(2)))
         }
         .buttonStyle(.plain)
+        // Die Fernbedienung steuert die Liste über AppModel.handle; auf dem Apple TV dürfen die
+        // Knöpfe den Fokus nicht übernehmen (sonst wirken Klick und Pfeile auf eine andere Zeile).
+        .focusable(false)
     }
 
     private func settingsRow(selected: Bool) -> some View {
@@ -583,6 +586,9 @@ struct ChannelListOverlay: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        // Die Fernbedienung steuert die Liste über AppModel.handle; auf dem Apple TV dürfen die
+        // Knöpfe den Fokus nicht übernehmen (sonst wirken Klick und Pfeile auf eine andere Zeile).
+        .focusable(false)
         .padding(.top, UI.s(14))
         .padding(.bottom, UI.s(8))
     }
@@ -649,6 +655,9 @@ struct ChannelListOverlay: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        // Die Fernbedienung steuert die Liste über AppModel.handle; auf dem Apple TV dürfen die
+        // Knöpfe den Fokus nicht übernehmen (sonst wirken Klick und Pfeile auf eine andere Zeile).
+        .focusable(false)
     }
 }
 
