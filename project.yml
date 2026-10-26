@@ -55,12 +55,11 @@ targets:
             # Senderlogos vom AVM-Server (nur per http erreichbar)
             tv.avm.de:
               NSExceptionAllowsInsecureHTTPLoads: true
-    # App Group, damit die Top-Shelf-Erweiterung die Senderplätze der App lesen kann
-    entitlements:
-      path: App/tvOS/FritzTV.entitlements
-      properties:
-        com.apple.security.application-groups:
-          - group.de.home.fritztv
+    # Keine App Group: Das kostenlose „Personal Team“ (Apple-ID ohne Entwicklerprogramm) unterstützt
+    # sie nicht. Das Top Shelf zeigt deshalb die Standard-Sender statt der eigenen Senderplätze.
+    # Mit bezahltem Entwickler-Account hier und bei der Top-Shelf-Erweiterung wieder ergänzen:
+    #   entitlements: { path: App/tvOS/FritzTV.entitlements,
+    #                   properties: { com.apple.security.application-groups: [group.de.home.fritztv] } }
     settings:
       base:
         PRODUCT_NAME: FritzTV
@@ -129,11 +128,6 @@ targets:
           NSExceptionDomains:
             tv.avm.de:
               NSExceptionAllowsInsecureHTTPLoads: true
-    entitlements:
-      path: App/TopShelf/FritzTVTopShelf.entitlements
-      properties:
-        com.apple.security.application-groups:
-          - group.de.home.fritztv
     settings:
       base:
         PRODUCT_NAME: FritzTVTopShelf
