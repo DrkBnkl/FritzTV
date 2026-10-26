@@ -488,11 +488,16 @@ final class AppModel: ObservableObject {
         }
     }
 
+    /// Zurück-Taste im Live-Bild: Ziel laut Einstellung.
     private func openChannelList() {
         bannerVisible = false
+        if settings.backTarget == .epg {
+            openEPGOverview()
+            return
+        }
         epgScanner.stop()
         let targetID: String
-        if let recent = recentEntries.first {
+        if settings.backTarget == .lastChannel, let recent = recentEntries.first {
             targetID = "recent-\(recent.number)"
         } else if let current = currentEntry {
             targetID = "channel-\(current.number)"
