@@ -37,56 +37,65 @@ struct PlayerSurface: UIViewRepresentable {
 
     func makeUIView(context: Context) -> VideoHostView {
         let view = VideoHostView()
-        view.backgroundColor = .black
-        player.drawable = view
+        player.drawable = view.videoView
         return view
     }
 
     func updateUIView(_ uiView: VideoHostView, context: Context) {
-        if (player.drawable as? UIView) != uiView {
-            player.drawable = uiView
+        if (player.drawable as? UIView) != uiView.videoView {
+            player.drawable = uiView.videoView
         }
         uiView.previewFrame = previewFrame
     }
 }
 
-/// Zeichenfläche für VLC. Verkleinern und Verschieben für die Programmübersicht geschieht hier
-/// per UIKit-Transformation, nicht über SwiftUI-Modifier: Ändert SwiftUI Effekte wie
-/// Zuschnitt oder Skalierung an der eingebetteten Ansicht, hängt es sie intern um – VLC
-/// zeichnet dann weiter in die alte Fläche und das Bild bleibt stehen (auch nach dem Zurückkehren).
+/// Behälter für die VLC-Zeichenfläche. Verkleinern und Verschieben für die Programmübersicht
+/// geschieht per UIKit-Transformation an der inneren Fläche `videoView`; der Behälter selbst,
+/// den SwiftUI verwaltet, bleibt unverändert. (SwiftUI-Effekte direkt an der eingebetteten
+/// Ansicht bzw. eine Transformation am Behälter führten zu stehendem Bild bzw. Abstürzen.)
 final class VideoHostView: UIView {
+    let videoView = UIView()
+
     var previewFrame: CGRect? {
-        didSet { if previewFrame != oldValue { applyPreview() } }
+        didSet { if previewFrame != oldValue { setNeedsLayout() } }
     }
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        backgroundColor = .clear
+        videoView.backgroundColor = .black
+        addSubview(videoView)
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) wird nicht verwendet") }
 
     override func layoutSubviews() {
         super.layoutSubviews()
-        applyPreview()
+        // Größe immer bildschirmfüllend, nur über bounds/center (nie frame, solange transformiert).
+        videoView.bounds = CGRect(origin: .zero, size: bounds.size)
+        videoView.center = CGPoint(x: bounds.midX, y: bounds.midY)
+
+        guard let target = previewFrame, target.width >= 10, target.height >= 10,
+              target.minX.isFinite, target.minY.isFinite,
+              bounds.width > 0, bounds.height > 0, window != nil else {
+            videoView.transform = .identity
+            videoView.layer.cornerRadius = 0
+            videoView.layer.masksToBounds = false
+            return
+        }
+        let scale = target.width / bounds.width
+        let targetCenter = convert(CGPoint(x: target.midX, y: target.midY), from: nil)
+        videoView.transform = CGAffineTransform(translationX: targetCenter.x - bounds.midX,
+                                                y: targetCenter.y - bounds.midY)
+            .scaledBy(x: scale, y: scale)
+        videoView.layer.cornerRadius = 10 / scale
+        videoView.layer.masksToBounds = true
     }
 
     override func didMoveToWindow() {
         super.didMoveToWindow()
         DebugLog.log("Bildfläche \(window == nil ? "aus dem Fenster genommen" : "im Fenster")")
-    }
-
-    private func applyPreview() {
-        // Ungültige Rahmen (Breite 0 während des ersten Layouts) ergäben eine Transformation mit
-        // Faktor 0 – UIKit bricht dann beim Layout der VLC-Unteransicht mit NaN-Rahmen ab.
-        guard let target = previewFrame, target.width >= 10, target.height >= 10,
-              target.minX.isFinite, target.minY.isFinite,
-              bounds.width > 0, bounds.height > 0, let superview else {
-            transform = .identity
-            layer.cornerRadius = 0
-            layer.masksToBounds = false
-            return
-        }
-        let scale = target.width / bounds.width
-        // Mittelpunkt dieser Fläche in Bildschirmkoordinaten (ohne Transformation).
-        let center = superview.convert(self.center, to: nil)
-        transform = CGAffineTransform(translationX: target.midX - center.x, y: target.midY - center.y)
-            .scaledBy(x: scale, y: scale)
-        layer.cornerRadius = 10 / max(scale, 0.01)
-        layer.masksToBounds = true
+        setNeedsLayout()
     }
 }
 #endif
