@@ -33,7 +33,7 @@ struct SettingsView: View {
 
     private let cachingValues = [500, 1000, 2000, 3000, 5000]
     private let delayValues = Array(stride(from: -500, through: 500, by: 25))
-    private let bannerValues = [7, 8, 10, 15, 20, 30]
+    private let bannerValues = [5, 7, 10, 15, 20, 30]
     private let timeshiftMinuteValues = [30, 60, 90, 120]
 
     var body: some View {

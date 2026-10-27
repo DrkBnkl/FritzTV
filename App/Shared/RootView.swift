@@ -138,7 +138,11 @@ struct OverlayLayer: View {
         ZStack {
             switch model.loadState {
             case .loading:
-                StatusCard(title: "Verbinde mit der FRITZ!Box …", message: nil, hint: nil, busy: true)
+                // Apple-Richtlinien: schwarzer Bildschirm mit zentriertem Ladesymbol, ohne weitere Inhalte.
+                ProgressView()
+                    .scaleEffect(1.5)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(Color.black)
             case .failed(let message):
                 StatusCard(title: "Keine Verbindung", message: message,
                            hint: "\(UI.select): erneut versuchen · \(UI.playPause): Einstellungen", busy: false)

@@ -48,6 +48,8 @@ final class AppSettings: ObservableObject {
     @Published var match50Hz: Bool { didSet { defaults.set(match50Hz, forKey: Keys.match50Hz) } }
     /// Benutzername für die TR-064-Anmeldung (Sendersuchlauf). Das Kennwort liegt im Schlüsselbund.
     @Published var boxUsername: String { didSet { defaults.set(boxUsername, forKey: Keys.boxUsername) } }
+    /// „Meine Sender“ (Senderschlüssel) für die Programmübersicht.
+    @Published var favoriteKeys: [String] { didSet { defaults.set(favoriteKeys, forKey: Keys.favoriteKeys) } }
     /// Zuletzt gesehene Sender (maximal 3 Schlüssel).
     @Published var recentKeys: [String] { didSet { defaults.set(recentKeys, forKey: Keys.recentKeys) } }
     /// Sender-Varianten (RTSP-URLs), die nachweislich keine Daten liefern.
@@ -77,7 +79,7 @@ final class AppSettings: ObservableObject {
             Keys.blackScreenOnZap: true,
             Keys.timeshift: true,
             Keys.timeshiftMinutes: 90,
-            Keys.bannerSeconds: 15,
+            Keys.bannerSeconds: 7,
             Keys.match50Hz: true,
             Keys.press2arr: "192.168.178.99:5056"
         ])
@@ -100,13 +102,21 @@ final class AppSettings: ObservableObject {
             defaults.set(storedBanner, forKey: Keys.bannerSeconds)
             defaults.set(true, forKey: Keys.bannerMigrated)
         }
-        bannerSeconds = storedBanner > 0 ? storedBanner : 15
+        // Einmalig (Apple-Richtlinien: Einblendungen über dem Video kurz halten): den bisherigen
+        // Standard von 15 s auf 7 s senken. Andere, selbst gewählte Werte bleiben.
+        if !defaults.bool(forKey: Keys.bannerHIGMigrated) {
+            if storedBanner == 15 { storedBanner = 7 }
+            defaults.set(storedBanner, forKey: Keys.bannerSeconds)
+            defaults.set(true, forKey: Keys.bannerHIGMigrated)
+        }
+        bannerSeconds = storedBanner > 0 ? storedBanner : 7
         backTarget = defaults.string(forKey: Keys.backTarget).flatMap(BackTarget.init(rawValue:)) ?? .lastChannel
         match50Hz = defaults.bool(forKey: Keys.match50Hz)
         press2arrAddress = defaults.string(forKey: Keys.press2arr) ?? ""
         xmltvSource = defaults.string(forKey: Keys.xmltvSource) ?? ""
         boxUsername = defaults.string(forKey: Keys.boxUsername) ?? ""
         recentKeys = defaults.stringArray(forKey: Keys.recentKeys) ?? []
+        favoriteKeys = defaults.stringArray(forKey: Keys.favoriteKeys) ?? []
         deadChannelIDs = Set(defaults.stringArray(forKey: Keys.deadChannels) ?? [])
         workingVariantIDs = defaults.dictionary(forKey: Keys.workingVariants) as? [String: String] ?? [:]
         // Einmalig: Bis 26.10.2026 konnte ein einziger Aussetzer eine HD-Variante als „tot“ und SD als
@@ -125,6 +135,14 @@ final class AppSettings: ObservableObject {
         var updated = recentKeys.filter { $0 != key && $0 != currentKey }
         updated.insert(key, at: 0)
         recentKeys = Array(updated.prefix(3))
+    }
+
+    func toggleFavorite(_ key: String) {
+        if let index = favoriteKeys.firstIndex(of: key) {
+            favoriteKeys.remove(at: index)
+        } else {
+            favoriteKeys.append(key)
+        }
     }
 
     func markVariantWorking(variantKey: String, channelID: String) {
@@ -153,6 +171,8 @@ final class AppSettings: ObservableObject {
         static let timeshift = "timeshift"
         static let timeshiftMinutes = "timeshiftMinutes"
         static let bannerMigrated = "bannerSecondsMigrated"
+        static let bannerHIGMigrated = "bannerSecondsHIGMigrated"
+        static let favoriteKeys = "favoriteKeys"
         static let bannerSeconds = "bannerSeconds"
         static let backTarget = "backTarget"
         static let variantResetV2 = "variantStateResetV2"

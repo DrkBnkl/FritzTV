@@ -3,6 +3,18 @@ import FritzTVKit
 
 // MARK: Bausteine
 
+extension View {
+    /// Fokus wie im System (Apple-Richtlinien): das gewählte Element hebt sich leicht an –
+    /// etwas größer, mit Schatten, kurz animiert.
+    func focusLift(_ focused: Bool, scale: CGFloat = 1.03) -> some View {
+        self
+            .scaleEffect(focused ? scale : 1)
+            .shadow(color: .black.opacity(focused ? 0.45 : 0), radius: focused ? 12 : 0, y: focused ? 6 : 0)
+            .zIndex(focused ? 1 : 0)
+            .animation(.easeOut(duration: 0.15), value: focused)
+    }
+}
+
 struct Badge: View {
     let text: String
     var dark = false
@@ -27,13 +39,24 @@ private struct BottomPanel<Content: View>: View {
                 .padding(.horizontal, UI.s(48))
                 .padding(.vertical, UI.s(36))
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background(UI.panel, in: RoundedRectangle(cornerRadius: UI.s(32)))
-                .padding(.horizontal, UI.s(96))
-                .padding(.bottom, UI.s(28))
+                .background { PanelBackground(cornerRadius: UI.s(32)) }
+                .padding(.horizontal, UI.s(16))
         }
-        // Tiefer an den unteren Bildrand (ohne den sicheren Bereich), damit weniger vom Bild
-        // verdeckt wird.
-        .ignoresSafeArea(edges: .bottom)
+        // Unten genau am sicheren Bereich (60 pt vom Bildrand, Apple-Richtlinien): so tief wie
+        // möglich, ohne dass ein Fernseher mit Überscan etwas abschneidet.
+    }
+}
+
+/// Durchscheinender Hintergrund für Tafeln über dem Video (Apple: Overlays zurückhaltend und
+/// eher durchscheinend; dichtes Material plus Abdunklung für Lesbarkeit bei hellem Bild).
+struct PanelBackground: View {
+    var cornerRadius: CGFloat
+
+    var body: some View {
+        RoundedRectangle(cornerRadius: cornerRadius)
+            .fill(.thickMaterial)
+            .overlay(RoundedRectangle(cornerRadius: cornerRadius).fill(UI.panelDim))
+            .environment(\.colorScheme, .dark)
     }
 }
 
@@ -312,6 +335,9 @@ struct InfoPanel: View {
             .padding(.horizontal, UI.s(28))
             .padding(.vertical, UI.s(14))
             .background(selected ? UI.text : Color.white.opacity(0.14), in: Capsule())
+            .scaleEffect(selected ? 1.08 : 1)
+            .shadow(color: .black.opacity(selected ? 0.45 : 0), radius: 8, y: 4)
+            .animation(.easeOut(duration: 0.15), value: selected)
     }
 
     static func formatTime(_ date: Date) -> String {
@@ -542,6 +568,7 @@ struct ChannelListOverlay: View {
                 .padding(.vertical, UI.s(14))
                 .background(selected ? UI.text : Color.clear, in: RoundedRectangle(cornerRadius: UI.s(16)))
                 .overlay(RoundedRectangle(cornerRadius: UI.s(16)).stroke(Color.white.opacity(selected ? 0 : 0.25), lineWidth: UI.s(2)))
+                .focusLift(selected)
         }
         .buttonStyle(.plain)
         // Die Fernbedienung steuert die Liste über AppModel.handle; auf dem Apple TV dürfen die
@@ -587,6 +614,7 @@ struct ChannelListOverlay: View {
                     .stroke(strokeColor, lineWidth: UI.s(1.5))
             )
             .contentShape(Rectangle())
+            .focusLift(selected)
         }
         .buttonStyle(.plain)
         // Die Fernbedienung steuert die Liste über AppModel.handle; auf dem Apple TV dürfen die
@@ -656,6 +684,7 @@ struct ChannelListOverlay: View {
             .background(selected ? UI.text : (isCurrent ? Color.white.opacity(0.08) : Color.clear),
                         in: RoundedRectangle(cornerRadius: UI.s(16)))
             .contentShape(Rectangle())
+            .focusLift(selected)
         }
         .buttonStyle(.plain)
         // Die Fernbedienung steuert die Liste über AppModel.handle; auf dem Apple TV dürfen die
@@ -688,6 +717,7 @@ struct DirectEntryOverlay: View {
                             .foregroundStyle(index == key ? Color.black : UI.text)
                             .background(index == key ? UI.text : Color.white.opacity(0.1),
                                         in: RoundedRectangle(cornerRadius: UI.s(16)))
+                            .focusLift(index == key, scale: 1.08)
                     }
                 }
                 #if os(macOS)
@@ -696,7 +726,7 @@ struct DirectEntryOverlay: View {
             }
             .foregroundStyle(UI.text)
             .padding(UI.s(48))
-            .background(UI.panel, in: RoundedRectangle(cornerRadius: UI.s(32)))
+            .background { PanelBackground(cornerRadius: UI.s(32)) }
         }
     }
 

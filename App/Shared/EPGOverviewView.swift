@@ -432,7 +432,7 @@ enum EPGColors {
     static let accent = Color(red: 0.50, green: 0.78, blue: 1.0)
     static let nowLine = Color(red: 0.55, green: 0.85, blue: 1.0)
     static let secondaryText = Color(red: 0.70, green: 0.78, blue: 0.90)
-    static let tertiaryText = Color(red: 0.55, green: 0.63, blue: 0.76)
+    static let tertiaryText = Color(red: 0.68, green: 0.75, blue: 0.86)
 }
 
 // MARK: - Zeilenbausteine
@@ -511,6 +511,7 @@ private struct TimelineRow: View, Equatable {
                                      width: item.width)
                         .frame(height: height - 6)
                         .offset(x: item.x, y: 3)
+                        .zIndex(item.id == focusedID ? 1 : 0)
                 }
             }
         }
@@ -592,7 +593,7 @@ private struct ProgramBlockView: View {
                 .foregroundStyle(Color.white)
                 .lineLimit(1)
 
-            if width >= EPGMetrics.s(140), let sub = prog.subtitle ?? prog.description, !sub.isEmpty {
+            if !isLive, width >= EPGMetrics.s(140), let sub = prog.subtitle ?? prog.description, !sub.isEmpty {
                 Text(sub)
                     .font(EPGMetrics.font(13, .regular))
                     .foregroundStyle(isFocused ? Color.white.opacity(0.85) : EPGColors.tertiaryText)
@@ -624,6 +625,10 @@ private struct ProgramBlockView: View {
                 .strokeBorder(isFocused ? Color.white.opacity(0.9) : (isLive ? EPGColors.accent.opacity(0.7) : EPGColors.cellBorder),
                               lineWidth: isFocused ? 2 : 1)
         )
+        // Fokus wie im System: angewählte Kachel hebt sich leicht an.
+        .scaleEffect(isFocused ? 1.06 : 1)
+        .shadow(color: .black.opacity(isFocused ? 0.5 : 0), radius: isFocused ? 10 : 0, y: isFocused ? 5 : 0)
+        .animation(.easeOut(duration: 0.15), value: isFocused)
         #if os(macOS)
         .help(tooltipText)
         #endif
@@ -651,8 +656,13 @@ enum EPGMetrics {
 
     static func s(_ value: CGFloat) -> CGFloat { value * k }
 
+    /// Apple TV: mindestens 23 pt (Apple-Richtlinien).
     static func font(_ size: CGFloat, _ weight: Font.Weight = .regular) -> Font {
+        #if os(tvOS)
+        .system(size: max(size * k, UI.minimumFontSize), weight: weight)
+        #else
         .system(size: size * k, weight: weight)
+        #endif
     }
 }
 
