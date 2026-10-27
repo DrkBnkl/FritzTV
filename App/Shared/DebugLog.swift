@@ -38,3 +38,34 @@ enum DebugLog {
         }
     }
 }
+
+#if DEBUG
+/// Nur Debug-Builds: meldet im Log, wenn der Hauptthread länger als eine Sekunde nicht reagiert.
+/// Hilft bei eingefrorenem Bild (VLC braucht den Hauptthread für die Bildausgabe).
+enum MainThreadWatchdog {
+    private static var started = false
+
+    static func start() {
+        guard !started else { return }
+        started = true
+        let thread = Thread {
+            var stalledSince: Date?
+            while true {
+                let answered = DispatchSemaphore(value: 0)
+                DispatchQueue.main.async { answered.signal() }
+                if answered.wait(timeout: .now() + 1.0) == .timedOut {
+                    let since = stalledSince ?? Date().addingTimeInterval(-1)
+                    stalledSince = since
+                    DebugLog.log("Hauptthread blockiert seit \(String(format: "%.0f", Date().timeIntervalSince(since))) s")
+                    answered.wait()
+                    DebugLog.log("Hauptthread wieder frei nach \(String(format: "%.1f", Date().timeIntervalSince(since))) s")
+                    stalledSince = nil
+                }
+                Thread.sleep(forTimeInterval: 0.5)
+            }
+        }
+        thread.name = "MainThreadWatchdog"
+        thread.start()
+    }
+}
+#endif

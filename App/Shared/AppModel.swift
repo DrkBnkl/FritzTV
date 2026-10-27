@@ -517,6 +517,7 @@ final class AppModel: ObservableObject {
     }
 
     func openEPGOverview() {
+        DebugLog.log("Programmübersicht geöffnet")
         overlay = .none
         bannerVisible = false
         epgSelectedKey = playingKey ?? currentEntry.map(Self.key)
@@ -525,6 +526,7 @@ final class AppModel: ObservableObject {
     }
 
     func closeEPGOverview() {
+        DebugLog.log("Programmübersicht geschlossen")
         showEPGOverview = false
         epgScanner.stop()
     }

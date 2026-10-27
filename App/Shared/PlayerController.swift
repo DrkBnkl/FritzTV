@@ -143,6 +143,9 @@ final class PlayerController: ObservableObject {
 
     // Watchdog gegen eingefrorene Streams
     private var lastDisplayedPictures: Int = 0
+    #if DEBUG
+    private var lastStatsLog = Date.distantPast
+    #endif
     private var lastPictureChangeAt = Date()
 
     // MARK: Abspielen
@@ -395,6 +398,12 @@ final class PlayerController: ObservableObject {
 
         if let vlcStats = mediaPlayer.media?.statistics {
             let currentPictures = Int(vlcStats.displayedPictures)
+            #if DEBUG
+            if Date().timeIntervalSince(lastStatsLog) > 3 {
+                lastStatsLog = Date()
+                DebugLog.log("Bilder: dekodiert \(vlcStats.decodedVideo), angezeigt \(currentPictures), verloren \(vlcStats.lostPictures)")
+            }
+            #endif
             // Erst prüfen, wenn überhaupt schon Bilder empfangen und angezeigt wurden
             guard currentPictures > 0 else { return }
 

@@ -8,6 +8,9 @@ struct FritzTVApp: App {
         let memoryCapacity = 50 * 1024 * 1024
         let diskCapacity = 100 * 1024 * 1024
         URLCache.shared = URLCache(memoryCapacity: memoryCapacity, diskCapacity: diskCapacity)
+        #if DEBUG
+        MainThreadWatchdog.start()
+        #endif
     }
 
     var body: some Scene {
