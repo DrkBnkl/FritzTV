@@ -294,15 +294,16 @@ struct EPGOverviewView: View {
                         height: rowHeight)
                 .equatable()
 
-            TimelineRow(items: items,
+            // Nur der sichtbare Ausschnitt wird gezeichnet: Ein 24-Stunden-Streifen (über 9000 pt
+            // breit) je Zeile kostete auf dem Apple TV bei jeder Änderung Sekunden.
+            TimelineRow(items: visibleItems(items, offset: offset, width: timelineWidth),
                         focusedID: isSelected ? Self.programID(in: items, at: focus) : nil,
                         liveID: Self.programID(in: items, at: now),
                         isSelected: isSelected,
                         progress: Self.liveProgress(in: items, at: now),
-                        width: totalTimelineWidth,
+                        width: timelineWidth,
                         height: rowHeight)
                 .equatable()
-                .offset(x: -offset)
                 .frame(width: timelineWidth, height: rowHeight, alignment: .leading)
                 .clipped()
         }
@@ -312,6 +313,16 @@ struct EPGOverviewView: View {
         }
         .contentShape(Rectangle())
         .onTapGesture { model.tuneFromEPG(key: AppModel.key(entry)) }
+    }
+
+    /// Kacheln im sichtbaren Ausschnitt, Lage relativ zu dessen linkem Rand.
+    private func visibleItems(_ items: [TimelineItem], offset: CGFloat, width: CGFloat) -> [TimelineItem] {
+        items.compactMap { item in
+            let start = max(item.x, offset)
+            let end = min(item.x + item.width, offset + width)
+            guard end > start + 1 else { return nil }
+            return TimelineItem(id: item.id, program: item.program, x: start - offset, width: end - start)
+        }
     }
 
     /// Zeitleiste oben; bleibt beim senkrechten Blättern stehen.
@@ -332,9 +343,9 @@ struct EPGOverviewView: View {
             .frame(width: channelColumnWidth, height: rulerHeight, alignment: .leading)
             .background(EPGColors.ruler)
 
-            TimeRuler(start: windowStart, hours: totalHours, pointsPerMinute: pointsPerMinute, height: rulerHeight)
+            TimeRuler(start: windowStart.addingTimeInterval(Double(offset / pointsPerMinute) * 60),
+                      width: timelineWidth, pointsPerMinute: pointsPerMinute, height: rulerHeight)
                 .equatable()
-                .offset(x: -offset)
                 .frame(width: timelineWidth, height: rulerHeight, alignment: .leading)
                 .clipped()
                 .background(EPGColors.ruler)
@@ -514,16 +525,20 @@ private struct TimelineRow: View, Equatable {
 }
 
 private struct TimeRuler: View, Equatable {
+    /// Zeit am linken Rand des sichtbaren Ausschnitts.
     let start: Date
-    let hours: Int
+    let width: CGFloat
     let pointsPerMinute: CGFloat
     let height: CGFloat
 
     var body: some View {
-        HStack(spacing: 0) {
-            ForEach(0..<(hours * 2), id: \.self) { index in
-                let date = start.addingTimeInterval(Double(index * 30 * 60))
-                let isFullHour = index % 2 == 0
+        let step: TimeInterval = 30 * 60
+        let first = Date(timeIntervalSince1970: floor(start.timeIntervalSince1970 / step) * step)
+        let count = Int(ceil(Double(width / pointsPerMinute) / 30)) + 2
+        ZStack(alignment: .topLeading) {
+            ForEach(0..<count, id: \.self) { index in
+                let date = first.addingTimeInterval(Double(index) * step)
+                let isFullHour = Calendar.current.component(.minute, from: date) == 0
                 HStack(spacing: 5) {
                     Rectangle()
                         .fill(Color.white.opacity(isFullHour ? 0.7 : 0.3))
@@ -538,8 +553,10 @@ private struct TimeRuler: View, Equatable {
                         .foregroundStyle(Color.white.opacity(isFullHour ? 0.95 : 0.5))
                 }
                 .frame(width: 30 * pointsPerMinute, height: height, alignment: .leading)
+                .offset(x: CGFloat(date.timeIntervalSince(start) / 60) * pointsPerMinute)
             }
         }
+        .frame(width: width, height: height, alignment: .topLeading)
     }
 
     private static let dayFormatter: DateFormatter = {
