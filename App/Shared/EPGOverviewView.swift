@@ -6,15 +6,17 @@ import FritzTVKit
 /// Bedienung (über `AppModel.handleEPG`): Hoch/Runter wählt den Sender, Links/Rechts springt im
 /// Zeitstrahl von Sendung zu Sendung, Klick schaltet um.
 ///
-/// Leistung: Die Zeilen werden nur bei neuen Programmdaten berechnet (`rowItems`), liegen in
-/// einem `LazyVStack` und sind `Equatable` – beim Bewegen der Auswahl zeichnet SwiftUI nur die
-/// betroffenen Zeilen neu. Waagerecht wird nicht gescrollt, sondern der Zeitstrahl aller Zeilen
-/// gemeinsam verschoben; das ist auf dem Apple TV deutlich ruhiger.
+/// Leistung auf dem Apple TV: Es gibt keine ScrollView. Gezeichnet werden nur die sichtbaren
+/// Zeilen (plus Rand); sie liegen an festen Positionen und werden beim Blättern nur per Versatz
+/// verschoben – das ist eine reine Transformation und läuft flüssig. Die Kacheln werden nur bei
+/// neuen Programmdaten berechnet (`rowItems`), die Zeilen sind `Equatable`. Die Auswahl liegt in
+/// einem eigenen Objekt (`EPGNavigation`), damit nicht die ganze App neu gezeichnet wird.
 struct EPGOverviewView: View {
     @ObservedObject var model: AppModel
     @ObservedObject var player: PlayerController
     /// Eigene Beobachtung: Änderungen am Suchlauf sollen die Kopfzeile sofort aktualisieren.
     @ObservedObject private var scanner: BackgroundEPGScanner
+    @ObservedObject private var nav: EPGNavigation
 
     // Timeline-Konfiguration; alle Maße über EPGMetrics (auf dem Apple TV deutlich größer)
     private let pointsPerMinute: CGFloat = EPGMetrics.s(4.0)
@@ -27,11 +29,18 @@ struct EPGOverviewView: View {
     @State private var windowStart: Date = EPGOverviewView.makeWindowStart()
     /// Kacheln je Senderplatz, neu berechnet nur bei neuen Programmdaten.
     @State private var rowItems: [Int: [TimelineItem]] = [:]
+    /// Erste sichtbare Zeile (Index in `entries`).
+    @State private var topIndex = 0
+    /// Anzahl ganz sichtbarer Zeilen, aus der Höhe des Rasters.
+    @State private var visibleRows = 6
+    @State private var lastRebuild = Date.distantPast
+    @State private var rebuildPending = false
 
     init(model: AppModel, player: PlayerController) {
         self.model = model
         self.player = player
         self.scanner = model.epgScanner
+        self.nav = model.epgNav
     }
 
     private var entries: [LineupEntry] {
@@ -40,7 +49,11 @@ struct EPGOverviewView: View {
 
     /// Platznummer des ausgewählten Senders (Auswahl liegt im Modell, siehe `AppModel.handleEPG`).
     private var selectedChannelNumber: Int? {
-        entries.first { AppModel.key($0) == model.epgSelectedKey }?.number
+        entries.first { AppModel.key($0) == nav.selectedKey }?.number
+    }
+
+    private var selectedIndex: Int {
+        entries.firstIndex { AppModel.key($0) == nav.selectedKey } ?? 0
     }
 
     private var totalTimelineWidth: CGFloat {
@@ -52,7 +65,7 @@ struct EPGOverviewView: View {
     }
 
     /// Zeitpunkt, um den es geht: der Cursor (Links/Rechts) oder jetzt.
-    private var focusTime: Date { model.epgCursorTime ?? Date() }
+    private var focusTime: Date { nav.cursorTime ?? Date() }
 
     /// Waagerechte Verschiebung: Die fokussierte Zeit steht eine halbe Stunde vom linken Rand.
     private var horizontalOffset: CGFloat {
@@ -67,12 +80,14 @@ struct EPGOverviewView: View {
         return Calendar.current.date(from: comps) ?? earlier
     }
 
-    private var headerDateString: String {
+    private static let headerFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "de_DE")
         formatter.dateFormat = "EEEE, d. MMMM · HH:mm 'Uhr'"
-        return formatter.string(from: Date())
-    }
+        return formatter
+    }()
+
+    private var headerDateString: String { Self.headerFormatter.string(from: Date()) }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -86,9 +101,42 @@ struct EPGOverviewView: View {
         // Senderliste über `AppModel.handle`. Zwei konkurrierende Steuerungen führten dazu, dass
         // Hoch/Runter im Hintergrund den Live-Sender wechselte statt die Auswahl zu bewegen.
         .preferredColorScheme(.dark)
-        .onAppear { rebuildRows() }
-        .onChange(of: player.epgRevision) { _, _ in rebuildRows() }
+        .onAppear {
+            rebuildRows()
+            topIndex = clampedTop(for: selectedIndex, current: selectedIndex - 2)
+        }
+        .onChange(of: player.epgRevision) { _, _ in scheduleRebuild() }
         .onChange(of: model.lineup?.entries.count) { _, _ in rebuildRows() }
+        .onChange(of: nav.selectedKey) { _, _ in
+            let newTop = clampedTop(for: selectedIndex, current: topIndex)
+            if newTop != topIndex {
+                withAnimation(.easeOut(duration: 0.18)) { topIndex = newTop }
+            }
+        }
+    }
+
+    /// Blättert erst, wenn die Auswahl die zweite Zeile vom Rand erreicht.
+    private func clampedTop(for index: Int, current: Int) -> Int {
+        let count = entries.count
+        let visible = max(visibleRows, 3)
+        var top = current
+        if index < top + 1 { top = index - 1 }
+        if index > top + visible - 2 { top = index - visible + 2 }
+        return max(0, min(top, max(0, count - visible)))
+    }
+
+    /// Neue Programmdaten kommen in schneller Folge: höchstens alle 3 Sekunden neu berechnen.
+    private func scheduleRebuild() {
+        let wait = 3 - Date().timeIntervalSince(lastRebuild)
+        if wait <= 0 {
+            rebuildRows()
+        } else if !rebuildPending {
+            rebuildPending = true
+            DispatchQueue.main.asyncAfter(deadline: .now() + wait) {
+                rebuildPending = false
+                rebuildRows()
+            }
+        }
     }
 
     private func rebuildRows() {
@@ -100,6 +148,7 @@ struct EPGOverviewView: View {
         }
         windowStart = start
         rowItems = items
+        lastRebuild = Date()
     }
 
     // MARK: - Kopfzeile
@@ -192,71 +241,79 @@ struct EPGOverviewView: View {
         let now = Date()
         let focus = focusTime
         let offset = horizontalOffset
+        let all = entries
         let selected = selectedChannelNumber
+        let top = topIndex
+        let first = max(0, top - 2)
+        let last = min(all.count, top + visibleRows + 3)
 
-        return ScrollViewReader { proxy in
-            ScrollView(.vertical, showsIndicators: false) {
-                LazyVStack(alignment: .leading, spacing: 0, pinnedViews: [.sectionHeaders]) {
-                    Section {
-                        ForEach(entries) { entry in
-                            let isSelected = entry.number == selected
-                            let items = rowItems[entry.number] ?? []
-                            HStack(spacing: 0) {
-                                ChannelCell(number: entry.number,
-                                            name: entry.group.displayName,
-                                            isCurrent: entry.number == model.currentNumber,
-                                            isSelected: isSelected,
-                                            width: channelColumnWidth,
-                                            height: rowHeight)
-                                    .equatable()
-
-                                TimelineRow(items: items,
-                                            focusedID: isSelected ? Self.programID(in: items, at: focus) : nil,
-                                            liveID: Self.programID(in: items, at: now),
-                                            isSelected: isSelected,
-                                            progress: Self.liveProgress(in: items, at: now),
-                                            width: totalTimelineWidth,
-                                            height: rowHeight)
-                                    .equatable()
-                                    .offset(x: -offset)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                    .clipped()
-                            }
-                            .frame(height: rowHeight)
-                            .overlay(alignment: .bottom) {
-                                Rectangle().fill(EPGColors.line.opacity(0.5)).frame(height: 1)
-                            }
-                            .contentShape(Rectangle())
-                            .onTapGesture { model.tuneFromEPG(key: AppModel.key(entry)) }
-                            .id(entry.number)
-                        }
-                    } header: {
-                        rulerRow(now: now, offset: offset)
+        return VStack(spacing: 0) {
+            rulerRow(now: now, offset: offset)
+            GeometryReader { geo in
+                ZStack(alignment: .topLeading) {
+                    ForEach(first..<max(first, last), id: \.self) { index in
+                        let entry = all[index]
+                        let isSelected = entry.number == selected
+                        let items = rowItems[entry.number] ?? []
+                        row(entry: entry, items: items, isSelected: isSelected,
+                            focus: focus, now: now, offset: offset)
+                            .offset(y: CGFloat(index - top) * rowHeight)
                     }
+                    nowLine(now: now, offset: offset)
                 }
-            }
-            .overlay(alignment: .topLeading) {
-                nowLine(now: now, offset: offset)
-            }
-            .onChange(of: model.epgSelectedKey) { _, _ in
-                guard let number = selectedChannelNumber else { return }
-                withAnimation(.easeInOut(duration: 0.22)) {
-                    proxy.scrollTo(number, anchor: .center)
-                }
-            }
-            .onAppear {
-                let number = selectedChannelNumber ?? model.currentNumber
-                DispatchQueue.main.async { proxy.scrollTo(number, anchor: .center) }
+                .frame(width: geo.size.width, height: geo.size.height, alignment: .topLeading)
+                .clipped()
+                .onAppear { updateVisibleRows(height: geo.size.height) }
+                .onChange(of: geo.size.height) { _, height in updateVisibleRows(height: height) }
             }
         }
-        .animation(.easeInOut(duration: 0.25), value: model.epgCursorTime)
+        .animation(.easeInOut(duration: 0.25), value: nav.cursorTime)
+    }
+
+    private func updateVisibleRows(height: CGFloat) {
+        let rows = max(3, Int(height / rowHeight))
+        if rows != visibleRows {
+            visibleRows = rows
+            topIndex = clampedTop(for: selectedIndex, current: topIndex)
+        }
+    }
+
+    private func row(entry: LineupEntry, items: [TimelineItem], isSelected: Bool,
+                     focus: Date, now: Date, offset: CGFloat) -> some View {
+        HStack(spacing: 0) {
+            ChannelCell(number: entry.number,
+                        name: entry.group.displayName,
+                        isCurrent: entry.number == model.currentNumber,
+                        isSelected: isSelected,
+                        width: channelColumnWidth,
+                        height: rowHeight)
+                .equatable()
+
+            TimelineRow(items: items,
+                        focusedID: isSelected ? Self.programID(in: items, at: focus) : nil,
+                        liveID: Self.programID(in: items, at: now),
+                        isSelected: isSelected,
+                        progress: Self.liveProgress(in: items, at: now),
+                        width: totalTimelineWidth,
+                        height: rowHeight)
+                .equatable()
+                .offset(x: -offset)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .clipped()
+        }
+        .frame(height: rowHeight)
+        .overlay(alignment: .bottom) {
+            Rectangle().fill(EPGColors.line.opacity(0.5)).frame(height: 1)
+        }
+        .contentShape(Rectangle())
+        .onTapGesture { model.tuneFromEPG(key: AppModel.key(entry)) }
     }
 
     /// Zeitleiste oben; bleibt beim senkrechten Blättern stehen.
     private func rulerRow(now: Date, offset: CGFloat) -> some View {
         HStack(spacing: 0) {
             HStack(spacing: 8) {
-                if let cursor = model.epgCursorTime {
+                if let cursor = nav.cursorTime {
                     Text("ab \(Self.formatTime(cursor))")
                         .font(EPGMetrics.font(15, .bold))
                         .foregroundStyle(EPGColors.accent)
@@ -581,4 +638,11 @@ enum EPGMetrics {
     static func font(_ size: CGFloat, _ weight: Font.Weight = .regular) -> Font {
         .system(size: size * k, weight: weight)
     }
+}
+
+/// Auswahl in der Programmübersicht (siehe `AppModel.epgNav`).
+@MainActor
+final class EPGNavigation: ObservableObject {
+    @Published var selectedKey: String?
+    @Published var cursorTime: Date?
 }

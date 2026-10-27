@@ -80,11 +80,20 @@ final class AppModel: ObservableObject {
     @Published var showSettings = false
     @Published var showMediathek = false
     @Published var showEPGOverview = false
+    /// Auswahl in der Programmübersicht. Eigenes Objekt: Änderungen zeichnen nur die Übersicht
+    /// neu, nicht die ganze App (wichtig für ruhiges Blättern auf dem Apple TV).
+    let epgNav = EPGNavigation()
     /// Ausgewählter Sender in der Programmübersicht (Senderschlüssel). Die Auswahl verwaltet die
     /// App selbst wie bei der Senderliste: Alle Tasten laufen über `handle`, auf Apple TV und Mac gleich.
-    @Published private(set) var epgSelectedKey: String?
+    private(set) var epgSelectedKey: String? {
+        get { epgNav.selectedKey }
+        set { if epgNav.selectedKey != newValue { epgNav.selectedKey = newValue } }
+    }
     /// Zeitpunkt in der Programmübersicht, den Links/Rechts ansteuert; `nil` = jetzt.
-    @Published var epgCursorTime: Date?
+    var epgCursorTime: Date? {
+        get { epgNav.cursorTime }
+        set { if epgNav.cursorTime != newValue { epgNav.cursorTime = newValue } }
+    }
     @Published var activeHLSReplay: (url: URL, startDate: Date?)?
     @Published var activeMediathekURL: URL?
     /// Untertitel zum laufenden Mediathek-Video aus der Suche, falls vorhanden.
