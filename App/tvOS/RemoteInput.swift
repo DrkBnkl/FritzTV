@@ -13,6 +13,10 @@ struct RemoteInputModifier: ViewModifier {
             .focusEffectDisabled()
             .background(RemotePressBridge(model: model))
             .onMoveCommand { direction in
+                // Ende eines gehaltenen Blätterns: Das Loslassen meldet noch einen Schritt – verwerfen.
+                if (direction == .up || direction == .down), RemoteHoldRepeater.shared.swallowReleaseMove() {
+                    return
+                }
                 // Live-Bild: oben/unten kurz zurückhalten. Erkennt `RemotePressBridge` in dieser
                 // Zeit ein Wischen, öffnet das die Senderleiste bzw. Info; sonst wird gezappt
                 // (Klick auf den Ring). Wischen löst ebenfalls einen Move-Befehl aus.
@@ -242,6 +246,14 @@ final class RemoteSwipeArbiter {
 final class RemoteHoldRepeater {
     static let shared = RemoteHoldRepeater()
     private var task: Task<Void, Never>?
+    private var repeatEndedAt = Date.distantPast
+
+    /// Wahr direkt nach einem gehaltenen Blättern (einmalig).
+    func swallowReleaseMove() -> Bool {
+        guard Date().timeIntervalSince(repeatEndedAt) < 0.3 else { return false }
+        repeatEndedAt = .distantPast
+        return true
+    }
 
     func update(_ state: UIGestureRecognizer.State, command: RemoteCommand, model: AppModel) {
         switch state {
@@ -259,6 +271,7 @@ final class RemoteHoldRepeater {
                 }
             }
         case .ended, .cancelled, .failed:
+            if task != nil { repeatEndedAt = Date() }
             task?.cancel()
             task = nil
         default:
