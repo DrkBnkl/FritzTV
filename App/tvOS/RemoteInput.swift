@@ -13,9 +13,13 @@ struct RemoteInputModifier: ViewModifier {
             .focusEffectDisabled()
             .background(RemotePressBridge(model: model))
             .onMoveCommand { direction in
-                // Live-Bild: oben/unten kommen getrennt nach Klick (zappen) und Wischen
-                // (Senderleiste/Info) über `RemotePressBridge`; hier nicht doppelt auswerten.
-                if model.isPlainLiveView, direction == .up || direction == .down { return }
+                // Live-Bild: oben/unten kurz zurückhalten. Erkennt `RemotePressBridge` in dieser
+                // Zeit ein Wischen, öffnet das die Senderleiste bzw. Info; sonst wird gezappt
+                // (Klick auf den Ring). Wischen löst ebenfalls einen Move-Befehl aus.
+                if model.isPlainLiveView, direction == .up || direction == .down {
+                    RemoteSwipeArbiter.shared.deferMove(direction == .up ? .up : .down, model: model)
+                    return
+                }
                 if model.searchResultDialog != nil {
                     switch direction {
                     case .up: NotificationCenter.default.post(name: .searchResultMove, object: -1)
@@ -148,8 +152,6 @@ private struct RemotePressBridge: UIViewRepresentable {
         func install(on window: UIWindow) {
             guard installedWindow !== window else { return }
             installedWindow = window
-            add(press: .upArrow, to: window, action: #selector(clickUp))
-            add(press: .downArrow, to: window, action: #selector(clickDown))
             add(press: .pageUp, to: window, action: #selector(pageUp))
             add(press: .pageDown, to: window, action: #selector(pageDown))
             add(swipe: .up, to: window, action: #selector(swipeUp))
@@ -171,11 +173,39 @@ private struct RemotePressBridge: UIViewRepresentable {
             view.addGestureRecognizer(swipe)
         }
 
-        @objc private func clickUp() { if model.isPlainLiveView { model.handle(.up) } }
-        @objc private func clickDown() { if model.isPlainLiveView { model.handle(.down) } }
-        @objc private func swipeUp() { if model.isPlainLiveView { withAnimation { model.handle(.swipeUp) } } }
-        @objc private func swipeDown() { if model.isPlainLiveView { withAnimation { model.handle(.swipeDown) } } }
+        @objc private func swipeUp() { RemoteSwipeArbiter.shared.swiped(.swipeUp, model: model) }
+        @objc private func swipeDown() { RemoteSwipeArbiter.shared.swiped(.swipeDown, model: model) }
         @objc private func pageUp() { model.handle(.pageUp) }
         @objc private func pageDown() { model.handle(.pageDown) }
+    }
+}
+
+/// Trennt im Live-Bild Klick (zappen) und Wischen (Senderleiste/Info): Ein Wischen erzeugt
+/// zuerst einen Move-Befehl und wird erst am Ende der Bewegung als Wischen erkannt. Deshalb wird
+/// der Move-Befehl kurz zurückgehalten und verworfen, wenn in dieser Zeit ein Wischen kommt.
+@MainActor
+final class RemoteSwipeArbiter {
+    static let shared = RemoteSwipeArbiter()
+    private var pending: DispatchWorkItem?
+    private var lastSwipe = Date.distantPast
+
+    func deferMove(_ command: RemoteCommand, model: AppModel) {
+        // Gerade gewischt (Erkennung kam vor dem Move-Befehl): nicht zusätzlich zappen.
+        if Date().timeIntervalSince(lastSwipe) < 0.4 { return }
+        pending?.cancel()
+        let work = DispatchWorkItem { [weak model] in
+            guard let model, model.isPlainLiveView else { return }
+            model.handle(command)
+        }
+        pending = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25, execute: work)
+    }
+
+    func swiped(_ command: RemoteCommand, model: AppModel) {
+        guard model.isPlainLiveView else { return }
+        lastSwipe = Date()
+        pending?.cancel()
+        pending = nil
+        withAnimation(.easeOut(duration: 0.25)) { model.handle(command) }
     }
 }

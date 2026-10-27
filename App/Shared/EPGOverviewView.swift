@@ -17,6 +17,8 @@ struct EPGOverviewView: View {
     /// Eigene Beobachtung: Änderungen am Suchlauf sollen die Kopfzeile sofort aktualisieren.
     @ObservedObject private var scanner: BackgroundEPGScanner
     @ObservedObject private var nav: EPGNavigation
+    /// „Meine Sender“ (Sterne, Detailtafel) sollen sofort aktualisiert werden.
+    @ObservedObject private var settings: AppSettings
 
     // Timeline-Konfiguration; alle Maße über EPGMetrics (auf dem Apple TV deutlich größer)
     private let pointsPerMinute: CGFloat = EPGMetrics.s(4.0)
@@ -41,6 +43,7 @@ struct EPGOverviewView: View {
         self.player = player
         self.scanner = model.epgScanner
         self.nav = model.epgNav
+        self.settings = model.settings
     }
 
     /// Angezeigte Sender (nach Filter, siehe `AppModel.epgEntries`).
@@ -325,7 +328,7 @@ struct EPGOverviewView: View {
                         name: entry.group.displayName,
                         isCurrent: entry.number == model.currentNumber,
                         isSelected: isSelected,
-                        isFavorite: model.settings.favoriteKeys.contains(AppModel.key(entry)),
+                        isFavorite: settings.favoriteKeys.contains(AppModel.key(entry)),
                         width: channelColumnWidth,
                         height: rowHeight)
                 .equatable()
