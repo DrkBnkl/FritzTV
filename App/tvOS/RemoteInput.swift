@@ -248,8 +248,10 @@ final class RemoteHoldRepeater {
     private var task: Task<Void, Never>?
     private var repeatEndedAt = Date.distantPast
 
-    /// Wahr direkt nach einem gehaltenen Blättern (einmalig).
+    /// Wahr während und direkt nach einem gehaltenen Blättern (die Reihenfolge von Loslassen und
+    /// Ende der Geste ist nicht festgelegt).
     func swallowReleaseMove() -> Bool {
+        if task != nil { return true }
         guard Date().timeIntervalSince(repeatEndedAt) < 0.3 else { return false }
         repeatEndedAt = .distantPast
         return true
