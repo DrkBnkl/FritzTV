@@ -246,6 +246,8 @@ final class PlayerController: ObservableObject {
 
         let media = VLCMedia(url: pidOverrides[channel.id] ?? channel.streamURL)
         media.addOption(":network-caching=\(options.networkCachingMs)")
+        // Videotext-Untertitel durchsichtig über dem Bild statt als schwarze Videotext-Tafel.
+        media.addOption(":vbi-opaque=0")
         if options.rtspTCP || forceTCP {
             media.addOption(":rtsp-tcp")
         }
@@ -886,6 +888,7 @@ final class PlayerController: ObservableObject {
         }
         let media = VLCMedia(url: segment.url)
         media.addOption(":file-caching=300")
+        media.addOption(":vbi-opaque=0")
         replayPlayer.media = media
         replayPlayer.setDeinterlaceFilter(options.deinterlace && channel?.isHD == false ? "yadif" : nil)
         mediaPlayer.audio?.isMuted = true
@@ -1057,7 +1060,7 @@ final class PlayerController: ObservableObject {
     }
 
     func cycleSubtitle() {
-        var tracks = indexes(mediaPlayer.videoSubTitlesIndexes)
+        var tracks = subtitleTrackIDs()
         if !tracks.contains(-1) { tracks.insert(-1, at: 0) }
         guard tracks.count > 1 else { return }
         let position = tracks.firstIndex(of: mediaPlayer.currentVideoSubTitleIndex) ?? 0
@@ -1071,7 +1074,7 @@ final class PlayerController: ObservableObject {
 
     private func refreshTrackNames() {
         // Läuft zweimal pro Sekunde: nur bei Änderungen zuweisen (siehe `setStatus`).
-        let subIndexes = indexes(mediaPlayer.videoSubTitlesIndexes).filter { $0 >= 0 }
+        let subIndexes = subtitleTrackIDs().filter { $0 >= 0 }
         let newHasSubtitles = !subIndexes.isEmpty
         if hasSubtitles != newHasSubtitles { hasSubtitles = newHasSubtitles }
         let rawAudio = trackName(current: mediaPlayer.currentAudioTrackIndex,
@@ -1091,6 +1094,32 @@ final class PlayerController: ObservableObject {
             newSubtitleName = cleanSubtitleName(rawSub)
         }
         if subtitleName != newSubtitleName { subtitleName = newSubtitleName }
+    }
+
+    /// Untertitelspuren ohne die vollständige Videotext-Ansicht: VLC bietet bei DVB neben den
+    /// Untertitel-Tafeln (z. B. 150, 777) auch den normalen Videotext als „Untertitel“ an.
+    private func subtitleTrackIDs() -> [Int32] {
+        let ids = indexes(mediaPlayer.videoSubTitlesIndexes)
+        let names = (mediaPlayer.videoSubTitlesNames as? [String]) ?? []
+        guard ids.count == names.count else { return ids }
+        let joined = names.joined(separator: " | ")
+        if joined != lastLoggedSubtitleNames {
+            lastLoggedSubtitleNames = joined
+            DebugLog.log("Untertitelspuren: \(joined)")
+        }
+        return zip(ids, names).compactMap { id, name in
+            id < 0 || !Self.isFullTeletext(name) ? id : nil
+        }
+    }
+
+    private var lastLoggedSubtitleNames = ""
+
+    /// Volle Videotext-Seite (keine Untertitel-Tafel)?
+    static func isFullTeletext(_ name: String) -> Bool {
+        let lower = name.lowercased()
+        guard lower.contains("teletext") || lower.contains("videotext") else { return false }
+        let subtitleHints = ["subtitle", "untertitel", "150", "777", "888", "149", "hearing"]
+        return !subtitleHints.contains { lower.contains($0) }
     }
 
     private static let trackRegex = try? NSRegularExpression(pattern: #"Track\s*\d+\s*-\s*\[(.*?)\]"#)

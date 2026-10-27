@@ -20,13 +20,19 @@ struct HLSReplayPlayerView: View {
     @State private var lastJumpPressAt = Date.distantPast
     @State private var lastJumpForward = true
     @State private var jumpPressCount = 0
+    /// Hinweise oben („Live-TV“ / „Von Anfang an“) blenden sich nach einigen Sekunden aus und
+    /// erscheinen bei jeder Bedienung kurz wieder.
+    @State private var headerVisible = true
+    @State private var headerTask: Task<Void, Never>?
 
     var body: some View {
         VideoPlayer(player: player)
             .ignoresSafeArea()
             .task { await start() }
+            .onAppear { showHeader() }
             .onDisappear {
                 jumpFeedbackTask?.cancel()
+                headerTask?.cancel()
                 player.pause()
                 player.replaceCurrentItem(with: nil)
             }
@@ -107,6 +113,8 @@ struct HLSReplayPlayerView: View {
                 }
                 .padding(.horizontal, 24)
                 .padding(.top, 20)
+                .opacity(headerVisible ? 1 : 0)
+                .allowsHitTesting(headerVisible)
             }
             #if os(macOS)
             .onKeyPress(.escape) {
@@ -132,7 +140,18 @@ struct HLSReplayPlayerView: View {
             #endif
     }
 
+    private func showHeader() {
+        withAnimation(.easeOut(duration: 0.2)) { headerVisible = true }
+        headerTask?.cancel()
+        headerTask = Task {
+            try? await Task.sleep(for: .seconds(5))
+            guard !Task.isCancelled else { return }
+            withAnimation(.easeInOut(duration: 0.6)) { headerVisible = false }
+        }
+    }
+
     private func jumpProgressive(forward: Bool) {
+        showHeader()
         let step = ProgressiveJump.nextStep(
             forward: forward,
             lastPressAt: &lastJumpPressAt,
@@ -177,6 +196,7 @@ struct HLSReplayPlayerView: View {
     }
 
     private func togglePlayPause() {
+        showHeader()
         if player.timeControlStatus == .paused {
             player.play()
         } else {
