@@ -629,14 +629,25 @@ final class AppModel: ObservableObject {
         if forward {
             target = current?.endDate
                 ?? programs.first(where: { $0.startDate > time })?.startDate
-                ?? time.addingTimeInterval(30 * 60)
+                ?? Self.nextHalfHour(after: time)
             guard target < now.addingTimeInterval(22 * 3600) else { return }
         } else {
             let reference = current?.startDate ?? time
             let previous = programs.last { $0.startDate < reference && $0.endDate > reference.addingTimeInterval(-60) }
-            target = previous?.startDate ?? reference.addingTimeInterval(-30 * 60)
+            target = previous?.startDate ?? Self.previousHalfHour(before: reference)
         }
         epgCursorTime = target <= now ? nil : target
+    }
+
+    /// Nächste volle oder halbe Stunde nach `date` (Schritte ohne Programmdaten).
+    private static func nextHalfHour(after date: Date) -> Date {
+        let step: TimeInterval = 30 * 60
+        return Date(timeIntervalSince1970: (floor(date.timeIntervalSince1970 / step) + 1) * step)
+    }
+
+    private static func previousHalfHour(before date: Date) -> Date {
+        let step: TimeInterval = 30 * 60
+        return Date(timeIntervalSince1970: (ceil(date.timeIntervalSince1970 / step) - 1) * step)
     }
 
     private func handleList(_ command: RemoteCommand, selectedID: String) {
