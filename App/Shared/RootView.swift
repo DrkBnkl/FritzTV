@@ -26,7 +26,7 @@ struct RootView: View {
             }
             // In der Programmübersicht läuft das Bild verkleinert im Vorschaufenster weiter.
             // Dieselbe Ansicht wird nur verschoben (kein zweiter Player, kein Neuaufbau).
-            PlayerSurface(player: player.mediaPlayer)
+            PlayerSurface(player: player.mediaPlayer, previewFrame: previewFrame)
                 .modifier(EPGPreviewPlacement(frame: previewFrame))
             // Schwarzer Bildschirm beim Umschalten: Blendet Standbilder des alten Senders aus,
             // bis der neue Stream decodiert wird.
@@ -35,7 +35,7 @@ struct RootView: View {
                 Color.black.ignoresSafeArea()
             }
             // Timeshift: Mitschnitt-Wiedergabe liegt über dem stumm weiterlaufenden Live-Bild.
-            PlayerSurface(player: player.replayPlayer)
+            PlayerSurface(player: player.replayPlayer, previewFrame: previewFrame)
                 .opacity(player.isReplaying ? 1 : 0)
                 .allowsHitTesting(false)
                 .modifier(EPGPreviewPlacement(frame: previewFrame))
@@ -203,13 +203,14 @@ struct EPGPreviewFrameKey: PreferenceKey {
 
 /// Bildfläche: normalerweise bildschirmfüllend, in der Programmübersicht im Vorschaufenster.
 ///
-/// Die Fläche behält immer die volle Bildschirmgröße und wird nur per Transformation
-/// verkleinert und verschoben. So muss VLC seine Videoausgabe nicht an eine neue Größe
-/// anpassen – beim Ändern der Größe blieb das Vorschaubild auf dem Apple TV stehen.
+/// Apple TV: Die SwiftUI-Modifier bleiben immer gleich; verkleinert wird in
+/// `VideoHostView` per UIKit-Transformation (siehe dort, warum).
+/// Mac: Die Fläche behält die volle Größe und wird per `scaleEffect` verkleinert.
 struct EPGPreviewPlacement: ViewModifier {
     let frame: CGRect?
 
     func body(content: Content) -> some View {
+        #if os(macOS)
         GeometryReader { geo in
             let full = geo.size
             let scale = frame.map { $0.width / max(full.width, 1) } ?? 1
@@ -221,6 +222,11 @@ struct EPGPreviewPlacement: ViewModifier {
         }
         .ignoresSafeArea()
         .allowsHitTesting(frame == nil)
+        #else
+        content
+            .ignoresSafeArea()
+            .allowsHitTesting(false)
+        #endif
     }
 }
 
