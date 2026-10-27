@@ -16,13 +16,22 @@ struct RootView: View {
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
+            // Die Programmübersicht liegt UNTER der Bildfläche. Die Bildfläche behält so immer
+            // ihren Platz in der Ansichtshierarchie: Wurde sie (per zIndex) über die Übersicht
+            // gehoben, blieb das VLC-Bild stehen – auch nach dem Schließen der Übersicht.
+            if model.showEPGOverview && model.activeHLSReplay == nil && model.activeMediathekURL == nil {
+                EPGOverviewView(model: model, player: player)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .transition(.opacity)
+            }
             // In der Programmübersicht läuft das Bild verkleinert im Vorschaufenster weiter.
             // Dieselbe Ansicht wird nur verschoben (kein zweiter Player, kein Neuaufbau).
             PlayerSurface(player: player.mediaPlayer)
                 .modifier(EPGPreviewPlacement(frame: previewFrame))
             // Schwarzer Bildschirm beim Umschalten: Blendet Standbilder des alten Senders aus,
             // bis der neue Stream decodiert wird.
-            if model.settings.blackScreenOnZap && player.status.isTransitioning && !player.isReplaying {
+            if model.settings.blackScreenOnZap && player.status.isTransitioning && !player.isReplaying
+                && !model.showEPGOverview {
                 Color.black.ignoresSafeArea()
             }
             // Timeshift: Mitschnitt-Wiedergabe liegt über dem stumm weiterlaufenden Live-Bild.
@@ -40,11 +49,7 @@ struct RootView: View {
                     model.mediathekPlayClosed()
                 }
                 .ignoresSafeArea()
-            } else if model.showEPGOverview {
-                EPGOverviewView(model: model, player: player)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .transition(.opacity)
-            } else {
+            } else if !model.showEPGOverview {
                 #if os(macOS)
                 // Mausklick ins Bild öffnet die Senderliste. Nur auf dem Mac: Auf dem Apple TV fing
                 // diese Fläche den Klick der Fernbedienung ab (z. B. im Timeshift).
@@ -216,8 +221,6 @@ struct EPGPreviewPlacement: ViewModifier {
         }
         .ignoresSafeArea()
         .allowsHitTesting(frame == nil)
-        // Über die Programmübersicht legen; die Ansicht bleibt dieselbe.
-        .zIndex(frame == nil ? 0 : 5)
     }
 }
 

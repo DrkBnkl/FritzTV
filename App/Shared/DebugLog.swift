@@ -13,6 +13,14 @@ enum DebugLog {
         let url = folder.appendingPathComponent("debug.log")
         try? Data().write(to: url)
         return url
+        #elseif targetEnvironment(simulator) && DEBUG
+        // Apple-TV-Simulator: ins Projektverzeichnis auf dem Mac schreiben (für UI-Tests).
+        guard let home = ProcessInfo.processInfo.environment["SIMULATOR_HOST_HOME"] else { return nil }
+        let folder = URL(fileURLWithPath: home).appendingPathComponent("coding/FritzTV", isDirectory: true)
+        guard FileManager.default.fileExists(atPath: folder.path) else { return nil }
+        let url = folder.appendingPathComponent("debug.log")
+        try? Data().write(to: url)
+        return url
         #else
         return nil
         #endif
