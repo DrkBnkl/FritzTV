@@ -83,6 +83,8 @@ final class AppModel: ObservableObject {
     /// Ausgewählter Sender in der Programmübersicht (Senderschlüssel). Die Auswahl verwaltet die
     /// App selbst wie bei der Senderliste: Alle Tasten laufen über `handle`, auf Apple TV und Mac gleich.
     @Published private(set) var epgSelectedKey: String?
+    /// Zeitpunkt in der Programmübersicht, den Links/Rechts ansteuert; `nil` = jetzt.
+    @Published var epgCursorTime: Date?
     @Published var activeHLSReplay: (url: URL, startDate: Date?)?
     @Published var activeMediathekURL: URL?
     /// Untertitel zum laufenden Mediathek-Video aus der Suche, falls vorhanden.
@@ -521,6 +523,7 @@ final class AppModel: ObservableObject {
         overlay = .none
         bannerVisible = false
         epgSelectedKey = playingKey ?? currentEntry.map(Self.key)
+        epgCursorTime = nil
         showEPGOverview = true
         // Kein automatischer Suchlauf: Eine zweite Verbindung zur FRITZ!Box unterbricht das
         // laufende Live-Bild. Der Suchlauf startet nur auf Knopfdruck (Play/Pause).
@@ -605,8 +608,35 @@ final class AppModel: ObservableObject {
                 epgSelectedKey = Self.key(entry)
             }
         case .left, .right:
-            break
+            moveEPGCursor(forward: command == .right)
         }
+    }
+
+    /// Links/Rechts in der Programmübersicht: zur vorigen bzw. nächsten Sendung des gewählten
+    /// Senders. Ohne Programmdaten in Schritten von 30 Minuten. Nie vor „jetzt“, höchstens 22 h voraus.
+    private func moveEPGCursor(forward: Bool) {
+        let now = Date()
+        let time = epgCursorTime ?? now
+        let programs: [EPGProgram]
+        if let key = epgSelectedKey, let entry = lineup?.entries.first(where: { Self.key($0) == key }) {
+            programs = (player.epgStore.schedule(forChannelNames: entry.group.epgNames)?.programs ?? [])
+                .sorted { $0.startDate < $1.startDate }
+        } else {
+            programs = []
+        }
+        let current = programs.first { $0.startDate <= time && time < $0.endDate }
+        let target: Date
+        if forward {
+            target = current?.endDate
+                ?? programs.first(where: { $0.startDate > time })?.startDate
+                ?? time.addingTimeInterval(30 * 60)
+            guard target < now.addingTimeInterval(22 * 3600) else { return }
+        } else {
+            let reference = current?.startDate ?? time
+            let previous = programs.last { $0.startDate < reference && $0.endDate > reference.addingTimeInterval(-60) }
+            target = previous?.startDate ?? reference.addingTimeInterval(-30 * 60)
+        }
+        epgCursorTime = target <= now ? nil : target
     }
 
     private func handleList(_ command: RemoteCommand, selectedID: String) {

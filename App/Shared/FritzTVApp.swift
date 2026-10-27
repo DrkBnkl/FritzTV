@@ -67,6 +67,6 @@ enum UI {
 
     static let text = Color(red: 0.95, green: 0.96, blue: 0.97)
     static let secondary = Color(red: 0.66, green: 0.69, blue: 0.74)
-    static let panel = Color(red: 0.07, green: 0.08, blue: 0.10).opacity(0.9)
-    static let accent = Color(red: 1.0, green: 0.72, blue: 0.42)
+    static let panel = Color(red: 0.04, green: 0.08, blue: 0.15).opacity(0.9)
+    static let accent = Color(red: 0.50, green: 0.78, blue: 1.0)
 }

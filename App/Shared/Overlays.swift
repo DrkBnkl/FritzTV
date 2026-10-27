@@ -29,8 +29,11 @@ private struct BottomPanel<Content: View>: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(UI.panel, in: RoundedRectangle(cornerRadius: UI.s(32)))
                 .padding(.horizontal, UI.s(96))
-                .padding(.bottom, UI.s(60))
+                .padding(.bottom, UI.s(28))
         }
+        // Tiefer an den unteren Bildrand (ohne den sicheren Bereich), damit weniger vom Bild
+        // verdeckt wird.
+        .ignoresSafeArea(edges: .bottom)
     }
 }
 
