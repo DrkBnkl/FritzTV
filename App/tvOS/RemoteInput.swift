@@ -143,7 +143,7 @@ private struct RemotePressBridge: UIViewRepresentable {
     }
 
     @MainActor
-    final class Coordinator: NSObject {
+    final class Coordinator: NSObject, UIGestureRecognizerDelegate {
         var model: AppModel
         private weak var installedWindow: UIWindow?
 
@@ -156,6 +156,28 @@ private struct RemotePressBridge: UIViewRepresentable {
             add(press: .pageDown, to: window, action: #selector(pageDown))
             add(swipe: .up, to: window, action: #selector(swipeUp))
             add(swipe: .down, to: window, action: #selector(swipeDown))
+            add(hold: .upArrow, to: window, action: #selector(holdUp(_:)))
+            add(hold: .downArrow, to: window, action: #selector(holdDown(_:)))
+        }
+
+        /// Gedrückt halten (Ring oben/unten): nach kurzer Zeit wiederholt weiterblättern.
+        /// Der erste Schritt kommt wie gewohnt über `onMoveCommand`.
+        private func add(hold press: UIPress.PressType, to view: UIView, action: Selector) {
+            let hold = UILongPressGestureRecognizer(target: self, action: action)
+            hold.allowedPressTypes = [NSNumber(value: press.rawValue)]
+            hold.allowedTouchTypes = []
+            hold.minimumPressDuration = 0.4
+            hold.allowableMovement = .greatestFiniteMagnitude
+            hold.cancelsTouchesInView = false
+            hold.delegate = self
+            view.addGestureRecognizer(hold)
+        }
+
+        @objc private func holdUp(_ recognizer: UILongPressGestureRecognizer) {
+            RemoteHoldRepeater.shared.update(recognizer.state, command: .up, model: model)
+        }
+        @objc private func holdDown(_ recognizer: UILongPressGestureRecognizer) {
+            RemoteHoldRepeater.shared.update(recognizer.state, command: .down, model: model)
         }
 
         private func add(press: UIPress.PressType, to view: UIView, action: Selector) {
@@ -172,6 +194,9 @@ private struct RemotePressBridge: UIViewRepresentable {
             swipe.cancelsTouchesInView = false
             view.addGestureRecognizer(swipe)
         }
+
+        func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
+                               shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool { true }
 
         @objc private func swipeUp() { RemoteSwipeArbiter.shared.swiped(.swipeUp, model: model) }
         @objc private func swipeDown() { RemoteSwipeArbiter.shared.swiped(.swipeDown, model: model) }
@@ -207,5 +232,43 @@ final class RemoteSwipeArbiter {
         pending?.cancel()
         pending = nil
         withAnimation(.easeOut(duration: 0.25)) { model.handle(command) }
+    }
+}
+
+/// Wiederholt oben/unten, solange die Taste gehalten wird – in der Programmübersicht und in der
+/// Senderliste, nicht im Live-Bild (dort würde Halten durch alle Sender zappen). Erst ruhig
+/// (8 Schritte/s), nach gut einer Sekunde schneller (15/s).
+@MainActor
+final class RemoteHoldRepeater {
+    static let shared = RemoteHoldRepeater()
+    private var task: Task<Void, Never>?
+
+    func update(_ state: UIGestureRecognizer.State, command: RemoteCommand, model: AppModel) {
+        switch state {
+        case .began:
+            guard Self.allowsRepeat(model) else { return }
+            task?.cancel()
+            DebugLog.log("Halten: \(command) – blättern")
+            task = Task { @MainActor [weak model] in
+                var steps = 0
+                while !Task.isCancelled {
+                    guard let model, Self.allowsRepeat(model) else { return }
+                    model.handle(command)
+                    steps += 1
+                    try? await Task.sleep(for: .milliseconds(steps < 10 ? 125 : 65))
+                }
+            }
+        case .ended, .cancelled, .failed:
+            task?.cancel()
+            task = nil
+        default:
+            break
+        }
+    }
+
+    private static func allowsRepeat(_ model: AppModel) -> Bool {
+        if model.showEPGOverview { return model.epgNav.detail == nil }
+        if case .channelList = model.overlay { return true }
+        return false
     }
 }
