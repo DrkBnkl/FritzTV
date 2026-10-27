@@ -247,25 +247,28 @@ struct EPGOverviewView: View {
         let first = max(0, top - 2)
         let last = min(all.count, top + visibleRows + 3)
 
-        return VStack(spacing: 0) {
-            rulerRow(now: now, offset: offset)
-            GeometryReader { geo in
+        return GeometryReader { geo in
+            let timelineWidth = max(0, geo.size.width - channelColumnWidth)
+            let rowsHeight = max(0, geo.size.height - rulerHeight)
+            VStack(spacing: 0) {
+                rulerRow(now: now, offset: offset, timelineWidth: timelineWidth)
                 ZStack(alignment: .topLeading) {
                     ForEach(first..<max(first, last), id: \.self) { index in
                         let entry = all[index]
                         let isSelected = entry.number == selected
                         let items = rowItems[entry.number] ?? []
                         row(entry: entry, items: items, isSelected: isSelected,
-                            focus: focus, now: now, offset: offset)
+                            focus: focus, now: now, offset: offset, timelineWidth: timelineWidth)
                             .offset(y: CGFloat(index - top) * rowHeight)
                     }
                     nowLine(now: now, offset: offset)
                 }
-                .frame(width: geo.size.width, height: geo.size.height, alignment: .topLeading)
+                .frame(width: geo.size.width, height: rowsHeight, alignment: .topLeading)
                 .clipped()
-                .onAppear { updateVisibleRows(height: geo.size.height) }
-                .onChange(of: geo.size.height) { _, height in updateVisibleRows(height: height) }
             }
+            .frame(width: geo.size.width, height: geo.size.height, alignment: .topLeading)
+            .onAppear { updateVisibleRows(height: rowsHeight) }
+            .onChange(of: rowsHeight) { _, height in updateVisibleRows(height: height) }
         }
         .animation(.easeInOut(duration: 0.25), value: nav.cursorTime)
     }
@@ -279,7 +282,7 @@ struct EPGOverviewView: View {
     }
 
     private func row(entry: LineupEntry, items: [TimelineItem], isSelected: Bool,
-                     focus: Date, now: Date, offset: CGFloat) -> some View {
+                     focus: Date, now: Date, offset: CGFloat, timelineWidth: CGFloat) -> some View {
         HStack(spacing: 0) {
             ChannelCell(number: entry.number,
                         name: entry.group.displayName,
@@ -298,10 +301,10 @@ struct EPGOverviewView: View {
                         height: rowHeight)
                 .equatable()
                 .offset(x: -offset)
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .frame(width: timelineWidth, height: rowHeight, alignment: .leading)
                 .clipped()
         }
-        .frame(height: rowHeight)
+        .frame(width: channelColumnWidth + timelineWidth, height: rowHeight, alignment: .leading)
         .overlay(alignment: .bottom) {
             Rectangle().fill(EPGColors.line.opacity(0.5)).frame(height: 1)
         }
@@ -310,7 +313,7 @@ struct EPGOverviewView: View {
     }
 
     /// Zeitleiste oben; bleibt beim senkrechten Blättern stehen.
-    private func rulerRow(now: Date, offset: CGFloat) -> some View {
+    private func rulerRow(now: Date, offset: CGFloat, timelineWidth: CGFloat) -> some View {
         HStack(spacing: 0) {
             HStack(spacing: 8) {
                 if let cursor = nav.cursorTime {
@@ -330,7 +333,7 @@ struct EPGOverviewView: View {
             TimeRuler(start: windowStart, hours: totalHours, pointsPerMinute: pointsPerMinute, height: rulerHeight)
                 .equatable()
                 .offset(x: -offset)
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .frame(width: timelineWidth, height: rulerHeight, alignment: .leading)
                 .clipped()
                 .background(EPGColors.ruler)
         }
