@@ -70,7 +70,11 @@ final class VideoHostView: UIView {
     }
 
     private func applyPreview() {
-        guard let target = previewFrame, bounds.width > 0, bounds.height > 0, let superview else {
+        // Ungültige Rahmen (Breite 0 während des ersten Layouts) ergäben eine Transformation mit
+        // Faktor 0 – UIKit bricht dann beim Layout der VLC-Unteransicht mit NaN-Rahmen ab.
+        guard let target = previewFrame, target.width >= 10, target.height >= 10,
+              target.minX.isFinite, target.minY.isFinite,
+              bounds.width > 0, bounds.height > 0, let superview else {
             transform = .identity
             layer.cornerRadius = 0
             layer.masksToBounds = false
