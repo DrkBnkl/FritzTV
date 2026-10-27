@@ -45,7 +45,7 @@ public final class EPGStore: @unchecked Sendable {
 
     // MARK: Speichern und Laden
 
-    /// Fasst viele Änderungen zu einem Speichervorgang nach 3 Sekunden zusammen.
+    /// Fasst viele Änderungen zu einem Speichervorgang nach 10 Sekunden zusammen.
     /// Wird aus VLC-Threads aufgerufen, daher nur unter der Sperre (und nie, während sie gehalten wird).
     private func scheduleSave() {
         guard let url = cacheURL else { return }
@@ -54,7 +54,7 @@ public final class EPGStore: @unchecked Sendable {
         savePending = true
         lock.unlock()
         guard !alreadyPending else { return }
-        DispatchQueue.global(qos: .background).asyncAfter(deadline: .now() + 3) { [weak self] in
+        DispatchQueue.global(qos: .background).asyncAfter(deadline: .now() + 10) { [weak self] in
             guard let self else { return }
             self.lock.lock()
             self.savePending = false
@@ -75,21 +75,32 @@ public final class EPGStore: @unchecked Sendable {
 
     // MARK: Daten aufnehmen
 
-    public func add(program: EPGProgram) {
+    /// Nimmt eine Sendung auf. Gibt `true` zurück, wenn sie neu ist oder sich geändert hat.
+    /// (Die EIT wiederholt dieselben Sendungen alle paar Sekunden; Wiederholungen lösen weder
+    /// Speichern noch Neuzeichnen aus.)
+    @discardableResult
+    public func add(program: EPGProgram) -> Bool {
         lock.lock()
-        programsByService[program.serviceID, default: [:]][program.eventID] = program
+        let changed = programsByService[program.serviceID]?[program.eventID] != program
+        if changed {
+            programsByService[program.serviceID, default: [:]][program.eventID] = program
+        }
         lock.unlock()
-        scheduleSave()
+        if changed { scheduleSave() }
+        return changed
     }
 
-    /// Zuordnung aus der SDT: Service-ID → Sendername.
-    public func setServiceName(_ name: String, for serviceID: Int) {
+    /// Zuordnung aus der SDT: Service-ID → Sendername. `true`, wenn sie neu ist.
+    @discardableResult
+    public func setServiceName(_ name: String, for serviceID: Int) -> Bool {
         let key = Self.normalize(name)
-        guard !key.isEmpty else { return }
+        guard !key.isEmpty else { return false }
         lock.lock()
-        serviceIDByName[key] = serviceID
+        let changed = serviceIDByName[key] != serviceID
+        if changed { serviceIDByName[key] = serviceID }
         lock.unlock()
-        scheduleSave()
+        if changed { scheduleSave() }
+        return changed
     }
 
     /// Lernt eine Zuordnung, wenn genau ein Dienst gerade eine Sendung mit diesem Titel zeigt.

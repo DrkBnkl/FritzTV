@@ -85,14 +85,23 @@ final class PlayerController: ObservableObject {
 
         // Der Speicher ist threadsicher; die Rückrufe kommen aus VLC-Threads (Wiedergabe und
         // Hintergrund-Abruf teilen sich die Bibliothek und damit diesen Parser).
+        //
+        // Die EIT wiederholt sich alle paar Sekunden und bringt Tausende Sendungen. Früher startete
+        // jede einzelne Sendung eine Aufgabe auf dem Hauptthread (samt teurem Abgleich über den
+        // ganzen Speicher) – nach einem Suchlauf über alle Frequenzen war der Hauptthread damit
+        // dauerhaft ausgelastet und die App reagierte nur noch zäh. Jetzt: nur Änderungen zählen,
+        // und höchstens einmal pro Sekunde ein Signal an den Hauptthread.
         let store = epgStore
+        let signal = EPGChangeSignal()
         parser.onServiceName = { [weak self] serviceID, name in
-            store.setServiceName(name, for: serviceID)
-            Task { @MainActor in self?.scheduleEPGRefresh() }
+            if store.setServiceName(name, for: serviceID) {
+                signal.fire { self?.epgDataChanged() }
+            }
         }
         parser.onProgramParsed = { [weak self] program in
-            store.add(program: program)
-            Task { @MainActor in self?.handleParsedProgram(program) }
+            if store.add(program: program) {
+                signal.fire { self?.epgDataChanged() }
+            }
         }
         let receiver = EPGLogReceiver(parser: parser)
         self.logReceiver = receiver
@@ -425,7 +434,8 @@ final class PlayerController: ObservableObject {
     /// Unabhängig vom EPG-Speicher, daher als Anker für das Lernen einer Zuordnung geeignet.
     private var vlcTitle: String?
     private var lastEPGRefresh = Date.distantPast
-    private var epgRefreshPending = false
+    /// Abgleich über den Titel ist teuer (geht über alle gespeicherten Sendungen): höchstens alle 30 s.
+    private var lastLearnAttempt = Date.distantPast
 
     /// Namen aller Varianten des aktuellen Senders (HD/SD, alte/neue Frequenz).
     private var currentEPGNames: [String] {
@@ -433,27 +443,19 @@ final class PlayerController: ObservableObject {
         return names.isEmpty ? (channel.map { [$0.name] } ?? []) : names
     }
 
-    private func handleParsedProgram(_ program: EPGProgram) {
-        if channel != nil, epgStore.serviceID(forChannelNames: currentEPGNames) == nil,
-           let title = vlcTitle,
-           epgStore.learn(channelNames: currentEPGNames, fromNowPlayingTitle: title) {
-            DebugLog.log("EPG-Zuordnung über Titel gelernt: \(currentEPGNames.first ?? "")")
+    /// Neue oder geänderte Programmdaten (höchstens einmal pro Sekunde, siehe `EPGChangeSignal`).
+    /// Meldet Ansichten wie der Programmübersicht über `epgRevision`, dass neue Daten da sind.
+    private func epgDataChanged() {
+        if channel != nil, let title = vlcTitle,
+           Date().timeIntervalSince(lastLearnAttempt) > 30,
+           epgStore.serviceID(forChannelNames: currentEPGNames) == nil {
+            lastLearnAttempt = Date()
+            if epgStore.learn(channelNames: currentEPGNames, fromNowPlayingTitle: title) {
+                DebugLog.log("EPG-Zuordnung über Titel gelernt: \(currentEPGNames.first ?? "")")
+            }
         }
-        scheduleEPGRefresh()
-    }
-
-    /// Fasst viele Aktualisierungen in kurzer Folge zusammen (eine EIT bringt Dutzende Sendungen)
-    /// und meldet Ansichten wie der Programmübersicht über `epgRevision`, dass neue Daten da sind.
-    private func scheduleEPGRefresh() {
-        guard !epgRefreshPending else { return }
-        epgRefreshPending = true
-        Task { @MainActor [weak self] in
-            try? await Task.sleep(for: .seconds(1))
-            guard let self else { return }
-            self.epgRefreshPending = false
-            self.epgRevision &+= 1
-            self.refreshEPGPrograms()
-        }
+        epgRevision &+= 1
+        refreshEPGPrograms()
     }
 
     func refreshEPGPrograms() {
@@ -1175,5 +1177,27 @@ final class PlayerController: ObservableObject {
             return name
         }
         return nil
+    }
+}
+
+/// Fasst Meldungen aus VLC-Threads zusammen: höchstens ein Aufruf pro Sekunde auf dem Hauptthread.
+final class EPGChangeSignal: @unchecked Sendable {
+    private let lock = NSLock()
+    private var pending = false
+
+    func fire(_ action: @escaping @MainActor () -> Void) {
+        lock.lock()
+        if pending {
+            lock.unlock()
+            return
+        }
+        pending = true
+        lock.unlock()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [self] in
+            lock.lock()
+            pending = false
+            lock.unlock()
+            MainActor.assumeIsolated { action() }
+        }
     }
 }
