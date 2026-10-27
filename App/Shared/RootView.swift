@@ -91,7 +91,7 @@ struct RootView: View {
                 .frame(minWidth: 1000, maxWidth: .infinity, minHeight: 650, maxHeight: .infinity)
         }
         #endif
-        .sheet(isPresented: Binding(
+        .searchResultsPresentation(isPresented: Binding(
             get: { model.searchResultDialog != nil },
             set: { if !$0 { model.searchResultDialog = nil } }
         )) {
@@ -190,6 +190,20 @@ struct OverlayLayer: View {
                 .shadow(color: .black.opacity(0.5), radius: 8)
                 .transition(.scale.combined(with: .opacity))
         }
+    }
+}
+
+private extension View {
+    /// Mediathek-Suchergebnisse: auf dem Apple TV im Vollbild (als Sheet war das Fenster klein,
+    /// die Schrift winzig und das Fernsehbild schien durch), auf dem Mac als Sheet.
+    @ViewBuilder
+    func searchResultsPresentation<Content: View>(isPresented: Binding<Bool>,
+                                                  @ViewBuilder content: @escaping () -> Content) -> some View {
+        #if os(tvOS)
+        fullScreenCover(isPresented: isPresented, content: content)
+        #else
+        sheet(isPresented: isPresented, content: content)
+        #endif
     }
 }
 
