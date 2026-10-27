@@ -197,19 +197,27 @@ struct EPGPreviewFrameKey: PreferenceKey {
 }
 
 /// Bildfläche: normalerweise bildschirmfüllend, in der Programmübersicht im Vorschaufenster.
+///
+/// Die Fläche behält immer die volle Bildschirmgröße und wird nur per Transformation
+/// verkleinert und verschoben. So muss VLC seine Videoausgabe nicht an eine neue Größe
+/// anpassen – beim Ändern der Größe blieb das Vorschaubild auf dem Apple TV stehen.
 struct EPGPreviewPlacement: ViewModifier {
     let frame: CGRect?
 
     func body(content: Content) -> some View {
-        content
-            .frame(width: frame?.width, height: frame?.height)
-            .clipShape(RoundedRectangle(cornerRadius: frame == nil ? 0 : 12))
-            .frame(maxWidth: .infinity, maxHeight: .infinity,
-                   alignment: frame == nil ? .center : .topLeading)
-            .offset(x: frame?.minX ?? 0, y: frame?.minY ?? 0)
-            .ignoresSafeArea()
-            // Über die Programmübersicht legen; die Ansicht bleibt dieselbe (nur Lage und Größe ändern sich).
-            .zIndex(frame == nil ? 0 : 5)
+        GeometryReader { geo in
+            let full = geo.size
+            let scale = frame.map { $0.width / max(full.width, 1) } ?? 1
+            content
+                .frame(width: full.width, height: full.height)
+                .clipShape(RoundedRectangle(cornerRadius: frame == nil ? 0 : 10 / max(scale, 0.01)))
+                .scaleEffect(scale, anchor: .topLeading)
+                .offset(x: frame?.minX ?? 0, y: frame?.minY ?? 0)
+        }
+        .ignoresSafeArea()
+        .allowsHitTesting(frame == nil)
+        // Über die Programmübersicht legen; die Ansicht bleibt dieselbe.
+        .zIndex(frame == nil ? 0 : 5)
     }
 }
 

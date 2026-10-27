@@ -67,53 +67,36 @@ struct EPGOverviewView: View {
         .preferredColorScheme(.dark)
     }
 
-    // MARK: - Header Bar
+    // MARK: - Kopfzeile
 
-    private var selectedEntry: LineupEntry? {
-        entries.first { AppModel.key($0) == model.epgSelectedKey } ?? model.currentEntry
-    }
-
+    /// Schmale Kopfzeile: links Datum, Uhrzeit und Bedienhinweis, rechts das kleine Live-Bild.
+    /// Darunter beginnt direkt das Raster. (Die frühere Info-Zeile zur Auswahl entfällt; die
+    /// Sendungen stehen im Raster.)
     private var headerBar: some View {
-        HStack(alignment: .top, spacing: EPGMetrics.s(28)) {
+        HStack(alignment: .center, spacing: EPGMetrics.s(24)) {
             VStack(alignment: .leading, spacing: EPGMetrics.s(10)) {
-                HStack(alignment: .firstTextBaseline, spacing: 14) {
-                    Text("Programmübersicht")
-                        .font(EPGMetrics.font(30, .heavy))
-                        .foregroundStyle(.white)
-                        .lineLimit(1)
+                Text(headerDateString)
+                    .font(EPGMetrics.font(20, .bold))
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
 
-                    Text(headerDateString)
-                        .font(EPGMetrics.font(18, .medium))
-                        .foregroundStyle(Color.white.opacity(0.65))
-                        .lineLimit(1)
+                if model.epgScanner.isScanning, let ch = model.epgScanner.currentScanningChannel {
+                    HStack(spacing: 6) {
+                        #if os(macOS)
+                        ProgressView().controlSize(.small)
+                        #else
+                        // `controlSize` gibt es auf tvOS nicht.
+                        ProgressView().scaleEffect(0.6)
+                        #endif
+                        Text("Lade Programmdaten (\(ch)) …")
+                            .font(EPGMetrics.font(14, .regular))
+                            .foregroundStyle(Color.white.opacity(0.65))
+                    }
                 }
 
-                selectedProgramInfo
-
-                Spacer(minLength: 0)
-
-                HStack(spacing: 16) {
-                    if model.epgScanner.isScanning, let ch = model.epgScanner.currentScanningChannel {
-                        HStack(spacing: 6) {
-                            #if os(macOS)
-                            ProgressView().controlSize(.small)
-                            #else
-                            // `controlSize` gibt es auf tvOS nicht.
-                            ProgressView().scaleEffect(0.6)
-                            #endif
-                            Text("Lade Programmdaten (\(ch)) …")
-                                .font(EPGMetrics.font(15, .regular))
-                                .foregroundStyle(Color.white.opacity(0.65))
-                        }
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 5)
-                        .background(Color.white.opacity(0.08), in: Capsule())
-                    }
-
-                    Spacer(minLength: 0)
-
-                    #if os(macOS)
-                    // Knöpfe nur für die Maus; auf dem Apple TV: Zurück schließt.
+                #if os(macOS)
+                // Knöpfe nur für die Maus; auf dem Apple TV: Zurück schließt.
+                HStack(spacing: 12) {
                     Button {
                         withAnimation(.easeInOut(duration: 0.25)) {
                             horizontalProxy?.scrollTo("timeline_now", anchor: .leading)
@@ -121,8 +104,7 @@ struct EPGOverviewView: View {
                     } label: {
                         HStack(spacing: 7) {
                             Circle().fill(Color.red).frame(width: 8, height: 8)
-                            Text("Jetzt")
-                                .font(EPGMetrics.font(17, .semibold))
+                            Text("Jetzt").font(EPGMetrics.font(17, .semibold))
                         }
                         .foregroundStyle(.white)
                         .padding(.horizontal, 16)
@@ -136,10 +118,8 @@ struct EPGOverviewView: View {
                         close()
                     } label: {
                         HStack(spacing: 6) {
-                            Image(systemName: "xmark")
-                                .font(EPGMetrics.font(13, .bold))
-                            Text("Schließen")
-                                .font(EPGMetrics.font(15, .medium))
+                            Image(systemName: "xmark").font(EPGMetrics.font(13, .bold))
+                            Text("Schließen").font(EPGMetrics.font(15, .medium))
                         }
                         .foregroundStyle(Color.white.opacity(0.85))
                         .padding(.horizontal, 14)
@@ -149,77 +129,31 @@ struct EPGOverviewView: View {
                     .buttonStyle(.plain)
                     .focusable(false)
                     .help("Programmübersicht schließen (Esc)")
-                    #else
-                    Text("\(UI.upDown): Sender wählen · \(UI.select): umschalten · \(UI.back): schließen")
-                        .font(EPGMetrics.font(15, .medium))
-                        .foregroundStyle(Color.white.opacity(0.55))
-                    #endif
                 }
+                #else
+                Text("\(UI.upDown): Sender wählen · \(UI.select): umschalten · \(UI.back): schließen")
+                    .font(EPGMetrics.font(14, .medium))
+                    .foregroundStyle(Color.white.opacity(0.5))
+                #endif
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
             livePreview
         }
         .padding(.horizontal, EPGMetrics.s(22))
-        .padding(.vertical, EPGMetrics.s(14))
+        .padding(.vertical, EPGMetrics.s(10))
         .background(Color(red: 0.08, green: 0.08, blue: 0.10))
     }
 
-    /// Jetzt und Danach auf dem ausgewählten Sender.
-    @ViewBuilder private var selectedProgramInfo: some View {
-        let _ = player.epgRevision
-        if let entry = selectedEntry {
-            let names = entry.group.epgNames
-            let current = player.epgStore.currentProgram(forChannelNames: names)
-            let next = player.epgStore.nextProgram(forChannelNames: names)
-            VStack(alignment: .leading, spacing: EPGMetrics.s(6)) {
-                Text("\(entry.number) · \(entry.group.displayName)")
-                    .font(EPGMetrics.font(18, .bold))
-                    .foregroundStyle(UI.accent)
-                if let current {
-                    Text("\(Self.formatTime(current.startDate)) – \(Self.formatTime(current.endDate))  \(current.title)")
-                        .font(EPGMetrics.font(22, .bold))
-                        .foregroundStyle(.white)
-                        .lineLimit(1)
-                    if let detail = current.subtitle ?? current.description, !detail.isEmpty {
-                        Text(detail)
-                            .font(EPGMetrics.font(16))
-                            .foregroundStyle(Color.white.opacity(0.7))
-                            .lineLimit(2)
-                    }
-                } else {
-                    Text("Keine Programmdaten empfangen")
-                        .font(EPGMetrics.font(18))
-                        .foregroundStyle(Color.white.opacity(0.5))
-                }
-                if let next {
-                    Text("Danach ab \(Self.formatTime(next.startDate)): \(next.title)")
-                        .font(EPGMetrics.font(16, .medium))
-                        .foregroundStyle(Color.white.opacity(0.6))
-                        .lineLimit(1)
-                }
-            }
-        }
-    }
-
     /// Platzhalter für das Live-Bild: Die Bildfläche selbst liegt in `RootView` und wird
-    /// über `EPGPreviewFrameKey` genau hierher verschoben.
+    /// über `EPGPreviewFrameKey` verkleinert genau hierher gelegt.
     private var livePreview: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            RoundedRectangle(cornerRadius: 12)
-                .fill(Color.black)
-                .frame(width: EPGMetrics.previewSize.width, height: EPGMetrics.previewSize.height)
-                .background(GeometryReader { geo in
-                    Color.clear.preference(key: EPGPreviewFrameKey.self, value: geo.frame(in: .global))
-                })
-            HStack(spacing: 6) {
-                Circle().fill(Color.red).frame(width: 8, height: 8)
-                Text("LIVE · \(model.currentEntry?.group.displayName ?? "")")
-                    .font(EPGMetrics.font(14, .bold))
-                    .foregroundStyle(Color.white.opacity(0.8))
-                    .lineLimit(1)
-            }
-        }
+        RoundedRectangle(cornerRadius: 10)
+            .fill(Color.black)
+            .frame(width: EPGMetrics.previewSize.width, height: EPGMetrics.previewSize.height)
+            .background(GeometryReader { geo in
+                Color.clear.preference(key: EPGPreviewFrameKey.self, value: geo.frame(in: .global))
+            })
     }
 
     // MARK: - Timeline Body (Vertical + Horizontal Scroll)
@@ -665,10 +599,10 @@ enum EPGMetrics {
     // 1,6-fach: Sendungstitel ~26 pt, Zeilen ~110 pt hoch – lesbar, und es passen noch
     // gut fünf Sender unter Kopfzeile und Vorschau.
     static let k: CGFloat = 1.6
-    static let previewSize = CGSize(width: 480, height: 270)
+    static let previewSize = CGSize(width: 384, height: 216)
     #else
     static let k: CGFloat = 0.85
-    static let previewSize = CGSize(width: 320, height: 180)
+    static let previewSize = CGSize(width: 256, height: 144)
     #endif
 
     static func s(_ value: CGFloat) -> CGFloat { value * k }
