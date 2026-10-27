@@ -86,6 +86,9 @@ final class AppModel: ObservableObject {
     @Published var showSettings = false
     @Published var showMediathek = false
     @Published var showEPGOverview = false
+    /// Umschalten aus der Programmübersicht: Bild abdecken, bis der neue Sender ein Bild zeigt
+    /// (unabhängig von der Einstellung „Schwarzer Bildschirm beim Umschalten“).
+    @Published var zapFromEPG = false
     /// Auswahl in der Programmübersicht. Eigenes Objekt: Änderungen zeichnen nur die Übersicht
     /// neu, nicht die ganze App (wichtig für ruhiges Blättern auf dem Apple TV).
     let epgNav = EPGNavigation()
@@ -621,9 +624,13 @@ final class AppModel: ObservableObject {
     /// Schaltet auf den Sender (Mausklick bzw. ohne Angabe die aktuelle Auswahl) und schließt die Übersicht.
     func tuneFromEPG(key: String? = nil) {
         let target = key ?? epgSelectedKey
+        // Anderer Sender: Bildfläche abdecken, bevor die Übersicht schließt – sonst ist beim
+        // Vergrößern kurz das letzte Bild des bisherigen Senders zu sehen.
+        if let target, let entry = lineup?.entries.first(where: { Self.key($0) == target }) {
+            if target != playingKey { zapFromEPG = true }
+            tune(to: entry.number)
+        }
         closeEPGOverview()
-        guard let target, let entry = lineup?.entries.first(where: { Self.key($0) == target }) else { return }
-        tune(to: entry.number)
     }
 
     // MARK: Programmdaten aus dem Internet

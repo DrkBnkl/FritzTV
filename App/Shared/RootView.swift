@@ -29,9 +29,11 @@ struct RootView: View {
             PlayerSurface(player: player.mediaPlayer, previewFrame: previewFrame)
                 .modifier(EPGPreviewPlacement(frame: previewFrame))
             // Schwarzer Bildschirm beim Umschalten: Blendet Standbilder des alten Senders aus,
-            // bis der neue Stream decodiert wird.
-            if model.settings.blackScreenOnZap && player.status.isTransitioning && !player.isReplaying
-                && !model.showEPGOverview {
+            // bis der neue Sender ein Bild zeigt. Aus der Programmübersicht immer – das kleine
+            // Vorschaubild wächst sonst kurz mit dem alten Sender auf Vollbild.
+            if (model.settings.blackScreenOnZap || model.zapFromEPG)
+                && (player.status.isTransitioning || player.awaitingFirstPicture)
+                && !player.isReplaying && !model.showEPGOverview {
                 Color.black.ignoresSafeArea()
             }
             // Timeshift: Mitschnitt-Wiedergabe liegt über dem stumm weiterlaufenden Live-Bild.
@@ -113,11 +115,15 @@ struct RootView: View {
             if oldStatus != .playing && newStatus == .playing {
                 model.showBanner()
             }
+            if case .failed = newStatus { model.zapFromEPG = false }
             #if os(tvOS)
             if newStatus == .playing, model.settings.match50Hz {
                 DisplayCriteria.request50Hz()
             }
             #endif
+        }
+        .onChange(of: player.awaitingFirstPicture) { _, waiting in
+            if !waiting { model.zapFromEPG = false }
         }
         .onChange(of: scenePhase) { _, phase in
             switch phase {

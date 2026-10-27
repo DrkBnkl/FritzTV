@@ -51,6 +51,10 @@ final class PlayerController: ObservableObject {
     private var logReceiver: EPGLogReceiver?
 
     @Published private(set) var status: PlayerStatus = .idle
+    /// Nach dem Umschalten noch kein Bild des neuen Senders zu sehen. Die Bildfläche zeigt bis dahin
+    /// womöglich noch das letzte Bild des vorherigen Senders (VLC meldet „läuft“ schon, wenn nur der
+    /// Ton da ist) – solange wird sie schwarz abgedeckt.
+    @Published private(set) var awaitingFirstPicture = false
     @Published private(set) var nowPlaying: String?
     @Published private(set) var currentProgram: EPGProgram?
     @Published private(set) var nextProgram: EPGProgram?
@@ -236,6 +240,7 @@ final class PlayerController: ObservableObject {
         mediaPlayer.stop()
         lastDisplayedPictures = 0
         lastPictureChangeAt = Date()
+        if !awaitingFirstPicture { awaitingFirstPicture = true }
         recordingLimit = 0
         nowPlaying = nil
         vlcTitle = nil
@@ -272,7 +277,10 @@ final class PlayerController: ObservableObject {
     private func startMonitor() {
         monitorTask = Task { [weak self] in
             while !Task.isCancelled {
-                try? await Task.sleep(for: .milliseconds(500))
+                // Bis das erste Bild da ist, öfter nachsehen: Die schwarze Abdeckung soll ohne
+                // Verzögerung verschwinden.
+                let interval = (self?.awaitingFirstPicture ?? false) ? 100 : 500
+                try? await Task.sleep(for: .milliseconds(interval))
                 guard let self, !Task.isCancelled else { return }
                 self.poll()
             }
@@ -333,6 +341,7 @@ final class PlayerController: ObservableObject {
                 }
             }
             setStatus((isReplaying && replayAnchor.paused) ? .paused : .playing)
+            updateFirstPicture()
             if collectStats { updatePlaybackStats() }
             refreshTrackNames()
             checkStreamHealth()
@@ -479,6 +488,18 @@ final class PlayerController: ObservableObject {
 
     /// Setzt den Status nur bei einer Änderung: Jede Zuweisung an eine `@Published`-Eigenschaft
     /// löst ein Neuzeichnen aus, auch wenn der Wert gleich bleibt.
+    /// Gibt die Bildfläche frei, sobald der neue Sender ein Bild zeigt. Radio (kein Bild) sofort;
+    /// kommt trotz Ton nach 4 s kein Bild, ebenfalls – sonst bliebe der Bildschirm dauerhaft schwarz.
+    private func updateFirstPicture() {
+        guard awaitingFirstPicture else { return }
+        let shown = Int(mediaPlayer.media?.statistics.displayedPictures ?? 0)
+        let isRadio = channel?.kind == .radio
+        if shown > 0 || isRadio || Date().timeIntervalSince(openedAt) > 4 {
+            DebugLog.log("Erstes Bild nach \(Int(Date().timeIntervalSince(openedAt) * 1000)) ms (\(shown) Bilder)")
+            awaitingFirstPicture = false
+        }
+    }
+
     private func setStatus(_ newStatus: PlayerStatus) {
         if status != newStatus { status = newStatus }
     }
