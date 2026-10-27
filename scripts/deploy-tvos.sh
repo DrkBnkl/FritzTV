@@ -70,6 +70,9 @@ for d in devices:
              or "apple tv" in str(props.get("name", "")).lower())
     if not is_tv:
         continue
+    # Simulatoren überspringen (devicectl listet gebootete Simulatoren ebenfalls als Apple TV).
+    if str(hw.get("reality", "")).lower() == "simulated":
+        continue
     if wanted and wanted not in (d.get("identifier"), hw.get("udid")):
         continue
     print(d.get("identifier", ""), hw.get("udid", ""), props.get("name", "Apple TV"), sep="\t")
