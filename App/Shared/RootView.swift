@@ -177,6 +177,9 @@ struct OverlayLayer: View {
             EmptyView()
         case .info(let selection):
             InfoPanel(model: model, player: player, selection: selection)
+                .transition(.move(edge: .top).combined(with: .opacity))
+        case .footer(let index):
+            ChannelFooter(model: model, player: player, index: index)
         case .channelList(let selectedID):
             ChannelListOverlay(model: model, player: player, selectedID: selectedID)
         case .directEntry(let digits, let key):

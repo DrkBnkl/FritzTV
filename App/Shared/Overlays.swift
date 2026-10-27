@@ -47,6 +47,23 @@ private struct BottomPanel<Content: View>: View {
     }
 }
 
+/// Tafel am oberen Rand (Info, wie die Info-Reiter des Apple-Players: Wischen nach unten).
+private struct TopPanel<Content: View>: View {
+    @ViewBuilder let content: Content
+
+    var body: some View {
+        VStack {
+            content
+                .padding(.horizontal, UI.s(48))
+                .padding(.vertical, UI.s(36))
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background { PanelBackground(cornerRadius: UI.s(32)) }
+                .padding(.horizontal, UI.s(16))
+            Spacer()
+        }
+    }
+}
+
 /// Durchscheinender Hintergrund für Tafeln über dem Video (Apple: Overlays zurückhaltend und
 /// eher durchscheinend; dichtes Material plus Abdunklung für Lesbarkeit bei hellem Bild).
 struct PanelBackground: View {
@@ -196,7 +213,7 @@ struct InfoPanel: View {
     let selection: Int
 
     var body: some View {
-        BottomPanel {
+        TopPanel {
             VStack(alignment: .leading, spacing: UI.s(28)) {
                 // Schalter oben
                 let pills = model.availableInfoPills
@@ -309,7 +326,7 @@ struct InfoPanel: View {
                 .foregroundStyle(UI.secondary)
                 .padding(.top, UI.s(4))
 
-                Text("\(UI.leftRight): auswählen · \(UI.select): Aktion ausführen · \(UI.back): schließen")
+                Text("\(UI.leftRight): auswählen · \(UI.select): Aktion ausführen · \(UI.back) oder nach oben wischen: schließen")
                     .font(UI.font(22))
                     .foregroundStyle(UI.secondary)
             }
@@ -734,5 +751,99 @@ struct DirectEntryOverlay: View {
         guard !digits.isEmpty else { return " " }
         guard let entry = model.directPreview(digits) else { return "Kein Sender auf diesem Platz" }
         return entry.group.displayName
+    }
+}
+
+// MARK: Senderleiste unten (Wischen nach oben)
+
+/// Senderleiste zum Stöbern während der Wiedergabe (Apple: „content footer“): Logo, laufende
+/// Sendung und Fortschritt; der laufende Sender ist markiert. Links/Rechts wählt, Klick schaltet um.
+struct ChannelFooter: View {
+    @ObservedObject var model: AppModel
+    @ObservedObject var player: PlayerController
+    let index: Int
+
+    private let cardWidth: CGFloat = UI.s(330)
+    private let spacing: CGFloat = UI.s(28)
+
+    var body: some View {
+        let entries = model.lineup?.entries ?? []
+        VStack(spacing: 0) {
+            Spacer()
+            ZStack(alignment: .bottom) {
+                // Dezente Abdunklung, damit Schrift und Karten vom Bild abgesetzt sind.
+                LinearGradient(colors: [.clear, .black.opacity(0.75)], startPoint: .top, endPoint: .bottom)
+                    .frame(height: UI.s(420))
+                    .ignoresSafeArea(edges: .bottom)
+                VStack(alignment: .leading, spacing: UI.s(16)) {
+                    Text("\(UI.leftRight): Sender wählen · \(UI.select): umschalten · nach unten wischen: schließen")
+                        .font(UI.font(23))
+                        .foregroundStyle(UI.secondary)
+                    GeometryReader { geo in
+                        let center = geo.size.width / 2 - cardWidth / 2
+                        ZStack(alignment: .topLeading) {
+                            ForEach(max(0, index - 4)..<min(entries.count, index + 5), id: \.self) { i in
+                                card(entries[i], selected: i == index)
+                                    .offset(x: center + CGFloat(i - index) * (cardWidth + spacing))
+                            }
+                        }
+                        .frame(width: geo.size.width, height: geo.size.height, alignment: .topLeading)
+                    }
+                    .frame(height: UI.s(210))
+                }
+            }
+        }
+        .animation(.easeOut(duration: 0.2), value: index)
+        .transition(.move(edge: .bottom).combined(with: .opacity))
+    }
+
+    private func card(_ entry: LineupEntry, selected: Bool) -> some View {
+        let isCurrent = entry.number == model.currentNumber
+        let program = (isCurrent ? player.currentProgram : nil)
+            ?? player.epgStore.currentProgram(forChannelNames: entry.group.epgNames)
+        return VStack(alignment: .leading, spacing: UI.s(10)) {
+            HStack(spacing: UI.s(12)) {
+                ChannelLogoView(channelName: entry.group.displayName, height: UI.s(40), maxWidth: UI.s(90))
+                Text("\(entry.number)")
+                    .font(UI.font(26, .bold))
+                    .foregroundStyle(selected ? Color.black.opacity(0.6) : UI.secondary)
+                Spacer(minLength: 0)
+                if isCurrent {
+                    Text("LÄUFT")
+                        .font(UI.font(23, .heavy))
+                        .foregroundStyle(selected ? Color.white : Color.black)
+                        .padding(.horizontal, UI.s(8))
+                        .background(selected ? Color.black.opacity(0.7) : UI.accent, in: Capsule())
+                }
+            }
+            Text(entry.group.displayName)
+                .font(UI.font(26, .semibold))
+                .foregroundStyle(selected ? Color.black : UI.text)
+                .lineLimit(1)
+            Text(program?.title ?? "Keine Programmdaten")
+                .font(UI.font(23))
+                .foregroundStyle(selected ? Color.black.opacity(0.75) : UI.secondary)
+                .lineLimit(1)
+            if let program {
+                GeometryReader { geo in
+                    ZStack(alignment: .leading) {
+                        Capsule().fill((selected ? Color.black : Color.white).opacity(0.18))
+                        Capsule().fill(isCurrent ? UI.accent : (selected ? Color.black.opacity(0.6) : Color.white.opacity(0.6)))
+                            .frame(width: max(geo.size.width * program.progress(at: Date()), UI.s(6)))
+                    }
+                }
+                .frame(height: UI.s(6))
+            }
+        }
+        .padding(UI.s(20))
+        .frame(width: cardWidth, height: UI.s(190), alignment: .topLeading)
+        .background {
+            if selected {
+                RoundedRectangle(cornerRadius: UI.s(20)).fill(UI.text)
+            } else {
+                PanelBackground(cornerRadius: UI.s(20))
+            }
+        }
+        .focusLift(selected, scale: 1.08)
     }
 }
