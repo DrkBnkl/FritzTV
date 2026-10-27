@@ -212,6 +212,7 @@ final class AppModel: ObservableObject {
             }
             let start = lineup?.entries.first { Self.key($0) == settings.lastChannelKey }?.number ?? 1
             tune(to: start)
+            refreshInternetEPG()
         } catch let error as FritzBoxClient.ClientError {
             DebugLog.log("Senderliste fehlgeschlagen: \(error)")
             switch error {
@@ -358,6 +359,7 @@ final class AppModel: ObservableObject {
     /// (Hintergrund) – nicht nach kurzem `inactive` (z. B. Kontrollzentrum), sonst wären
     /// Timeshift-Puffer und Position weg – und nicht, solange ein anderer Player offen ist.
     func returnedToForeground() {
+        refreshInternetEPG()
         guard loadState == .ready, player.status == .idle,
               activeHLSReplay == nil, activeMediathekURL == nil, !showMediathek else { return }
         resume()
@@ -535,64 +537,39 @@ final class AppModel: ObservableObject {
         epgSelectedKey = playingKey ?? currentEntry.map(Self.key)
         epgCursorTime = nil
         showEPGOverview = true
-        // Kein automatischer Suchlauf: Eine zweite Verbindung zur FRITZ!Box unterbricht das
-        // laufende Live-Bild. Der Suchlauf startet nur auf Knopfdruck (Play/Pause).
+        refreshInternetEPG()
     }
 
-    /// - Parameter resumeLive: Nach einem Suchlauf das Live-Bild wieder starten
-    ///   (entfällt, wenn ohnehin gleich auf einen Sender umgeschaltet wird).
-    func closeEPGOverview(resumeLive: Bool = true) {
+    func closeEPGOverview() {
         DebugLog.log("Programmübersicht geschlossen")
         showEPGOverview = false
-        if epgScanner.isScanning { epgScanner.stop() }
-        finishManualEPGScan(resumeLive: resumeLive)
-    }
-
-    /// Live-Bild wurde für den Suchlauf angehalten.
-    private var liveStoppedForEPGScan = false
-
-    /// Programmdaten aller Frequenzen laden. Die FRITZ!Box liefert nur eine Verbindung gleichzeitig
-    /// zuverlässig, daher wird das Live-Bild solange angehalten und danach fortgesetzt.
-    func toggleManualEPGScan() {
-        if epgScanner.isScanning {
-            DebugLog.log("EPG-Suchlauf abgebrochen")
-            epgScanner.stop()
-            finishManualEPGScan(resumeLive: true)
-            return
-        }
-        guard let catalog else { return }
-        player.stop()
-        liveStoppedForEPGScan = true
-        let started = epgScanner.startScanIfNeeded(
-            lineup: lineup,
-            catalog: catalog,
-            epgStore: player.epgStore,
-            host: boxHost,
-            activeFrequency: nil,
-            deadIDs: settings.deadChannelIDs,
-            force: true
-        ) { [weak self] in
-            self?.finishManualEPGScan(resumeLive: true)
-        }
-        if !started { finishManualEPGScan(resumeLive: true) }
-    }
-
-    private func finishManualEPGScan(resumeLive: Bool) {
-        guard liveStoppedForEPGScan else { return }
-        liveStoppedForEPGScan = false
-        if resumeLive { resume() }
     }
 
     /// Schaltet auf den Sender (Mausklick bzw. ohne Angabe die aktuelle Auswahl) und schließt die Übersicht.
     func tuneFromEPG(key: String? = nil) {
         let target = key ?? epgSelectedKey
-        let wasStopped = liveStoppedForEPGScan
-        closeEPGOverview(resumeLive: false)
-        guard let target, let entry = lineup?.entries.first(where: { Self.key($0) == target }) else {
-            if wasStopped { resume() }
-            return
-        }
+        closeEPGOverview()
+        guard let target, let entry = lineup?.entries.first(where: { Self.key($0) == target }) else { return }
         tune(to: entry.number)
+    }
+
+    // MARK: Programmdaten aus dem Internet
+
+    /// Programmdaten aller Sender kommen aus dem Internet (XMLTV): Ein Abruf weiterer Frequenzen
+    /// bei der FRITZ!Box unterbräche das Live-Bild (die Box liefert einem Gerät nur einen Stream).
+    private lazy var xmltvLoader = XMLTVLoader(store: player.epgStore) { [weak self] in
+        self?.player.externalEPGUpdated()
+    }
+
+    func refreshInternetEPG() {
+        guard let catalog else { return }
+        xmltvLoader.refreshIfNeeded(channelNames: catalog.tvGroups.flatMap(\.epgNames),
+                                    source: settings.xmltvSource)
+    }
+
+    func reloadInternetEPG() {
+        xmltvLoader.invalidate()
+        refreshInternetEPG()
     }
 
     private func handleEPG(_ command: RemoteCommand) {
@@ -610,7 +587,7 @@ final class AppModel: ObservableObject {
         case .select:
             tuneFromEPG()
         case .playPause:
-            toggleManualEPGScan()
+            break
         case .back:
             closeEPGOverview()
         case .digit(let digit):

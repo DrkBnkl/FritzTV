@@ -460,6 +460,12 @@ final class PlayerController: ObservableObject {
         refreshEPGPrograms()
     }
 
+    /// Neue Programmdaten aus dem Internet.
+    func externalEPGUpdated() {
+        epgRevision &+= 1
+        refreshEPGPrograms()
+    }
+
     func refreshEPGPrograms() {
         lastEPGRefresh = Date()
         guard channel != nil else { return }

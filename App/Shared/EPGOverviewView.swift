@@ -185,17 +185,11 @@ struct EPGOverviewView: View {
                     headerButton("Jetzt") {
                         withAnimation(.easeInOut(duration: 0.25)) { model.epgCursorTime = nil }
                     }
-                    headerButton(scanner.isScanning ? "Laden abbrechen" : "Programmdaten aller Sender laden") {
-                        model.toggleManualEPGScan()
-                    }
-                    .help("Das Live-Bild pausiert solange (Leertaste)")
                     headerButton("Schließen") { model.closeEPGOverview() }
                         .help("Programmübersicht schließen (Esc)")
                 }
                 #else
-                Text(scanner.isScanning
-                     ? "\(UI.playPause): Laden abbrechen · \(UI.back): schließen"
-                     : "\(UI.upDown): Sender · \(UI.leftRight): spätere Sendungen · \(UI.select): umschalten · \(UI.playPause): Programmdaten laden · \(UI.back): schließen")
+                Text("\(UI.upDown): Sender · \(UI.leftRight): spätere Sendungen · \(UI.select): umschalten · \(UI.back): schließen")
                     .lineLimit(1)
                     .minimumScaleFactor(0.7)
                     .font(EPGMetrics.font(14, .medium))
@@ -502,7 +496,7 @@ private struct TimelineRow: View, Equatable {
                 Rectangle().fill(EPGColors.selectedRow)
             }
             if items.isEmpty {
-                Text("Keine Programmdaten – \(UI.playPause) lädt sie")
+                Text("Keine Programmdaten")
                     .font(EPGMetrics.font(14, .regular))
                     .foregroundStyle(EPGColors.tertiaryText)
                     .padding(.horizontal, 14)

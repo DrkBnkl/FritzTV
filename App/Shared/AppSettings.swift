@@ -42,6 +42,8 @@ final class AppSettings: ObservableObject {
     @Published var backTarget: BackTarget { didSet { defaults.set(backTarget.rawValue, forKey: Keys.backTarget) } }
     /// Adresse von press2arr („Lichtspiel“) auf der NAS für die Mediathek-Seite.
     @Published var press2arrAddress: String { didSet { defaults.set(press2arrAddress, forKey: Keys.press2arr) } }
+    /// Internet-Adresse der Programmdaten (XMLTV); leer = Standardquelle.
+    @Published var xmltvSource: String { didSet { defaults.set(xmltvSource, forKey: Keys.xmltvSource) } }
     /// Nur Apple TV: Bildwiederholrate auf 50 Hz umschalten.
     @Published var match50Hz: Bool { didSet { defaults.set(match50Hz, forKey: Keys.match50Hz) } }
     /// Benutzername für die TR-064-Anmeldung (Sendersuchlauf). Das Kennwort liegt im Schlüsselbund.
@@ -102,6 +104,7 @@ final class AppSettings: ObservableObject {
         backTarget = defaults.string(forKey: Keys.backTarget).flatMap(BackTarget.init(rawValue:)) ?? .lastChannel
         match50Hz = defaults.bool(forKey: Keys.match50Hz)
         press2arrAddress = defaults.string(forKey: Keys.press2arr) ?? ""
+        xmltvSource = defaults.string(forKey: Keys.xmltvSource) ?? ""
         boxUsername = defaults.string(forKey: Keys.boxUsername) ?? ""
         recentKeys = defaults.stringArray(forKey: Keys.recentKeys) ?? []
         deadChannelIDs = Set(defaults.stringArray(forKey: Keys.deadChannels) ?? [])
@@ -155,6 +158,7 @@ final class AppSettings: ObservableObject {
         static let variantResetV2 = "variantStateResetV2"
         static let match50Hz = "match50Hz"
         static let press2arr = "press2arrAddress"
+        static let xmltvSource = "xmltvSource"
         static let boxUsername = "boxUsername"
         static let lastChannel = "lastChannelKey"
         static let lineup = "lineupPreferences"

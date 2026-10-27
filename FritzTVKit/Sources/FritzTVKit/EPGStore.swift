@@ -16,6 +16,9 @@ public final class EPGStore: @unchecked Sendable {
     private let lock = NSLock()
     private var programsByService: [Int: [Int: EPGProgram]] = [:]
     private var serviceIDByName: [String: Int] = [:]
+    /// Programmdaten aus dem Internet (XMLTV), je Schlüssel `XMLTV.key(Sendername)`.
+    /// Ergänzen die Daten aus dem Stream dort, wo diese fehlen.
+    private var externalByKey: [String: [EPGProgram]] = [:]
     private let cacheURL: URL?
     /// Gesetzt, solange ein Speichervorgang geplant ist (geschützt durch `lock`).
     private var savePending = false
@@ -151,9 +154,44 @@ public final class EPGStore: @unchecked Sendable {
         return EPGChannelSchedule(serviceID: serviceID, programs: Array(map.values))
     }
 
+    /// Programm eines Senders: Daten aus dem Stream (DVB-EIT), ergänzt um Sendungen aus der
+    /// Internet-Quelle in Zeiträumen, die der Stream nicht abdeckt.
     public func schedule(forChannelNames names: [String]) -> EPGChannelSchedule? {
-        guard let sid = serviceID(forChannelNames: names) else { return nil }
-        return schedule(for: sid)
+        let dvb = serviceID(forChannelNames: names).flatMap { schedule(for: $0) }
+        let external = externalPrograms(forChannelNames: names)
+        guard !external.isEmpty else { return dvb }
+        guard let dvb, !dvb.programs.isEmpty else {
+            return EPGChannelSchedule(serviceID: external[0].serviceID, programs: external)
+        }
+        // Lücken füllen: externe Sendungen nur, wo keine DVB-Sendung liegt.
+        let covered = dvb.programs
+        let extra = external.filter { ext in
+            !covered.contains { $0.startDate < ext.endDate && ext.startDate < $0.endDate }
+        }
+        return EPGChannelSchedule(serviceID: dvb.serviceID, programs: covered + extra)
+    }
+
+    private func externalPrograms(forChannelNames names: [String]) -> [EPGProgram] {
+        lock.lock()
+        defer { lock.unlock() }
+        guard !externalByKey.isEmpty else { return [] }
+        for name in names {
+            if let programs = externalByKey[XMLTV.key(name)], !programs.isEmpty { return programs }
+        }
+        return []
+    }
+
+    /// Ersetzt die Programmdaten aus dem Internet.
+    public func setExternal(_ programsByKey: [String: [EPGProgram]]) {
+        lock.lock()
+        externalByKey = programsByKey
+        lock.unlock()
+    }
+
+    public var hasExternalData: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return !externalByKey.isEmpty
     }
 
     public func currentProgram(forChannelNames names: [String], at date: Date = Date()) -> EPGProgram? {

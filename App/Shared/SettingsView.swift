@@ -126,6 +126,18 @@ struct SettingsView: View {
                 }
 
                 Section {
+                    TextField("Adresse (leer = \(XMLTVLoader.defaultSource))", text: $settings.xmltvSource)
+                        .autocorrectionDisabled()
+                    Button("Programmdaten jetzt neu laden") {
+                        model.reloadInternetEPG()
+                    }
+                } header: {
+                    Text("Programmdaten")
+                } footer: {
+                    Text("Die Programmdaten aller Sender kommen aus dem Internet (XMLTV, alle 12 Stunden). Für den laufenden Sender zeigt die App die genaueren Daten aus dem Fernsehsignal.")
+                }
+
+                Section {
                     TextField("press2arr-Adresse (z. B. 192.168.178.99:5056)", text: $settings.press2arrAddress)
                         .autocorrectionDisabled()
                     Toggle("Untertitel bei Mediathek-Videos", isOn: $mediathekSubtitles)
