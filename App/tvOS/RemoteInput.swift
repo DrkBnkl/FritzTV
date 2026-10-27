@@ -245,7 +245,7 @@ final class RemoteSwipeArbiter {
 @MainActor
 final class RemoteHoldRepeater {
     static let shared = RemoteHoldRepeater()
-    private var task: Task<Void, Never>?
+    fileprivate var task: Task<Void, Never>?
     private var repeatEndedAt = Date.distantPast
 
     /// Wahr während und direkt nach einem gehaltenen Blättern (die Reihenfolge von Loslassen und
@@ -266,7 +266,11 @@ final class RemoteHoldRepeater {
             task = Task { @MainActor [weak model] in
                 var steps = 0
                 while !Task.isCancelled {
-                    guard let model, Self.allowsRepeat(model) else { return }
+                    guard let model, Self.allowsRepeat(model) else {
+                        // Übersicht/Liste zu: nicht weiter Schritte schlucken.
+                        RemoteHoldRepeater.shared.task = nil
+                        return
+                    }
                     model.handle(command)
                     steps += 1
                     try? await Task.sleep(for: .milliseconds(steps < 10 ? 125 : 65))
