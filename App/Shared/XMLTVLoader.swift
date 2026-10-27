@@ -16,7 +16,7 @@ final class XMLTVLoader {
     private static let refreshInterval: TimeInterval = 12 * 3600
     private static let lastDownloadKey = "xmltvLastDownload"
 
-    private static var cacheURL: URL? {
+    private nonisolated static var cacheURL: URL? {
         FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first?
             .appendingPathComponent("epg_xmltv.json")
     }
