@@ -611,6 +611,7 @@ final class AppModel: ObservableObject {
         let entries = epgEntries
         let preferred = playingKey ?? currentEntry.map(Self.key)
         epgSelectedKey = entries.contains { Self.key($0) == preferred } ? preferred : entries.first.map(Self.key)
+        DebugLog.log("Übersicht: Filter \(epgNav.filter.title), \(entries.count) von \(lineup?.entries.count ?? -1) Sendern, Auswahl \(epgSelectedKey ?? "-")")
         showEPGOverview = true
         refreshInternetEPG()
     }

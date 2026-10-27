@@ -117,6 +117,7 @@ struct EPGOverviewView: View {
         .onAppear {
             rebuildRows()
             topIndex = clampedTop(for: selectedIndex, current: selectedIndex - 2)
+            DebugLog.log("Übersicht sichtbar: \(entries.count) Zeilen, Auswahl \(selectedIndex), oben \(topIndex), \(visibleRows) sichtbar")
         }
         .onChange(of: player.epgRevision) { _, _ in scheduleRebuild() }
         .onChange(of: model.lineup?.entries.count) { _, _ in rebuildRows() }
@@ -314,6 +315,7 @@ struct EPGOverviewView: View {
 
     private func updateVisibleRows(height: CGFloat) {
         let rows = max(3, Int(height / rowHeight))
+        DebugLog.log("Übersicht: Rasterhöhe \(Int(height)), Zeilenhöhe \(Int(rowHeight)), \(rows) Zeilen")
         nav.pageSize = rows
         if rows != visibleRows {
             visibleRows = rows
