@@ -76,3 +76,28 @@ final class XMLTVTests: XCTestCase {
         XCTAssertEqual(store.schedule(forChannelNames: ["ZDF HD"])?.programs.first?.title, "heute")
     }
 }
+
+final class EPGGenreTests: XCTestCase {
+    func testGenreBuckets() {
+        XCTAssertEqual(EPGGenre.from(categories: ["Kinder", "Animation"]), .kids)
+        XCTAssertEqual(EPGGenre.from(categories: ["Fußball"]), .sport)
+        XCTAssertEqual(EPGGenre.from(categories: ["Sports"]), .sport)
+        XCTAssertEqual(EPGGenre.from(categories: ["Nachrichten"]), .news)
+        XCTAssertEqual(EPGGenre.from(categories: ["Natur und Tiere"]), .documentary)
+        XCTAssertEqual(EPGGenre.from(categories: ["Krimi"]), .fiction)
+        XCTAssertEqual(EPGGenre.from(categories: ["Talkshow"]), .entertainment)
+        XCTAssertNil(EPGGenre.from(categories: ["Verschiedenes"]))
+    }
+
+    func testGenreFromXMLTV() throws {
+        let xml = """
+        <tv><channel id="a"><display-name>DE - ZDF</display-name></channel>
+        <programme start="20261027180000 +0000" stop="20261027190000 +0000" channel="a">
+        <title>Bundesliga</title><category>Sport</category><category>Fußball</category></programme></tv>
+        """
+        let from = try XCTUnwrap(XMLTV.date("20261027000000 +0000"))
+        let to = try XCTUnwrap(XMLTV.date("20261029000000 +0000"))
+        let result = try XCTUnwrap(XMLTV.parse(data: Data(xml.utf8), wantedKeys: [XMLTV.key("ZDF HD")], from: from, to: to))
+        XCTAssertEqual(result.programsByKey[XMLTV.key("ZDF HD")]?.first?.genre, EPGGenre.sport.rawValue)
+    }
+}

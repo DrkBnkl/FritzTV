@@ -11,6 +11,8 @@ public struct EPGProgram: Identifiable, Hashable, Sendable, Codable {
     public let startDate: Date
     public let duration: TimeInterval
     public let isRunningStatus: Bool
+    /// Sparte (`EPGGenre.rawValue`), soweit bekannt (aus der Internet-Quelle).
+    public let genre: String?
 
     public var endDate: Date {
         startDate.addingTimeInterval(duration)
@@ -24,7 +26,8 @@ public struct EPGProgram: Identifiable, Hashable, Sendable, Codable {
         description: String? = nil,
         startDate: Date,
         duration: TimeInterval,
-        isRunningStatus: Bool = false
+        isRunningStatus: Bool = false,
+        genre: String? = nil
     ) {
         self.eventID = eventID
         self.serviceID = serviceID
@@ -34,6 +37,14 @@ public struct EPGProgram: Identifiable, Hashable, Sendable, Codable {
         self.startDate = startDate
         self.duration = duration
         self.isRunningStatus = isRunningStatus
+        self.genre = genre
+    }
+
+    /// Dieselbe Sendung mit Sparte.
+    public func withGenre(_ genre: String?) -> EPGProgram {
+        EPGProgram(eventID: eventID, serviceID: serviceID, title: title, subtitle: subtitle,
+                   description: description, startDate: startDate, duration: duration,
+                   isRunningStatus: isRunningStatus, genre: genre)
     }
 
     /// Prüft, ob die Sendung zum angegebenen Zeitpunkt läuft.

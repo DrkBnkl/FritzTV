@@ -109,6 +109,7 @@ public enum XMLTV {
         private var title: String?
         private var subtitle: String?
         private var desc: String?
+        private var categories: [String] = []
         private var text = ""
         private var collecting = false
 
@@ -124,7 +125,7 @@ public enum XMLTV {
             case "channel":
                 channelID = attributes["id"]
                 channelNames = []
-            case "display-name", "title", "sub-title", "desc":
+            case "display-name", "title", "sub-title", "desc", "category":
                 text = ""
                 collecting = true
             case "programme":
@@ -136,7 +137,7 @@ public enum XMLTV {
                     return
                 }
                 programme = (channel, start, stop)
-                title = nil; subtitle = nil; desc = nil
+                title = nil; subtitle = nil; desc = nil; categories = []
             default:
                 break
             }
@@ -168,6 +169,9 @@ public enum XMLTV {
             case "desc":
                 collecting = false
                 if programme != nil, desc == nil { desc = text }
+            case "category":
+                collecting = false
+                if programme != nil { categories.append(text) }
             case "programme":
                 guard let p = programme, let key = keyByChannelID[p.channel],
                       let title, !title.isEmpty else { return }
@@ -183,7 +187,8 @@ public enum XMLTV {
                     subtitle: subtitle.flatMap { $0.isEmpty ? nil : $0 },
                     description: desc.flatMap { $0.isEmpty ? nil : $0 },
                     startDate: p.start,
-                    duration: p.stop.timeIntervalSince(p.start))
+                    duration: p.stop.timeIntervalSince(p.start),
+                    genre: EPGGenre.from(categories: categories)?.rawValue)
                 result.programsByKey[key, default: []].append(program)
                 result.programCount += 1
                 programme = nil

@@ -14,7 +14,8 @@ final class XMLTVLoader {
     private var loadedCache = false
 
     private static let refreshInterval: TimeInterval = 12 * 3600
-    private static let lastDownloadKey = "xmltvLastDownload"
+    // V2: Sparten (Filter) neu im Zwischenspeicher – einmal neu laden.
+    private static let lastDownloadKey = "xmltvLastDownloadV2"
 
     private nonisolated static var cacheURL: URL? {
         FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first?

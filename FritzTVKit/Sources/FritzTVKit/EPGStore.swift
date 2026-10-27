@@ -163,8 +163,15 @@ public final class EPGStore: @unchecked Sendable {
         guard let dvb, !dvb.programs.isEmpty else {
             return EPGChannelSchedule(serviceID: external[0].serviceID, programs: external)
         }
+        // Sparte aus der Internet-Quelle übernehmen (der Stream liefert keine), wenn eine Sendung
+        // dort fast zur selben Zeit beginnt.
+        let covered = dvb.programs.map { program -> EPGProgram in
+            guard program.genre == nil,
+                  let match = external.first(where: { abs($0.startDate.timeIntervalSince(program.startDate)) < 600 })
+            else { return program }
+            return program.withGenre(match.genre)
+        }
         // Lücken füllen: externe Sendungen nur, wo keine DVB-Sendung liegt.
-        let covered = dvb.programs
         let extra = external.filter { ext in
             !covered.contains { $0.startDate < ext.endDate && ext.startDate < $0.endDate }
         }

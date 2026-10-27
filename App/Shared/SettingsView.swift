@@ -420,7 +420,14 @@ private struct StationSearchSection: View {
 /// Übersicht aller Sender zum Sortieren (per Drag-and-Drop oder Pfeil-Tasten) und Ein-/Ausblenden.
 struct ChannelManagerView: View {
     @ObservedObject var model: AppModel
+    /// Für die Sterne („Meine Sender“): Änderungen sollen sofort sichtbar werden.
+    @ObservedObject private var settings: AppSettings
     @State private var filter: Filter = .all
+
+    init(model: AppModel) {
+        self.model = model
+        self.settings = model.settings
+    }
     @State private var searchText = ""
 
     enum Filter: String, CaseIterable, Identifiable {
@@ -563,6 +570,19 @@ struct ChannelManagerView: View {
                     .help("Nach unten schieben")
                 }
             }
+
+            // „Meine Sender“ (Programmübersicht)
+            Button {
+                settings.toggleFavorite(channel.key)
+            } label: {
+                let isFavorite = settings.favoriteKeys.contains(channel.key)
+                Label(isFavorite ? "Aus „Meine Sender“ entfernen" : "Zu „Meine Sender“",
+                      systemImage: isFavorite ? "star.fill" : "star")
+                    .labelStyle(.iconOnly)
+                    .foregroundStyle(isFavorite ? Color.accentColor : Color.secondary)
+            }
+            .buttonStyle(.borderless)
+            .help("Meine Sender")
 
             // Sichtbarkeit-Schalter
             Button {

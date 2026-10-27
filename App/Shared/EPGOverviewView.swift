@@ -43,8 +43,9 @@ struct EPGOverviewView: View {
         self.nav = model.epgNav
     }
 
+    /// Angezeigte Sender (nach Filter, siehe `AppModel.epgEntries`).
     private var entries: [LineupEntry] {
-        model.lineup?.entries ?? []
+        model.epgEntries
     }
 
     /// Platznummer des ausgewählten Senders (Auswahl liegt im Modell, siehe `AppModel.handleEPG`).
@@ -96,6 +97,15 @@ struct EPGOverviewView: View {
             timelineBody
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .overlay {
+            if let detail = nav.detail {
+                EPGDetailPanel(detail: detail,
+                               channelName: model.lineup?.entries.first { AppModel.key($0) == detail.key }?.group.displayName ?? "",
+                               actions: model.epgDetailActions(for: detail))
+                    .transition(.opacity)
+            }
+        }
+        .animation(.easeOut(duration: 0.2), value: nav.detail)
         .background(EPGColors.background.ignoresSafeArea())
         // Keine eigene Fokus- oder Tastensteuerung: Fernbedienung und Tastatur laufen wie bei der
         // Senderliste über `AppModel.handle`. Zwei konkurrierende Steuerungen führten dazu, dass
@@ -107,6 +117,9 @@ struct EPGOverviewView: View {
         }
         .onChange(of: player.epgRevision) { _, _ in scheduleRebuild() }
         .onChange(of: model.lineup?.entries.count) { _, _ in rebuildRows() }
+        .onChange(of: nav.filter) { _, _ in
+            topIndex = clampedTop(for: selectedIndex, current: 0)
+        }
         .onChange(of: nav.selectedKey) { _, _ in
             DebugLog.log("Übersicht: Auswahl geändert")
             let newTop = clampedTop(for: selectedIndex, current: topIndex)
@@ -145,7 +158,8 @@ struct EPGOverviewView: View {
         let start = Self.makeWindowStart()
         let end = start.addingTimeInterval(Double(totalHours) * 3600)
         var items: [Int: [TimelineItem]] = [:]
-        for entry in entries {
+        // Alle Sender berechnen, damit ein Filterwechsel ohne Neuberechnung auskommt.
+        for entry in model.lineup?.entries ?? [] {
             items[entry.number] = buildTimelineItems(for: entry, start: start, end: end)
         }
         windowStart = start
@@ -189,7 +203,8 @@ struct EPGOverviewView: View {
                         .help("Programmübersicht schließen (Esc)")
                 }
                 #else
-                Text("\(UI.upDown): Sender · \(UI.leftRight): spätere Sendungen · \(UI.select): umschalten · \(UI.back): schließen")
+                filterBar
+                Text("\(UI.upDown): Sender · \(UI.leftRight): spätere Sendungen · \(UI.select): umschalten bzw. Details · \(UI.playPause): Filter · \(UI.back): schließen")
                     .lineLimit(1)
                     .minimumScaleFactor(0.7)
                     .font(EPGMetrics.font(14, .medium))
@@ -203,6 +218,23 @@ struct EPGOverviewView: View {
         .padding(.horizontal, EPGMetrics.s(22))
         .padding(.vertical, EPGMetrics.s(10))
         .background(EPGColors.header)
+    }
+
+    /// Filter (Play/Pause schaltet weiter); der aktive ist hervorgehoben.
+    private var filterBar: some View {
+        HStack(spacing: EPGMetrics.s(8)) {
+            ForEach(EPGFilter.cycle, id: \.self) { filter in
+                let active = filter == nav.filter
+                Text(filter.title)
+                    .font(EPGMetrics.font(14, active ? .bold : .medium))
+                    .foregroundStyle(active ? EPGColors.background : EPGColors.secondaryText)
+                    .padding(.horizontal, EPGMetrics.s(10))
+                    .padding(.vertical, EPGMetrics.s(4))
+                    .background(active ? EPGColors.accent : EPGColors.cell, in: Capsule())
+                    .lineLimit(1)
+                    .fixedSize()
+            }
+        }
     }
 
     #if os(macOS)
@@ -258,6 +290,14 @@ struct EPGOverviewView: View {
                             .offset(y: CGFloat(index - top) * rowHeight)
                     }
                     nowLine(now: now, offset: offset)
+                    if all.isEmpty {
+                        Text(nav.filter == .favorites
+                             ? "Noch keine „Meine Sender“ – in den Details einer Sendung oder unter Einstellungen › Sendersortierung hinzufügen."
+                             : "Gerade keine Sendungen in „\(nav.filter.title)“. \(UI.playPause): anderer Filter.")
+                            .font(EPGMetrics.font(16, .medium))
+                            .foregroundStyle(EPGColors.secondaryText)
+                            .padding(EPGMetrics.s(24))
+                    }
                 }
                 .frame(width: geo.size.width, height: rowsHeight, alignment: .topLeading)
                 .clipped()
@@ -271,6 +311,7 @@ struct EPGOverviewView: View {
 
     private func updateVisibleRows(height: CGFloat) {
         let rows = max(3, Int(height / rowHeight))
+        nav.pageSize = rows
         if rows != visibleRows {
             visibleRows = rows
             topIndex = clampedTop(for: selectedIndex, current: topIndex)
@@ -284,6 +325,7 @@ struct EPGOverviewView: View {
                         name: entry.group.displayName,
                         isCurrent: entry.number == model.currentNumber,
                         isSelected: isSelected,
+                        isFavorite: model.settings.favoriteKeys.contains(AppModel.key(entry)),
                         width: channelColumnWidth,
                         height: rowHeight)
                 .equatable()
@@ -442,6 +484,7 @@ private struct ChannelCell: View, Equatable {
     let name: String
     let isCurrent: Bool
     let isSelected: Bool
+    let isFavorite: Bool
     let width: CGFloat
     let height: CGFloat
 
@@ -458,6 +501,12 @@ private struct ChannelCell: View, Equatable {
                 .font(EPGMetrics.font(17, .semibold))
                 .foregroundStyle(isCurrent ? EPGColors.accent : Color.white)
                 .lineLimit(1)
+
+            if isFavorite {
+                Image(systemName: "star.fill")
+                    .font(EPGMetrics.font(12, .bold))
+                    .foregroundStyle(EPGColors.accent)
+            }
 
             Spacer(minLength: 0)
 
@@ -671,4 +720,97 @@ enum EPGMetrics {
 final class EPGNavigation: ObservableObject {
     @Published var selectedKey: String?
     @Published var cursorTime: Date?
+    @Published var filter: EPGFilter = .all
+    /// Geöffnete Detailtafel zu einer späteren Sendung.
+    @Published var detail: EPGDetail?
+    /// Ganz sichtbare Zeilen (für seitenweises Blättern), setzt die Übersicht.
+    var pageSize = 5
+}
+
+/// Filter der Programmübersicht; Play/Pause schaltet weiter.
+enum EPGFilter: Hashable {
+    case all, favorites, genre(EPGGenre)
+
+    static var cycle: [EPGFilter] { [.all, .favorites] + EPGGenre.allCases.map { .genre($0) } }
+
+    var id: String {
+        switch self {
+        case .all: return "all"
+        case .favorites: return "favorites"
+        case .genre(let genre): return genre.rawValue
+        }
+    }
+
+    var title: String {
+        switch self {
+        case .all: return "Alle"
+        case .favorites: return "Meine Sender"
+        case .genre(let genre): return genre.title
+        }
+    }
+}
+
+struct EPGDetail: Equatable {
+    let key: String
+    let program: EPGProgram
+    /// Gewählte Aktion (siehe `AppModel.epgDetailActions`).
+    var action: Int
+}
+
+/// Detailtafel zu einer späteren Sendung (Klick in der Programmübersicht).
+private struct EPGDetailPanel: View {
+    let detail: EPGDetail
+    let channelName: String
+    let actions: [String]
+
+    private static let dayFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "de_DE")
+        f.dateFormat = "EEEE, d. MMMM"
+        return f
+    }()
+
+    var body: some View {
+        let p = detail.program
+        ZStack {
+            Color.black.opacity(0.55).ignoresSafeArea()
+            VStack(alignment: .leading, spacing: UI.s(20)) {
+                Text("\(channelName) · \(Self.dayFormatter.string(from: p.startDate)) · \(EPGOverviewView.formatTime(p.startDate)) – \(EPGOverviewView.formatTime(p.endDate)) Uhr")
+                    .font(UI.font(26, .semibold))
+                    .foregroundStyle(EPGColors.accent)
+                Text(p.title)
+                    .font(UI.font(48, .bold))
+                    .foregroundStyle(.white)
+                    .lineLimit(2)
+                if let sub = p.subtitle, !sub.isEmpty {
+                    Text(sub)
+                        .font(UI.font(30, .medium))
+                        .foregroundStyle(EPGColors.secondaryText)
+                        .lineLimit(2)
+                }
+                if let desc = p.description, !desc.isEmpty, desc != p.subtitle {
+                    Text(desc)
+                        .font(UI.font(29))
+                        .foregroundStyle(EPGColors.secondaryText)
+                        .lineLimit(6)
+                }
+                HStack(spacing: UI.s(20)) {
+                    ForEach(actions.indices, id: \.self) { index in
+                        let selected = index == detail.action
+                        Text(actions[index])
+                            .font(UI.font(29, .semibold))
+                            .foregroundStyle(selected ? Color.black : .white)
+                            .padding(.horizontal, UI.s(32))
+                            .padding(.vertical, UI.s(16))
+                            .background(selected ? Color.white : Color.white.opacity(0.14), in: Capsule())
+                            .focusLift(selected, scale: 1.08)
+                    }
+                }
+                .padding(.top, UI.s(12))
+            }
+            .padding(UI.s(56))
+            .frame(maxWidth: UI.s(1300), alignment: .leading)
+            .background { PanelBackground(cornerRadius: UI.s(32)) }
+        }
+    }
 }
