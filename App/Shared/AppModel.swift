@@ -390,6 +390,7 @@ final class AppModel: ObservableObject {
     // MARK: Tasten
 
     func handle(_ command: RemoteCommand) {
+        if command == .back { DebugLog.log("Taste: zurück") }
         switch loadState {
         case .loading:
             return
@@ -602,6 +603,7 @@ final class AppModel: ObservableObject {
         let index = entries.firstIndex { Self.key($0) == epgSelectedKey }
         switch command {
         case .up, .down:
+            DebugLog.log("Übersicht: Taste \(command == .up ? "hoch" : "runter")")
             let step = command == .up ? -1 : 1
             let next = index.map { min(max($0 + step, 0), entries.count - 1) } ?? 0
             epgSelectedKey = Self.key(entries[next])

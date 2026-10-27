@@ -108,6 +108,7 @@ struct EPGOverviewView: View {
         .onChange(of: player.epgRevision) { _, _ in scheduleRebuild() }
         .onChange(of: model.lineup?.entries.count) { _, _ in rebuildRows() }
         .onChange(of: nav.selectedKey) { _, _ in
+            DebugLog.log("Übersicht: Auswahl geändert")
             let newTop = clampedTop(for: selectedIndex, current: topIndex)
             if newTop != topIndex {
                 withAnimation(.easeOut(duration: 0.18)) { topIndex = newTop }
@@ -139,6 +140,8 @@ struct EPGOverviewView: View {
     }
 
     private func rebuildRows() {
+        let began = Date()
+        defer { DebugLog.log("Übersicht: Zeilen berechnet in \(Int(Date().timeIntervalSince(began) * 1000)) ms") }
         let start = Self.makeWindowStart()
         let end = start.addingTimeInterval(Double(totalHours) * 3600)
         var items: [Int: [TimelineItem]] = [:]

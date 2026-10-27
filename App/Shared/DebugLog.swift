@@ -26,8 +26,14 @@ enum DebugLog {
         #endif
     }()
 
+    private static let timeFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "HH:mm:ss.SSS"
+        return f
+    }()
+
     static func log(_ message: String) {
-        let line = "\(Date().formatted(date: .omitted, time: .standard)) \(message)\n"
+        let line = "\(timeFormatter.string(from: Date())) \(message)\n"
         print(line, terminator: "")
         guard let url = fileURL else { return }
         queue.async {
@@ -39,9 +45,9 @@ enum DebugLog {
     }
 }
 
-#if DEBUG
-/// Nur Debug-Builds: meldet im Log, wenn der Hauptthread länger als eine Sekunde nicht reagiert.
-/// Hilft bei eingefrorenem Bild (VLC braucht den Hauptthread für die Bildausgabe).
+/// Meldet im Log, wenn der Hauptthread (Fernbedienung, Oberfläche) länger als 0,2 s nicht
+/// reagiert. Kostet praktisch nichts; die Meldungen erscheinen in der Konsole
+/// (`devicectl device process launch --console`).
 enum MainThreadWatchdog {
     private static var started = false
 
@@ -49,23 +55,20 @@ enum MainThreadWatchdog {
         guard !started else { return }
         started = true
         let thread = Thread {
-            var stalledSince: Date?
             while true {
                 let answered = DispatchSemaphore(value: 0)
+                let sent = Date()
                 DispatchQueue.main.async { answered.signal() }
-                if answered.wait(timeout: .now() + 1.0) == .timedOut {
-                    let since = stalledSince ?? Date().addingTimeInterval(-1)
-                    stalledSince = since
-                    DebugLog.log("Hauptthread blockiert seit \(String(format: "%.0f", Date().timeIntervalSince(since))) s")
+                if answered.wait(timeout: .now() + 0.2) == .timedOut {
                     answered.wait()
-                    DebugLog.log("Hauptthread wieder frei nach \(String(format: "%.1f", Date().timeIntervalSince(since))) s")
-                    stalledSince = nil
+                    let ms = Int(Date().timeIntervalSince(sent) * 1000)
+                    DebugLog.log("Hauptthread blockiert: \(ms) ms")
                 }
-                Thread.sleep(forTimeInterval: 0.5)
+                Thread.sleep(forTimeInterval: 0.1)
             }
         }
         thread.name = "MainThreadWatchdog"
+        thread.qualityOfService = .utility
         thread.start()
     }
 }
-#endif
