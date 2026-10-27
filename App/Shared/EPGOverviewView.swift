@@ -115,13 +115,12 @@ struct EPGOverviewView: View {
         }
     }
 
-    /// Blättert erst, wenn die Auswahl die zweite Zeile vom Rand erreicht.
+    /// Die Auswahl bleibt in der Mitte stehen, die Liste rollt bei jedem Schritt mit
+    /// (nur am Anfang und Ende der Liste wandert die Auswahl).
     private func clampedTop(for index: Int, current: Int) -> Int {
         let count = entries.count
         let visible = max(visibleRows, 3)
-        var top = current
-        if index < top + 1 { top = index - 1 }
-        if index > top + visible - 2 { top = index - visible + 2 }
+        let top = index - (visible - 1) / 2
         return max(0, min(top, max(0, count - visible)))
     }
 
