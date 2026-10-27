@@ -15,9 +15,13 @@ struct EPGOverviewView: View {
     private let rulerHeight: CGFloat = EPGMetrics.s(48)
     private let channelColumnWidth: CGFloat = EPGMetrics.s(250)
 
-    init(model: AppModel, player: PlayerController, scanner: BackgroundEPGScanner? = nil) {
+    /// Eigene Beobachtung: Änderungen am Suchlauf sollen die Kopfzeile sofort aktualisieren.
+    @ObservedObject private var scanner: BackgroundEPGScanner
+
+    init(model: AppModel, player: PlayerController) {
         self.model = model
         self.player = player
+        self.scanner = model.epgScanner
     }
 
     /// Platznummer des ausgewählten Senders (Auswahl liegt im Modell, siehe `AppModel.handleEPG`).
@@ -80,7 +84,7 @@ struct EPGOverviewView: View {
                     .foregroundStyle(.white)
                     .lineLimit(1)
 
-                if model.epgScanner.isScanning, let ch = model.epgScanner.currentScanningChannel {
+                if scanner.isScanning {
                     HStack(spacing: 6) {
                         #if os(macOS)
                         ProgressView().controlSize(.small)
@@ -88,7 +92,7 @@ struct EPGOverviewView: View {
                         // `controlSize` gibt es auf tvOS nicht.
                         ProgressView().scaleEffect(0.6)
                         #endif
-                        Text("Lade Programmdaten (\(ch)) …")
+                        Text("Lade Programmdaten\(scanner.currentScanningChannel.map { " (\($0))" } ?? "") … · Live-Bild pausiert")
                             .font(EPGMetrics.font(14, .regular))
                             .foregroundStyle(Color.white.opacity(0.65))
                     }
@@ -115,6 +119,20 @@ struct EPGOverviewView: View {
                     .focusable(false)
 
                     Button {
+                        model.toggleManualEPGScan()
+                    } label: {
+                        Text(scanner.isScanning ? "Laden abbrechen" : "Programmdaten aller Sender laden")
+                            .font(EPGMetrics.font(15, .medium))
+                            .foregroundStyle(Color.white.opacity(0.85))
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 8)
+                            .background(Color.white.opacity(0.12), in: Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .focusable(false)
+                    .help("Das Live-Bild pausiert solange (Leertaste)")
+
+                    Button {
                         close()
                     } label: {
                         HStack(spacing: 6) {
@@ -131,7 +149,11 @@ struct EPGOverviewView: View {
                     .help("Programmübersicht schließen (Esc)")
                 }
                 #else
-                Text("\(UI.upDown): Sender wählen · \(UI.select): umschalten · \(UI.back): schließen")
+                Text(scanner.isScanning
+                     ? "\(UI.playPause): Laden abbrechen · \(UI.back): schließen"
+                     : "\(UI.upDown): Sender wählen · \(UI.select): umschalten · \(UI.playPause): Programmdaten aller Sender laden · \(UI.back): schließen")
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
                     .font(EPGMetrics.font(14, .medium))
                     .foregroundStyle(Color.white.opacity(0.5))
                 #endif

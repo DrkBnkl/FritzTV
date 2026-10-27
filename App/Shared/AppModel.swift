@@ -522,20 +522,63 @@ final class AppModel: ObservableObject {
         bannerVisible = false
         epgSelectedKey = playingKey ?? currentEntry.map(Self.key)
         showEPGOverview = true
-        triggerEPGScan()
+        // Kein automatischer Suchlauf: Eine zweite Verbindung zur FRITZ!Box unterbricht das
+        // laufende Live-Bild. Der Suchlauf startet nur auf Knopfdruck (Play/Pause).
     }
 
-    func closeEPGOverview() {
+    /// - Parameter resumeLive: Nach einem Suchlauf das Live-Bild wieder starten
+    ///   (entfällt, wenn ohnehin gleich auf einen Sender umgeschaltet wird).
+    func closeEPGOverview(resumeLive: Bool = true) {
         DebugLog.log("Programmübersicht geschlossen")
         showEPGOverview = false
-        epgScanner.stop()
+        if epgScanner.isScanning { epgScanner.stop() }
+        finishManualEPGScan(resumeLive: resumeLive)
+    }
+
+    /// Live-Bild wurde für den Suchlauf angehalten.
+    private var liveStoppedForEPGScan = false
+
+    /// Programmdaten aller Frequenzen laden. Die FRITZ!Box liefert nur eine Verbindung gleichzeitig
+    /// zuverlässig, daher wird das Live-Bild solange angehalten und danach fortgesetzt.
+    func toggleManualEPGScan() {
+        if epgScanner.isScanning {
+            DebugLog.log("EPG-Suchlauf abgebrochen")
+            epgScanner.stop()
+            finishManualEPGScan(resumeLive: true)
+            return
+        }
+        guard let catalog else { return }
+        player.stop()
+        liveStoppedForEPGScan = true
+        let started = epgScanner.startScanIfNeeded(
+            lineup: lineup,
+            catalog: catalog,
+            epgStore: player.epgStore,
+            host: boxHost,
+            activeFrequency: nil,
+            deadIDs: settings.deadChannelIDs,
+            force: true
+        ) { [weak self] in
+            self?.finishManualEPGScan(resumeLive: true)
+        }
+        if !started { finishManualEPGScan(resumeLive: true) }
+    }
+
+    private func finishManualEPGScan(resumeLive: Bool) {
+        guard liveStoppedForEPGScan else { return }
+        liveStoppedForEPGScan = false
+        if resumeLive { resume() }
     }
 
     /// Schaltet auf den Sender (Mausklick bzw. ohne Angabe die aktuelle Auswahl) und schließt die Übersicht.
     func tuneFromEPG(key: String? = nil) {
         let target = key ?? epgSelectedKey
-        closeEPGOverview()
-        guard let target, let entry = lineup?.entries.first(where: { Self.key($0) == target }) else { return }
+        let wasStopped = liveStoppedForEPGScan
+        closeEPGOverview(resumeLive: false)
+        guard let target, let entry = lineup?.entries.first(where: { Self.key($0) == target }) else {
+            if wasStopped { resume() }
+            return
+        }
         tune(to: entry.number)
     }
 
@@ -550,8 +593,10 @@ final class AppModel: ObservableObject {
             let step = command == .up ? -1 : 1
             let next = index.map { min(max($0 + step, 0), entries.count - 1) } ?? 0
             epgSelectedKey = Self.key(entries[next])
-        case .select, .playPause:
+        case .select:
             tuneFromEPG()
+        case .playPause:
+            toggleManualEPGScan()
         case .back:
             closeEPGOverview()
         case .digit(let digit):
@@ -692,19 +737,6 @@ final class AppModel: ObservableObject {
     }
 
     // MARK: EPG-Hintergrundscan
-
-    func triggerEPGScan() {
-        guard let catalog else { return }
-        let activeFreq = player.channel?.tuning?.frequencyMHz
-        epgScanner.startScanIfNeeded(
-            lineup: lineup,
-            catalog: catalog,
-            epgStore: player.epgStore,
-            host: boxHost,
-            activeFrequency: activeFreq,
-            deadIDs: settings.deadChannelIDs
-        )
-    }
 
     // MARK: Senderplätze verwalten (Einstellungen)
 
