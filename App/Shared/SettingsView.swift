@@ -33,26 +33,25 @@ struct SettingsView: View {
 
     private let cachingValues = [500, 1000, 2000, 3000, 5000]
     private let delayValues = Array(stride(from: -500, through: 500, by: 25))
-    private let bannerValues = [7, 8, 10, 15, 20, 30]
+    private let bannerValues = [5, 7, 10, 15, 20, 30]
     private let timeshiftMinuteValues = [30, 60, 90, 120]
 
     var body: some View {
         NavigationStack {
             Form {
                 Section("Bedienung") {
-                    Picker("Zurück-Taste (\(UI.back)) öffnet", selection: $settings.backTarget) {
-                        ForEach(BackTarget.allCases) { Text($0.title).tag($0) }
-                    }
+                    OptionRow(title: "Zurück-Taste (\(UI.back)) öffnet", selection: $settings.backTarget,
+                              options: BackTarget.allCases) { $0.title }
                     .cursorRow(.backTarget, focusedIndex: $focusedIndex)
 
-                    Picker("Sendungsinfo einblenden", selection: $settings.bannerSeconds) {
-                        ForEach(bannerValues, id: \.self) { Text("\($0) s").tag($0) }
-                    }
+                    OptionRow(title: "Sendungsinfo einblenden", selection: $settings.bannerSeconds,
+                              options: bannerValues) { "\($0) s" }
                     .cursorRow(.bannerSeconds, focusedIndex: $focusedIndex)
                 }
 
                 Section("Sendersortierung") {
-                    NavigationLink(destination: ChannelManagerView(model: model), isActive: $showChannelManager) {
+                    NavigationLink(destination: ChannelManagerView(model: model).settingsPageBackground(),
+                                   isActive: $showChannelManager) {
                         HStack {
                             Label("Sender sortieren & ausblenden", systemImage: "list.number")
                             Spacer()
@@ -81,10 +80,8 @@ struct SettingsView: View {
                     }
                     .cursorRow(.reloadList, focusedIndex: $focusedIndex)
 
-                    Picker("Netzwerkpuffer", selection: $settings.networkCaching) {
-                        Text("Automatisch").tag(0)
-                        ForEach(cachingValues, id: \.self) { Text("\($0) ms").tag($0) }
-                    }
+                    OptionRow(title: "Netzwerkpuffer", selection: $settings.networkCaching,
+                              options: [0] + cachingValues) { $0 == 0 ? "Automatisch" : "\($0) ms" }
                     .cursorRow(.networkCaching, focusedIndex: $focusedIndex)
 
                     Toggle("RTP über TCP", isOn: $settings.rtspTCP)
@@ -110,9 +107,8 @@ struct SettingsView: View {
                     Toggle("Timeshift (Live-Bild anhalten)", isOn: $settings.timeshift)
                         .cursorRow(.timeshift, focusedIndex: $focusedIndex)
 
-                    Picker("Timeshift-Puffer", selection: $settings.timeshiftMinutes) {
-                        ForEach(timeshiftMinuteValues, id: \.self) { Text("\($0) Min.").tag($0) }
-                    }
+                    OptionRow(title: "Timeshift-Puffer", selection: $settings.timeshiftMinutes,
+                              options: timeshiftMinuteValues) { "\($0) Min." }
                     .disabled(!settings.timeshift)
                     .cursorRow(.timeshiftMinutes, focusedIndex: $focusedIndex)
 
@@ -120,15 +116,25 @@ struct SettingsView: View {
                     Toggle("Bildwiederholrate auf 50 Hz", isOn: $settings.match50Hz)
                     #endif
 
-                    Picker("Tonverzögerung Stereo", selection: $settings.audioDelayMs) {
-                        ForEach(delayValues, id: \.self) { Text("\($0) ms").tag($0) }
-                    }
+                    OptionRow(title: "Tonverzögerung Stereo", selection: $settings.audioDelayMs,
+                              options: delayValues) { "\($0) ms" }
                     .cursorRow(.audioDelay, focusedIndex: $focusedIndex)
 
-                    Picker("Tonverzögerung Dolby Digital (AC3)", selection: $settings.audioDelayAC3Ms) {
-                        ForEach(delayValues, id: \.self) { Text("\($0) ms").tag($0) }
-                    }
+                    OptionRow(title: "Tonverzögerung Dolby Digital (AC3)", selection: $settings.audioDelayAC3Ms,
+                              options: delayValues) { "\($0) ms" }
                     .cursorRow(.audioDelayAC3, focusedIndex: $focusedIndex)
+                }
+
+                Section {
+                    TextField("Adresse (leer = \(XMLTVLoader.defaultSource))", text: $settings.xmltvSource)
+                        .autocorrectionDisabled()
+                    Button("Programmdaten jetzt neu laden") {
+                        model.reloadInternetEPG()
+                    }
+                } header: {
+                    Text("Programmdaten")
+                } footer: {
+                    Text("Die Programmdaten aller Sender kommen aus dem Internet (XMLTV, alle 12 Stunden). Für den laufenden Sender zeigt die App die genaueren Daten aus dem Fernsehsignal.")
                 }
 
                 Section {
@@ -141,14 +147,10 @@ struct SettingsView: View {
                     Text("Die Spielfilm-Übersicht kommt von press2arr („Lichtspiel“) auf der NAS. Untertitel gibt es, wenn der Sender welche anbietet.")
                 }
             }
-            #if os(tvOS)
-            // Auswahl als eigene Seite statt als Aufklapp-Menü: Das Menü erschien auf dem Apple TV
-            // durchsichtig und ohne Inhalt.
-            .pickerStyle(.navigationLink)
-            #endif
             #if os(macOS)
             .formStyle(.grouped)
             #endif
+            .settingsPageBackground()
             .navigationTitle("Einstellungen")
             .toolbar {
                 ToolbarItem(placement: .automatic) {
@@ -171,6 +173,9 @@ struct SettingsView: View {
             }
             #endif
         }
+        // Deckender Hintergrund: Sonst scheint das Fernsehbild stark durch und die Einträge
+        // sind kaum lesbar.
+        .settingsPageBackground()
         #if os(macOS)
         .frame(minWidth: 500, idealWidth: 620, maxWidth: .infinity, minHeight: 400, idealHeight: 560, maxHeight: .infinity)
         .onAppear { setupKeyMonitor() }
@@ -415,7 +420,14 @@ private struct StationSearchSection: View {
 /// Übersicht aller Sender zum Sortieren (per Drag-and-Drop oder Pfeil-Tasten) und Ein-/Ausblenden.
 struct ChannelManagerView: View {
     @ObservedObject var model: AppModel
+    /// Für die Sterne („Meine Sender“): Änderungen sollen sofort sichtbar werden.
+    @ObservedObject private var settings: AppSettings
     @State private var filter: Filter = .all
+
+    init(model: AppModel) {
+        self.model = model
+        self.settings = model.settings
+    }
     @State private var searchText = ""
 
     enum Filter: String, CaseIterable, Identifiable {
@@ -559,6 +571,19 @@ struct ChannelManagerView: View {
                 }
             }
 
+            // „Meine Sender“ (Programmübersicht)
+            Button {
+                settings.toggleFavorite(channel.key)
+            } label: {
+                let isFavorite = settings.favoriteKeys.contains(channel.key)
+                Label(isFavorite ? "Aus „Meine Sender“ entfernen" : "Zu „Meine Sender“",
+                      systemImage: isFavorite ? "star.fill" : "star")
+                    .labelStyle(.iconOnly)
+                    .foregroundStyle(isFavorite ? Color.accentColor : Color.secondary)
+            }
+            .buttonStyle(.borderless)
+            .help("Meine Sender")
+
             // Sichtbarkeit-Schalter
             Button {
                 withAnimation(.easeInOut(duration: 0.2)) {
@@ -580,5 +605,103 @@ struct ChannelManagerView: View {
 
     private func moveChannels(from source: IndexSet, to destination: Int) {
         model.moveActiveChannels(fromOffsets: source, toOffset: destination)
+    }
+}
+
+// MARK: - Auswahlzeilen
+
+/// Einstellung mit festen Werten. Auf dem Apple TV eine Zeile, die eine eigene Auswahlseite
+/// öffnet; auf dem Mac ein normales Aufklapp-Menü.
+///
+/// Ersetzt auf dem Apple TV den System-Picker: Dessen Menü und auch dessen Auswahlseite
+/// (`.navigationLink`) erschienen im Vollbild-Cover leer und durchsichtig und ließen sich
+/// nicht bedienen.
+struct OptionRow<Value: Hashable>: View {
+    let title: String
+    @Binding var selection: Value
+    let options: [Value]
+    let label: (Value) -> String
+
+    init(title: String, selection: Binding<Value>, options: [Value], label: @escaping (Value) -> String) {
+        self.title = title
+        self._selection = selection
+        self.options = options
+        self.label = label
+    }
+
+    var body: some View {
+        #if os(tvOS)
+        NavigationLink {
+            OptionListView(title: title, selection: $selection, options: options, label: label)
+        } label: {
+            HStack {
+                Text(title)
+                Spacer()
+                Text(label(selection))
+            }
+        }
+        #else
+        Picker(title, selection: $selection) {
+            ForEach(options, id: \.self) { Text(label($0)).tag($0) }
+        }
+        #endif
+    }
+}
+
+#if os(tvOS)
+/// Auswahlseite: Klick übernimmt den Wert und führt zurück zu den Einstellungen.
+private struct OptionListView<Value: Hashable>: View {
+    let title: String
+    @Binding var selection: Value
+    let options: [Value]
+    let label: (Value) -> String
+
+    @Environment(\.dismiss) private var dismiss
+    @FocusState private var focused: Value?
+
+    var body: some View {
+        ScrollViewReader { proxy in
+            List {
+                ForEach(options, id: \.self) { option in
+                    Button {
+                        selection = option
+                        dismiss()
+                    } label: {
+                        HStack {
+                            Text(label(option))
+                            Spacer()
+                            if option == selection {
+                                Image(systemName: "checkmark")
+                            }
+                        }
+                    }
+                    .focused($focused, equals: option)
+                    .id(option)
+                }
+            }
+            .onAppear {
+                // Fokus und Sichtbereich auf den aktuellen Wert (wichtig bei langen Listen
+                // wie der Tonverzögerung).
+                proxy.scrollTo(selection, anchor: .center)
+                DispatchQueue.main.async { focused = selection }
+            }
+        }
+        .navigationTitle(title)
+        .settingsPageBackground()
+    }
+}
+#endif
+
+extension View {
+    /// Deckender, dunkler Hintergrund für die Einstellungsseiten auf dem Apple TV. Ohne ihn
+    /// scheint das Fernsehbild durch das Vollbild-Cover und die Unterseiten.
+    @ViewBuilder func settingsPageBackground() -> some View {
+        #if os(tvOS)
+        self
+            .background(Color(red: 0.06, green: 0.07, blue: 0.09).ignoresSafeArea())
+            .presentationBackground(Color(red: 0.06, green: 0.07, blue: 0.09))
+        #else
+        self
+        #endif
     }
 }

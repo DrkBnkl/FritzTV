@@ -16,17 +16,26 @@ struct RootView: View {
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
+            // Die Programmübersicht liegt UNTER der Bildfläche. Die Bildfläche behält so immer
+            // ihren Platz in der Ansichtshierarchie: Wurde sie (per zIndex) über die Übersicht
+            // gehoben, blieb das VLC-Bild stehen – auch nach dem Schließen der Übersicht.
+            if model.showEPGOverview && model.activeHLSReplay == nil && model.activeMediathekURL == nil {
+                EPGOverviewView(model: model, player: player)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .transition(.opacity)
+            }
             // In der Programmübersicht läuft das Bild verkleinert im Vorschaufenster weiter.
             // Dieselbe Ansicht wird nur verschoben (kein zweiter Player, kein Neuaufbau).
-            PlayerSurface(player: player.mediaPlayer)
+            PlayerSurface(player: player.mediaPlayer, previewFrame: previewFrame)
                 .modifier(EPGPreviewPlacement(frame: previewFrame))
             // Schwarzer Bildschirm beim Umschalten: Blendet Standbilder des alten Senders aus,
             // bis der neue Stream decodiert wird.
-            if model.settings.blackScreenOnZap && player.status.isTransitioning && !player.isReplaying {
+            if model.settings.blackScreenOnZap && player.status.isTransitioning && !player.isReplaying
+                && !model.showEPGOverview {
                 Color.black.ignoresSafeArea()
             }
             // Timeshift: Mitschnitt-Wiedergabe liegt über dem stumm weiterlaufenden Live-Bild.
-            PlayerSurface(player: player.replayPlayer)
+            PlayerSurface(player: player.replayPlayer, previewFrame: previewFrame)
                 .opacity(player.isReplaying ? 1 : 0)
                 .allowsHitTesting(false)
                 .modifier(EPGPreviewPlacement(frame: previewFrame))
@@ -40,11 +49,7 @@ struct RootView: View {
                     model.mediathekPlayClosed()
                 }
                 .ignoresSafeArea()
-            } else if model.showEPGOverview {
-                EPGOverviewView(model: model, player: player)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .transition(.opacity)
-            } else {
+            } else if !model.showEPGOverview {
                 #if os(macOS)
                 // Mausklick ins Bild öffnet die Senderliste. Nur auf dem Mac: Auf dem Apple TV fing
                 // diese Fläche den Klick der Fernbedienung ab (z. B. im Timeshift).
@@ -86,7 +91,7 @@ struct RootView: View {
                 .frame(minWidth: 1000, maxWidth: .infinity, minHeight: 650, maxHeight: .infinity)
         }
         #endif
-        .sheet(isPresented: Binding(
+        .searchResultsPresentation(isPresented: Binding(
             get: { model.searchResultDialog != nil },
             set: { if !$0 { model.searchResultDialog = nil } }
         )) {
@@ -133,7 +138,11 @@ struct OverlayLayer: View {
         ZStack {
             switch model.loadState {
             case .loading:
-                StatusCard(title: "Verbinde mit der FRITZ!Box …", message: nil, hint: nil, busy: true)
+                // Apple-Richtlinien: schwarzer Bildschirm mit zentriertem Ladesymbol, ohne weitere Inhalte.
+                ProgressView()
+                    .scaleEffect(1.5)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(Color.black)
             case .failed(let message):
                 StatusCard(title: "Keine Verbindung", message: message,
                            hint: "\(UI.select): erneut versuchen · \(UI.playPause): Einstellungen", busy: false)
@@ -168,6 +177,9 @@ struct OverlayLayer: View {
             EmptyView()
         case .info(let selection):
             InfoPanel(model: model, player: player, selection: selection)
+                .transition(.move(edge: .top).combined(with: .opacity))
+        case .footer(let index):
+            ChannelFooter(model: model, player: player, index: index)
         case .channelList(let selectedID):
             ChannelListOverlay(model: model, player: player, selectedID: selectedID)
         case .directEntry(let digits, let key):
@@ -188,6 +200,20 @@ struct OverlayLayer: View {
     }
 }
 
+private extension View {
+    /// Mediathek-Suchergebnisse: auf dem Apple TV im Vollbild (als Sheet war das Fenster klein,
+    /// die Schrift winzig und das Fernsehbild schien durch), auf dem Mac als Sheet.
+    @ViewBuilder
+    func searchResultsPresentation<Content: View>(isPresented: Binding<Bool>,
+                                                  @ViewBuilder content: @escaping () -> Content) -> some View {
+        #if os(tvOS)
+        fullScreenCover(isPresented: isPresented, content: content)
+        #else
+        sheet(isPresented: isPresented, content: content)
+        #endif
+    }
+}
+
 /// Rahmen des Vorschaufensters in der Programmübersicht (Bildschirmkoordinaten).
 struct EPGPreviewFrameKey: PreferenceKey {
     static let defaultValue: CGRect? = nil
@@ -197,19 +223,31 @@ struct EPGPreviewFrameKey: PreferenceKey {
 }
 
 /// Bildfläche: normalerweise bildschirmfüllend, in der Programmübersicht im Vorschaufenster.
+///
+/// Apple TV: Die SwiftUI-Modifier bleiben immer gleich; verkleinert wird in
+/// `VideoHostView` per UIKit-Transformation (siehe dort, warum).
+/// Mac: Die Fläche behält die volle Größe und wird per `scaleEffect` verkleinert.
 struct EPGPreviewPlacement: ViewModifier {
     let frame: CGRect?
 
     func body(content: Content) -> some View {
+        #if os(macOS)
+        GeometryReader { geo in
+            let full = geo.size
+            let scale = frame.map { $0.width / max(full.width, 1) } ?? 1
+            content
+                .frame(width: full.width, height: full.height)
+                .clipShape(RoundedRectangle(cornerRadius: frame == nil ? 0 : 10 / max(scale, 0.01)))
+                .scaleEffect(scale, anchor: .topLeading)
+                .offset(x: frame?.minX ?? 0, y: frame?.minY ?? 0)
+        }
+        .ignoresSafeArea()
+        .allowsHitTesting(frame == nil)
+        #else
         content
-            .frame(width: frame?.width, height: frame?.height)
-            .clipShape(RoundedRectangle(cornerRadius: frame == nil ? 0 : 12))
-            .frame(maxWidth: .infinity, maxHeight: .infinity,
-                   alignment: frame == nil ? .center : .topLeading)
-            .offset(x: frame?.minX ?? 0, y: frame?.minY ?? 0)
             .ignoresSafeArea()
-            // Über die Programmübersicht legen; die Ansicht bleibt dieselbe (nur Lage und Größe ändern sich).
-            .zIndex(frame == nil ? 0 : 5)
+            .allowsHitTesting(false)
+        #endif
     }
 }
 

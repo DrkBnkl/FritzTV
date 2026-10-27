@@ -10,6 +10,10 @@ import TVServices
 enum RemoteCommand: Equatable {
     case up, down, left, right, select, back, playPause
     case digit(Int)
+    /// Seitentasten kompatibler Fernbedienungen: im Live-Bild Sender wechseln, in Listen blättern.
+    case pageUp, pageDown
+    /// Wischen auf der Touch-Fläche (Apple TV): im Live-Bild Senderleiste bzw. Info öffnen.
+    case swipeUp, swipeDown
 }
 
 /// Was gerade über dem Bild liegt. Die Auswahl in den Overlays verwaltet die App selbst,
@@ -22,6 +26,8 @@ enum Overlay: Equatable {
     case channelList(selectedID: String)
     /// Direktwahl; `key` = Taste im Ziffernblock (0…11).
     case directEntry(digits: String, key: Int)
+    /// Senderleiste am unteren Rand (Wischen nach oben); `index` in der Senderliste.
+    case footer(index: Int)
 }
 
 struct ManagedChannel: Identifiable, Equatable {
@@ -80,9 +86,20 @@ final class AppModel: ObservableObject {
     @Published var showSettings = false
     @Published var showMediathek = false
     @Published var showEPGOverview = false
+    /// Auswahl in der Programmübersicht. Eigenes Objekt: Änderungen zeichnen nur die Übersicht
+    /// neu, nicht die ganze App (wichtig für ruhiges Blättern auf dem Apple TV).
+    let epgNav = EPGNavigation()
     /// Ausgewählter Sender in der Programmübersicht (Senderschlüssel). Die Auswahl verwaltet die
     /// App selbst wie bei der Senderliste: Alle Tasten laufen über `handle`, auf Apple TV und Mac gleich.
-    @Published private(set) var epgSelectedKey: String?
+    private(set) var epgSelectedKey: String? {
+        get { epgNav.selectedKey }
+        set { if epgNav.selectedKey != newValue { epgNav.selectedKey = newValue } }
+    }
+    /// Zeitpunkt in der Programmübersicht, den Links/Rechts ansteuert; `nil` = jetzt.
+    var epgCursorTime: Date? {
+        get { epgNav.cursorTime }
+        set { if epgNav.cursorTime != newValue { epgNav.cursorTime = newValue } }
+    }
     @Published var activeHLSReplay: (url: URL, startDate: Date?)?
     @Published var activeMediathekURL: URL?
     /// Untertitel zum laufenden Mediathek-Video aus der Suche, falls vorhanden.
@@ -201,6 +218,7 @@ final class AppModel: ObservableObject {
             }
             let start = lineup?.entries.first { Self.key($0) == settings.lastChannelKey }?.number ?? 1
             tune(to: start)
+            refreshInternetEPG()
         } catch let error as FritzBoxClient.ClientError {
             DebugLog.log("Senderliste fehlgeschlagen: \(error)")
             switch error {
@@ -347,6 +365,7 @@ final class AppModel: ObservableObject {
     /// (Hintergrund) – nicht nach kurzem `inactive` (z. B. Kontrollzentrum), sonst wären
     /// Timeshift-Puffer und Position weg – und nicht, solange ein anderer Player offen ist.
     func returnedToForeground() {
+        refreshInternetEPG()
         guard loadState == .ready, player.status == .idle,
               activeHLSReplay == nil, activeMediathekURL == nil, !showMediathek else { return }
         resume()
@@ -379,6 +398,7 @@ final class AppModel: ObservableObject {
     // MARK: Tasten
 
     func handle(_ command: RemoteCommand) {
+        if command == .back { DebugLog.log("Taste: zurück") }
         switch loadState {
         case .loading:
             return
@@ -398,6 +418,8 @@ final class AppModel: ObservableObject {
         switch overlay {
         case .none:
             handleLive(command)
+        case .footer(let index):
+            handleFooter(command, index: index)
         case .info(let selection):
             handleInfo(command, selection: selection)
         case .channelList(let selectedID):
@@ -442,6 +464,67 @@ final class AppModel: ObservableObject {
         case .left: player.jumpProgressive(forward: false)
         case .right: player.jumpProgressive(forward: true)
         case .digit(let digit): enterDigit(digit, into: "", key: 0)
+        case .pageUp: zap(+1)
+        case .pageDown: zap(-1)
+        case .swipeUp: openFooter()
+        case .swipeDown:
+            bannerVisible = false
+            overlay = .info(selection: 0)
+            refreshTunerStats()
+        }
+    }
+
+    /// Ist das Live-Bild ohne Overlay zu sehen? Dann gelten Klick oben/unten (zappen) und Wischen
+    /// (Senderleiste/Info) getrennt, siehe `RemoteInputModifier`.
+    var isPlainLiveView: Bool {
+        guard case .ready = loadState else { return false }
+        return overlay == .none && !showEPGOverview && !showSettings && !showMediathek
+            && searchResultDialog == nil && activeHLSReplay == nil && activeMediathekURL == nil
+    }
+
+    // MARK: Senderleiste unten (Apple: „content footer“)
+
+    private var footerHideTask: Task<Void, Never>?
+
+    private func openFooter() {
+        guard let entries = lineup?.entries, !entries.isEmpty else { return }
+        bannerVisible = false
+        let index = entries.firstIndex { $0.number == currentNumber } ?? 0
+        overlay = .footer(index: index)
+        scheduleFooterHide()
+    }
+
+    /// Ohne Bedienung blendet sich die Leiste nach 8 Sekunden aus.
+    private func scheduleFooterHide() {
+        footerHideTask?.cancel()
+        footerHideTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(8))
+            guard let self, !Task.isCancelled, case .footer = self.overlay else { return }
+            withAnimation(.easeInOut(duration: 0.3)) { self.overlay = .none }
+        }
+    }
+
+    private func handleFooter(_ command: RemoteCommand, index: Int) {
+        guard let entries = lineup?.entries, !entries.isEmpty else { overlay = .none; return }
+        scheduleFooterHide()
+        switch command {
+        case .left: overlay = .footer(index: max(index - 1, 0))
+        case .right: overlay = .footer(index: min(index + 1, entries.count - 1))
+        case .pageUp: overlay = .footer(index: max(index - 5, 0))
+        case .pageDown: overlay = .footer(index: min(index + 5, entries.count - 1))
+        case .select:
+            let entry = entries[min(index, entries.count - 1)]
+            footerHideTask?.cancel()
+            overlay = .none
+            tune(to: entry.number)
+        case .back, .down, .swipeDown:
+            footerHideTask?.cancel()
+            overlay = .none
+        case .playPause: player.togglePause()
+        case .up, .swipeUp: break
+        case .digit(let digit):
+            footerHideTask?.cancel()
+            enterDigit(digit, into: "", key: 0)
         }
     }
 
@@ -491,9 +574,9 @@ final class AppModel: ObservableObject {
                 overlay = .none
                 showSettings = true
             }
-        case .back, .up, .down: overlay = .none
+        case .back, .up, .down, .swipeUp: overlay = .none
         case .playPause: player.togglePause()
-        case .digit: break
+        case .digit, .pageUp, .pageDown, .swipeDown: break
         }
     }
 
@@ -517,16 +600,22 @@ final class AppModel: ObservableObject {
     }
 
     func openEPGOverview() {
+        DebugLog.log("Programmübersicht geöffnet")
         overlay = .none
         bannerVisible = false
-        epgSelectedKey = playingKey ?? currentEntry.map(Self.key)
+        epgNav.detail = nil
+        epgCursorTime = nil
+        let entries = epgEntries
+        let preferred = playingKey ?? currentEntry.map(Self.key)
+        epgSelectedKey = entries.contains { Self.key($0) == preferred } ? preferred : entries.first.map(Self.key)
         showEPGOverview = true
-        triggerEPGScan()
+        refreshInternetEPG()
     }
 
     func closeEPGOverview() {
+        DebugLog.log("Programmübersicht geschlossen")
+        epgNav.detail = nil
         showEPGOverview = false
-        epgScanner.stop()
     }
 
     /// Schaltet auf den Sender (Mausklick bzw. ohne Angabe die aktuelle Auswahl) und schließt die Übersicht.
@@ -537,29 +626,194 @@ final class AppModel: ObservableObject {
         tune(to: entry.number)
     }
 
+    // MARK: Programmdaten aus dem Internet
+
+    /// Programmdaten aller Sender kommen aus dem Internet (XMLTV): Ein Abruf weiterer Frequenzen
+    /// bei der FRITZ!Box unterbräche das Live-Bild (die Box liefert einem Gerät nur einen Stream).
+    private lazy var xmltvLoader = XMLTVLoader(store: player.epgStore) { [weak self] in
+        self?.player.externalEPGUpdated()
+    }
+
+    func refreshInternetEPG() {
+        guard let catalog else { return }
+        xmltvLoader.refreshIfNeeded(channelNames: catalog.tvGroups.flatMap(\.epgNames),
+                                    source: settings.xmltvSource)
+    }
+
+    func reloadInternetEPG() {
+        xmltvLoader.invalidate()
+        refreshInternetEPG()
+    }
+
+    // MARK: Programmübersicht: Filter, Details
+
+    /// Sender der Programmübersicht nach Filter (Alle, Meine Sender, Sparte zur gewählten Zeit).
+    /// Zwischengespeichert: wird bei jedem Tastendruck und jedem Zeichnen gebraucht.
+    var epgEntries: [LineupEntry] {
+        let all = lineup?.entries ?? []
+        let filter = epgNav.filter
+        let time = epgCursorTime ?? Date()
+        let cacheKey = "\(filter.id)|\(Int(time.timeIntervalSince1970 / 60))|\(player.epgRevision)|\(all.count)|\(settings.favoriteKeys.joined(separator: ","))"
+        if cacheKey == epgEntriesCacheKey { return epgEntriesCache }
+        let result: [LineupEntry]
+        switch filter {
+        case .all:
+            result = all
+        case .favorites:
+            let favorites = Set(settings.favoriteKeys)
+            result = all.filter { favorites.contains(Self.key($0)) }
+        case .genre(let genre):
+            result = all.filter { entry in
+                player.epgStore.schedule(forChannelNames: entry.group.epgNames)?.programs
+                    .first { $0.startDate <= time && time < $0.endDate }?.genre == genre.rawValue
+            }
+        }
+        epgEntriesCacheKey = cacheKey
+        epgEntriesCache = result
+        return result
+    }
+
+    private var epgEntriesCacheKey = ""
+    private var epgEntriesCache: [LineupEntry] = []
+
+    private func cycleEPGFilter() {
+        let all = EPGFilter.cycle
+        let index = all.firstIndex(of: epgNav.filter) ?? 0
+        epgNav.filter = all[(index + 1) % all.count]
+        let entries = epgEntries
+        if !entries.contains(where: { Self.key($0) == epgSelectedKey }) {
+            epgSelectedKey = entries.first.map(Self.key)
+        }
+        DebugLog.log("Übersicht: Filter \(epgNav.filter.title) – \(entries.count) Sender")
+    }
+
+    /// Sendung des gewählten Senders zur Cursorzeit (bzw. jetzt).
+    private func selectedEPGProgram() -> EPGProgram? {
+        guard let key = epgSelectedKey,
+              let entry = lineup?.entries.first(where: { Self.key($0) == key }) else { return nil }
+        let time = epgCursorTime ?? Date()
+        return player.epgStore.schedule(forChannelNames: entry.group.epgNames)?.programs
+            .first { $0.startDate <= time && time < $0.endDate }
+    }
+
     private func handleEPG(_ command: RemoteCommand) {
-        guard let entries = lineup?.entries, !entries.isEmpty else {
-            if command == .back { closeEPGOverview() }
+        if let detail = epgNav.detail {
+            handleEPGDetail(command, detail: detail)
             return
         }
-        let index = entries.firstIndex { Self.key($0) == epgSelectedKey }
         switch command {
-        case .up, .down:
-            let step = command == .up ? -1 : 1
-            let next = index.map { min(max($0 + step, 0), entries.count - 1) } ?? 0
-            epgSelectedKey = Self.key(entries[next])
-        case .select, .playPause:
-            tuneFromEPG()
         case .back:
             closeEPGOverview()
+            return
+        case .playPause:
+            cycleEPGFilter()
+            return
+        case .left, .right:
+            moveEPGCursor(forward: command == .right)
+            return
+        default:
+            break
+        }
+        let entries = epgEntries
+        guard !entries.isEmpty else { return }
+        let index = entries.firstIndex { Self.key($0) == epgSelectedKey }
+        switch command {
+        case .up, .down, .pageUp, .pageDown:
+            let page = max(epgNav.pageSize - 1, 1)
+            let step: Int
+            switch command {
+            case .up: step = -1
+            case .down: step = 1
+            case .pageUp: step = -page
+            default: step = page
+            }
+            DebugLog.log("Übersicht: Taste \(command)")
+            let next = index.map { min(max($0 + step, 0), entries.count - 1) } ?? 0
+            epgSelectedKey = Self.key(entries[next])
+        case .select:
+            // Laufende Sendung: sofort umschalten (Apple: ein Klick bis zum Bild). Spätere Sendung:
+            // Detailtafel mit Beschreibung und Aktionen.
+            if let program = selectedEPGProgram(), program.startDate > Date(), let key = epgSelectedKey {
+                epgNav.detail = EPGDetail(key: key, program: program, action: 0)
+            } else {
+                tuneFromEPG()
+            }
         case .digit(let digit):
             // Ziffer: zum Senderplatz springen (einstellige Plätze direkt)
             if let entry = lineup?.entry(number: digit) {
                 epgSelectedKey = Self.key(entry)
             }
-        case .left, .right:
+        default:
             break
         }
+    }
+
+    /// Aktionen der Detailtafel, in fester Reihenfolge.
+    func epgDetailActions(for detail: EPGDetail) -> [String] {
+        let isFavorite = settings.favoriteKeys.contains(detail.key)
+        return ["Umschalten", isFavorite ? "Aus „Meine Sender“ entfernen" : "Zu „Meine Sender“", "Schließen"]
+    }
+
+    private func handleEPGDetail(_ command: RemoteCommand, detail: EPGDetail) {
+        let count = epgDetailActions(for: detail).count
+        switch command {
+        case .left:
+            epgNav.detail?.action = max(detail.action - 1, 0)
+        case .right:
+            epgNav.detail?.action = min(detail.action + 1, count - 1)
+        case .select:
+            switch detail.action {
+            case 0:
+                epgNav.detail = nil
+                tuneFromEPG(key: detail.key)
+            case 1:
+                settings.toggleFavorite(detail.key)
+            default:
+                epgNav.detail = nil
+            }
+        case .back, .playPause:
+            epgNav.detail = nil
+        default:
+            break
+        }
+    }
+
+    /// Links/Rechts in der Programmübersicht: zur vorigen bzw. nächsten Sendung des gewählten
+    /// Senders. Ohne Programmdaten in Schritten von 30 Minuten. Nie vor „jetzt“, höchstens 22 h voraus.
+    private func moveEPGCursor(forward: Bool) {
+        let now = Date()
+        let time = epgCursorTime ?? now
+        let programs: [EPGProgram]
+        if let key = epgSelectedKey, let entry = lineup?.entries.first(where: { Self.key($0) == key }) {
+            programs = (player.epgStore.schedule(forChannelNames: entry.group.epgNames)?.programs ?? [])
+                .sorted { $0.startDate < $1.startDate }
+        } else {
+            programs = []
+        }
+        let current = programs.first { $0.startDate <= time && time < $0.endDate }
+        let target: Date
+        if forward {
+            target = current?.endDate
+                ?? programs.first(where: { $0.startDate > time })?.startDate
+                ?? Self.nextHalfHour(after: time)
+            guard target < now.addingTimeInterval(22 * 3600) else { return }
+        } else {
+            let reference = current?.startDate ?? time
+            let previous = programs.last { $0.startDate < reference && $0.endDate > reference.addingTimeInterval(-60) }
+            target = previous?.startDate ?? Self.previousHalfHour(before: reference)
+        }
+        epgCursorTime = target <= now ? nil : target
+    }
+
+    /// Nächste volle oder halbe Stunde nach `date` (Schritte ohne Programmdaten).
+    private static func nextHalfHour(after date: Date) -> Date {
+        let step: TimeInterval = 30 * 60
+        return Date(timeIntervalSince1970: (floor(date.timeIntervalSince1970 / step) + 1) * step)
+    }
+
+    private static func previousHalfHour(before date: Date) -> Date {
+        let step: TimeInterval = 30 * 60
+        return Date(timeIntervalSince1970: (ceil(date.timeIntervalSince1970 / step) - 1) * step)
     }
 
     private func handleList(_ command: RemoteCommand, selectedID: String) {
@@ -588,11 +842,15 @@ final class AppModel: ObservableObject {
                 overlay = .none
                 showSettings = true
             }
+        case .pageUp, .pageDown:
+            let step = command == .pageUp ? -8 : 8
+            let nextIndex = min(max(currentIndex + step, 0), items.count - 1)
+            overlay = .channelList(selectedID: items[nextIndex].id)
         case .playPause:
             player.togglePause()
         case .back:
             overlay = .none
-        case .left, .right:
+        case .left, .right, .swipeUp, .swipeDown:
             break
         case .digit(let digit):
             enterDigit(digit, into: "", key: 0)
@@ -647,6 +905,7 @@ final class AppModel: ObservableObject {
             directTask?.cancel()
             overlay = .none
         case .digit(let digit): enterDigit(digit, into: digits, key: key)
+        case .pageUp, .pageDown, .swipeUp, .swipeDown: break
         }
     }
 
@@ -690,19 +949,6 @@ final class AppModel: ObservableObject {
     }
 
     // MARK: EPG-Hintergrundscan
-
-    func triggerEPGScan() {
-        guard let catalog else { return }
-        let activeFreq = player.channel?.tuning?.frequencyMHz
-        epgScanner.startScanIfNeeded(
-            lineup: lineup,
-            catalog: catalog,
-            epgStore: player.epgStore,
-            host: boxHost,
-            activeFrequency: activeFreq,
-            deadIDs: settings.deadChannelIDs
-        )
-    }
 
     // MARK: Senderplätze verwalten (Einstellungen)
 

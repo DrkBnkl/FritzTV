@@ -8,6 +8,7 @@ struct FritzTVApp: App {
         let memoryCapacity = 50 * 1024 * 1024
         let diskCapacity = 100 * 1024 * 1024
         URLCache.shared = URLCache(memoryCapacity: memoryCapacity, diskCapacity: diskCapacity)
+        MainThreadWatchdog.start()
     }
 
     var body: some Scene {
@@ -58,12 +59,21 @@ enum UI {
     }()
 
     static func s(_ value: CGFloat) -> CGFloat { value * scale }
+    /// Apple TV: nie kleiner als 23 pt (Mindestgröße laut Apple-Richtlinien, Standard 29 pt).
     static func font(_ size: CGFloat, _ weight: Font.Weight = .regular) -> Font {
+        #if os(tvOS)
+        .system(size: max(size * scale, minimumFontSize), weight: weight)
+        #else
         .system(size: size * scale, weight: weight)
+        #endif
     }
+
+    static let minimumFontSize: CGFloat = 23
 
     static let text = Color(red: 0.95, green: 0.96, blue: 0.97)
     static let secondary = Color(red: 0.66, green: 0.69, blue: 0.74)
-    static let panel = Color(red: 0.07, green: 0.08, blue: 0.10).opacity(0.9)
-    static let accent = Color(red: 1.0, green: 0.72, blue: 0.42)
+    static let panel = Color(red: 0.04, green: 0.08, blue: 0.15).opacity(0.9)
+    /// Abdunklung unter durchscheinenden Tafeln über dem Video (Lesbarkeit bei hellem Bild).
+    static let panelDim = Color.black.opacity(0.35)
+    static let accent = Color(red: 0.50, green: 0.78, blue: 1.0)
 }

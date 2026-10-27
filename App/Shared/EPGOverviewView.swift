@@ -1,593 +1,642 @@
 import SwiftUI
 import FritzTVKit
 
-/// EPG-Programmübersicht mit horizontaler Timeline (Zeitstrahl) über alle Sender.
+/// EPG-Programmübersicht mit Zeitstrahl über alle Sender.
+///
+/// Bedienung (über `AppModel.handleEPG`): Hoch/Runter wählt den Sender, Links/Rechts springt im
+/// Zeitstrahl von Sendung zu Sendung, Klick schaltet um.
+///
+/// Leistung auf dem Apple TV: Es gibt keine ScrollView. Gezeichnet werden nur die sichtbaren
+/// Zeilen (plus Rand); sie liegen an festen Positionen und werden beim Blättern nur per Versatz
+/// verschoben – das ist eine reine Transformation und läuft flüssig. Die Kacheln werden nur bei
+/// neuen Programmdaten berechnet (`rowItems`), die Zeilen sind `Equatable`. Die Auswahl liegt in
+/// einem eigenen Objekt (`EPGNavigation`), damit nicht die ganze App neu gezeichnet wird.
 struct EPGOverviewView: View {
     @ObservedObject var model: AppModel
     @ObservedObject var player: PlayerController
-
-    @State private var horizontalProxy: ScrollViewProxy?
+    /// Eigene Beobachtung: Änderungen am Suchlauf sollen die Kopfzeile sofort aktualisieren.
+    @ObservedObject private var scanner: BackgroundEPGScanner
+    @ObservedObject private var nav: EPGNavigation
+    /// „Meine Sender“ (Sterne, Detailtafel) sollen sofort aktualisiert werden.
+    @ObservedObject private var settings: AppSettings
 
     // Timeline-Konfiguration; alle Maße über EPGMetrics (auf dem Apple TV deutlich größer)
     private let pointsPerMinute: CGFloat = EPGMetrics.s(4.0)
     private let totalHours: Int = 24
     private let rowHeight: CGFloat = EPGMetrics.s(68)
-    private let rulerHeight: CGFloat = EPGMetrics.s(48)
+    private let rulerHeight: CGFloat = EPGMetrics.s(40)
     private let channelColumnWidth: CGFloat = EPGMetrics.s(250)
 
-    init(model: AppModel, player: PlayerController, scanner: BackgroundEPGScanner? = nil) {
+    /// Beginn des Zeitstrahls (volle Stunde, mindestens 30 Minuten vor jetzt).
+    @State private var windowStart: Date = EPGOverviewView.makeWindowStart()
+    /// Kacheln je Senderplatz, neu berechnet nur bei neuen Programmdaten.
+    @State private var rowItems: [Int: [TimelineItem]] = [:]
+    /// Erste sichtbare Zeile (Index in `entries`).
+    @State private var topIndex = 0
+    /// Anzahl ganz sichtbarer Zeilen, aus der Höhe des Rasters.
+    @State private var visibleRows = 6
+    @State private var lastRebuild = Date.distantPast
+    @State private var rebuildPending = false
+
+    init(model: AppModel, player: PlayerController) {
         self.model = model
         self.player = player
+        self.scanner = model.epgScanner
+        self.nav = model.epgNav
+        self.settings = model.settings
+    }
+
+    /// Angezeigte Sender (nach Filter, siehe `AppModel.epgEntries`).
+    private var entries: [LineupEntry] {
+        model.epgEntries
     }
 
     /// Platznummer des ausgewählten Senders (Auswahl liegt im Modell, siehe `AppModel.handleEPG`).
     private var selectedChannelNumber: Int? {
-        entries.first { AppModel.key($0) == model.epgSelectedKey }?.number
+        entries.first { AppModel.key($0) == nav.selectedKey }?.number
     }
 
-    private var entries: [LineupEntry] {
-        model.lineup?.entries ?? []
-    }
-
-    private var timelineStart: Date {
-        let now = Date()
-        let thirtyMinsAgo = now.addingTimeInterval(-30 * 60)
-        var comps = Calendar.current.dateComponents([.year, .month, .day, .hour], from: thirtyMinsAgo)
-        comps.minute = 0
-        comps.second = 0
-        return Calendar.current.date(from: comps) ?? now
-    }
-
-    private var timelineEnd: Date {
-        timelineStart.addingTimeInterval(Double(totalHours) * 3600)
+    private var selectedIndex: Int {
+        entries.firstIndex { AppModel.key($0) == nav.selectedKey } ?? 0
     }
 
     private var totalTimelineWidth: CGFloat {
         CGFloat(totalHours * 60) * pointsPerMinute
     }
 
-    private var headerDateString: String {
+    private func x(for date: Date) -> CGFloat {
+        CGFloat(date.timeIntervalSince(windowStart) / 60) * pointsPerMinute
+    }
+
+    /// Zeitpunkt, um den es geht: der Cursor (Links/Rechts) oder jetzt.
+    private var focusTime: Date { nav.cursorTime ?? Date() }
+
+    /// Waagerechte Verschiebung: Die fokussierte Zeit steht eine halbe Stunde vom linken Rand.
+    private var horizontalOffset: CGFloat {
+        max(0, min(x(for: focusTime) - 30 * pointsPerMinute, totalTimelineWidth - 600))
+    }
+
+    static func makeWindowStart(now: Date = Date()) -> Date {
+        let earlier = now.addingTimeInterval(-30 * 60)
+        var comps = Calendar.current.dateComponents([.year, .month, .day, .hour], from: earlier)
+        comps.minute = 0
+        comps.second = 0
+        return Calendar.current.date(from: comps) ?? earlier
+    }
+
+    private static let headerFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "de_DE")
         formatter.dateFormat = "EEEE, d. MMMM · HH:mm 'Uhr'"
-        return formatter.string(from: Date())
-    }
+        return formatter
+    }()
+
+    private var headerDateString: String { Self.headerFormatter.string(from: Date()) }
 
     var body: some View {
         VStack(spacing: 0) {
             headerBar
-            Divider().background(Color.white.opacity(0.15))
+            Rectangle().fill(EPGColors.line).frame(height: 1)
             timelineBody
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color(red: 0.05, green: 0.05, blue: 0.07).ignoresSafeArea())
+        .overlay {
+            if let detail = nav.detail {
+                EPGDetailPanel(detail: detail,
+                               channelName: model.lineup?.entries.first { AppModel.key($0) == detail.key }?.group.displayName ?? "",
+                               actions: model.epgDetailActions(for: detail))
+                    .transition(.opacity)
+            }
+        }
+        .animation(.easeOut(duration: 0.2), value: nav.detail)
+        .background(EPGColors.background.ignoresSafeArea())
         // Keine eigene Fokus- oder Tastensteuerung: Fernbedienung und Tastatur laufen wie bei der
         // Senderliste über `AppModel.handle`. Zwei konkurrierende Steuerungen führten dazu, dass
         // Hoch/Runter im Hintergrund den Live-Sender wechselte statt die Auswahl zu bewegen.
         .preferredColorScheme(.dark)
+        .onAppear {
+            rebuildRows()
+            topIndex = clampedTop(for: selectedIndex, current: selectedIndex - 2)
+        }
+        .onChange(of: player.epgRevision) { _, _ in scheduleRebuild() }
+        .onChange(of: model.lineup?.entries.count) { _, _ in rebuildRows() }
+        .onChange(of: nav.filter) { _, _ in
+            topIndex = clampedTop(for: selectedIndex, current: 0)
+        }
+        .onChange(of: nav.selectedKey) { _, _ in
+            DebugLog.log("Übersicht: Auswahl geändert")
+            let newTop = clampedTop(for: selectedIndex, current: topIndex)
+            if newTop != topIndex {
+                withAnimation(.easeOut(duration: 0.18)) { topIndex = newTop }
+            }
+        }
     }
 
-    // MARK: - Header Bar
-
-    private var selectedEntry: LineupEntry? {
-        entries.first { AppModel.key($0) == model.epgSelectedKey } ?? model.currentEntry
+    /// Die Auswahl bleibt in der Mitte stehen, die Liste rollt bei jedem Schritt mit
+    /// (nur am Anfang und Ende der Liste wandert die Auswahl).
+    private func clampedTop(for index: Int, current: Int) -> Int {
+        let count = entries.count
+        let visible = max(visibleRows, 3)
+        let top = index - (visible - 1) / 2
+        return max(0, min(top, max(0, count - visible)))
     }
 
+    /// Neue Programmdaten kommen in schneller Folge: höchstens alle 3 Sekunden neu berechnen.
+    private func scheduleRebuild() {
+        let wait = 3 - Date().timeIntervalSince(lastRebuild)
+        if wait <= 0 {
+            rebuildRows()
+        } else if !rebuildPending {
+            rebuildPending = true
+            DispatchQueue.main.asyncAfter(deadline: .now() + wait) {
+                rebuildPending = false
+                rebuildRows()
+            }
+        }
+    }
+
+    private func rebuildRows() {
+        let began = Date()
+        defer { DebugLog.log("Übersicht: Zeilen berechnet in \(Int(Date().timeIntervalSince(began) * 1000)) ms") }
+        let start = Self.makeWindowStart()
+        let end = start.addingTimeInterval(Double(totalHours) * 3600)
+        var items: [Int: [TimelineItem]] = [:]
+        // Alle Sender berechnen, damit ein Filterwechsel ohne Neuberechnung auskommt.
+        for entry in model.lineup?.entries ?? [] {
+            items[entry.number] = buildTimelineItems(for: entry, start: start, end: end)
+        }
+        windowStart = start
+        rowItems = items
+        lastRebuild = Date()
+    }
+
+    // MARK: - Kopfzeile
+
+    /// Schmale Kopfzeile: links Datum, Uhrzeit und Bedienhinweis, rechts das kleine Live-Bild.
+    /// Darunter beginnt direkt das Raster.
     private var headerBar: some View {
-        HStack(alignment: .top, spacing: EPGMetrics.s(28)) {
+        HStack(alignment: .center, spacing: EPGMetrics.s(24)) {
             VStack(alignment: .leading, spacing: EPGMetrics.s(10)) {
-                HStack(alignment: .firstTextBaseline, spacing: 14) {
-                    Text("Programmübersicht")
-                        .font(EPGMetrics.font(30, .heavy))
-                        .foregroundStyle(.white)
-                        .lineLimit(1)
+                Text(headerDateString)
+                    .font(EPGMetrics.font(20, .bold))
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
 
-                    Text(headerDateString)
-                        .font(EPGMetrics.font(18, .medium))
-                        .foregroundStyle(Color.white.opacity(0.65))
-                        .lineLimit(1)
+                if scanner.isScanning {
+                    HStack(spacing: 6) {
+                        #if os(macOS)
+                        ProgressView().controlSize(.small)
+                        #else
+                        // `controlSize` gibt es auf tvOS nicht.
+                        ProgressView().scaleEffect(0.6)
+                        #endif
+                        Text("Lade Programmdaten\(scanner.currentScanningChannel.map { " (\($0))" } ?? "") … · Live-Bild pausiert")
+                            .font(EPGMetrics.font(14, .regular))
+                            .foregroundStyle(EPGColors.secondaryText)
+                    }
                 }
 
-                selectedProgramInfo
-
-                Spacer(minLength: 0)
-
-                HStack(spacing: 16) {
-                    if model.epgScanner.isScanning, let ch = model.epgScanner.currentScanningChannel {
-                        HStack(spacing: 6) {
-                            #if os(macOS)
-                            ProgressView().controlSize(.small)
-                            #else
-                            // `controlSize` gibt es auf tvOS nicht.
-                            ProgressView().scaleEffect(0.6)
-                            #endif
-                            Text("Lade Programmdaten (\(ch)) …")
-                                .font(EPGMetrics.font(15, .regular))
-                                .foregroundStyle(Color.white.opacity(0.65))
-                        }
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 5)
-                        .background(Color.white.opacity(0.08), in: Capsule())
+                #if os(macOS)
+                // Knöpfe nur für die Maus; auf dem Apple TV: Zurück schließt.
+                HStack(spacing: 12) {
+                    headerButton("Jetzt") {
+                        withAnimation(.easeInOut(duration: 0.25)) { model.epgCursorTime = nil }
                     }
-
-                    Spacer(minLength: 0)
-
-                    #if os(macOS)
-                    // Knöpfe nur für die Maus; auf dem Apple TV: Zurück schließt.
-                    Button {
-                        withAnimation(.easeInOut(duration: 0.25)) {
-                            horizontalProxy?.scrollTo("timeline_now", anchor: .leading)
-                        }
-                    } label: {
-                        HStack(spacing: 7) {
-                            Circle().fill(Color.red).frame(width: 8, height: 8)
-                            Text("Jetzt")
-                                .font(EPGMetrics.font(17, .semibold))
-                        }
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 8)
-                        .background(Color.white.opacity(0.14), in: Capsule())
-                    }
-                    .buttonStyle(.plain)
-                    .focusable(false)
-
-                    Button {
-                        close()
-                    } label: {
-                        HStack(spacing: 6) {
-                            Image(systemName: "xmark")
-                                .font(EPGMetrics.font(13, .bold))
-                            Text("Schließen")
-                                .font(EPGMetrics.font(15, .medium))
-                        }
-                        .foregroundStyle(Color.white.opacity(0.85))
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 8)
-                        .background(Color.white.opacity(0.12), in: Capsule())
-                    }
-                    .buttonStyle(.plain)
-                    .focusable(false)
-                    .help("Programmübersicht schließen (Esc)")
-                    #else
-                    Text("\(UI.upDown): Sender wählen · \(UI.select): umschalten · \(UI.back): schließen")
-                        .font(EPGMetrics.font(15, .medium))
-                        .foregroundStyle(Color.white.opacity(0.55))
-                    #endif
+                    headerButton("Schließen") { model.closeEPGOverview() }
+                        .help("Programmübersicht schließen (Esc)")
                 }
+                #else
+                filterBar
+                Text("\(UI.upDown): Sender · \(UI.leftRight): spätere Sendungen · \(UI.select): umschalten bzw. Details · \(UI.playPause): Filter · \(UI.back): schließen")
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+                    .font(EPGMetrics.font(14, .medium))
+                    .foregroundStyle(EPGColors.tertiaryText)
+                #endif
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
             livePreview
         }
         .padding(.horizontal, EPGMetrics.s(22))
-        .padding(.vertical, EPGMetrics.s(14))
-        .background(Color(red: 0.08, green: 0.08, blue: 0.10))
+        .padding(.vertical, EPGMetrics.s(10))
+        .background(EPGColors.header)
     }
 
-    /// Jetzt und Danach auf dem ausgewählten Sender.
-    @ViewBuilder private var selectedProgramInfo: some View {
-        let _ = player.epgRevision
-        if let entry = selectedEntry {
-            let names = entry.group.epgNames
-            let current = player.epgStore.currentProgram(forChannelNames: names)
-            let next = player.epgStore.nextProgram(forChannelNames: names)
-            VStack(alignment: .leading, spacing: EPGMetrics.s(6)) {
-                Text("\(entry.number) · \(entry.group.displayName)")
-                    .font(EPGMetrics.font(18, .bold))
-                    .foregroundStyle(UI.accent)
-                if let current {
-                    Text("\(Self.formatTime(current.startDate)) – \(Self.formatTime(current.endDate))  \(current.title)")
-                        .font(EPGMetrics.font(22, .bold))
-                        .foregroundStyle(.white)
-                        .lineLimit(1)
-                    if let detail = current.subtitle ?? current.description, !detail.isEmpty {
-                        Text(detail)
-                            .font(EPGMetrics.font(16))
-                            .foregroundStyle(Color.white.opacity(0.7))
-                            .lineLimit(2)
-                    }
-                } else {
-                    Text("Keine Programmdaten empfangen")
-                        .font(EPGMetrics.font(18))
-                        .foregroundStyle(Color.white.opacity(0.5))
-                }
-                if let next {
-                    Text("Danach ab \(Self.formatTime(next.startDate)): \(next.title)")
-                        .font(EPGMetrics.font(16, .medium))
-                        .foregroundStyle(Color.white.opacity(0.6))
-                        .lineLimit(1)
-                }
+    /// Filter (Play/Pause schaltet weiter); der aktive ist hervorgehoben.
+    private var filterBar: some View {
+        HStack(spacing: EPGMetrics.s(8)) {
+            ForEach(EPGFilter.cycle, id: \.self) { filter in
+                let active = filter == nav.filter
+                Text(filter.title)
+                    .font(EPGMetrics.font(14, active ? .bold : .medium))
+                    .foregroundStyle(active ? EPGColors.background : EPGColors.secondaryText)
+                    .padding(.horizontal, EPGMetrics.s(10))
+                    .padding(.vertical, EPGMetrics.s(4))
+                    .background(active ? EPGColors.accent : EPGColors.cell, in: Capsule())
+                    .lineLimit(1)
+                    .fixedSize()
             }
         }
     }
+
+    #if os(macOS)
+    private func headerButton(_ title: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(EPGMetrics.font(15, .medium))
+                .foregroundStyle(.white)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 8)
+                .background(EPGColors.cell, in: Capsule())
+        }
+        .buttonStyle(.plain)
+        .focusable(false)
+    }
+    #endif
 
     /// Platzhalter für das Live-Bild: Die Bildfläche selbst liegt in `RootView` und wird
-    /// über `EPGPreviewFrameKey` genau hierher verschoben.
+    /// über `EPGPreviewFrameKey` verkleinert genau hierher gelegt.
     private var livePreview: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            RoundedRectangle(cornerRadius: 12)
-                .fill(Color.black)
-                .frame(width: EPGMetrics.previewSize.width, height: EPGMetrics.previewSize.height)
-                .background(GeometryReader { geo in
-                    Color.clear.preference(key: EPGPreviewFrameKey.self, value: geo.frame(in: .global))
-                })
-            HStack(spacing: 6) {
-                Circle().fill(Color.red).frame(width: 8, height: 8)
-                Text("LIVE · \(model.currentEntry?.group.displayName ?? "")")
-                    .font(EPGMetrics.font(14, .bold))
-                    .foregroundStyle(Color.white.opacity(0.8))
-                    .lineLimit(1)
-            }
-        }
+        RoundedRectangle(cornerRadius: 10)
+            .fill(Color.black)
+            .frame(width: EPGMetrics.previewSize.width, height: EPGMetrics.previewSize.height)
+            .background(GeometryReader { geo in
+                Color.clear.preference(key: EPGPreviewFrameKey.self, value: geo.frame(in: .global))
+            })
     }
 
-    // MARK: - Timeline Body (Vertical + Horizontal Scroll)
+    // MARK: - Raster
 
     private var timelineBody: some View {
-        let _ = player.epgRevision
         let now = Date()
-        let start = timelineStart
-        let end = timelineEnd
+        let focus = focusTime
+        let offset = horizontalOffset
+        let all = entries
+        let selected = selectedChannelNumber
+        let top = topIndex
+        let first = max(0, top - 2)
+        let last = min(all.count, top + visibleRows + 3)
 
-        return ScrollViewReader { verticalProxy in
-            ScrollView(.vertical, showsIndicators: true) {
-                HStack(alignment: .top, spacing: 0) {
-                    // Linke fixierte Senderspalte
-                    VStack(alignment: .leading, spacing: 0) {
-                        // Eckbereich in Höhe des Zeitstrahls
-                        HStack(spacing: 8) {
-                            Image(systemName: "tv")
-                                .font(EPGMetrics.font(15, .bold))
-                                .foregroundStyle(Color.white.opacity(0.55))
-                            Text("Sender")
-                                .font(EPGMetrics.font(16, .bold))
-                                .foregroundStyle(Color.white.opacity(0.55))
-                        }
-                        .padding(.horizontal, 14)
-                        .frame(width: channelColumnWidth, height: rulerHeight, alignment: .leading)
-                        .background(Color(red: 0.09, green: 0.09, blue: 0.12))
-
-                        Divider().background(Color.white.opacity(0.12))
-
-                        ForEach(entries) { entry in
-                            channelHeaderCell(entry)
-                                .id("channel_\(entry.number)")
-                            Divider().background(Color.white.opacity(0.06))
-                        }
+        return GeometryReader { geo in
+            let timelineWidth = max(0, geo.size.width - channelColumnWidth)
+            let rowsHeight = max(0, geo.size.height - rulerHeight)
+            VStack(spacing: 0) {
+                rulerRow(now: now, offset: offset, timelineWidth: timelineWidth)
+                ZStack(alignment: .topLeading) {
+                    ForEach(first..<max(first, last), id: \.self) { index in
+                        let entry = all[index]
+                        let isSelected = entry.number == selected
+                        let items = rowItems[entry.number] ?? []
+                        row(entry: entry, items: items, isSelected: isSelected,
+                            focus: focus, now: now, offset: offset, timelineWidth: timelineWidth)
+                            .offset(y: CGFloat(index - top) * rowHeight)
                     }
-                    .frame(width: channelColumnWidth)
-                    .background(Color(red: 0.07, green: 0.07, blue: 0.09))
-
-                    Divider().background(Color.white.opacity(0.18))
-
-                    // Rechter horizontal scrollbarer Zeitstrahl
-                    ScrollViewReader { hProxy in
-                        ScrollView(.horizontal, showsIndicators: true) {
-                            ZStack(alignment: .topLeading) {
-                                // Hintergrund-Gitter (alle 30 Min)
-                                timelineGridBackground
-
-                                // Vertikale "Jetzt"-Linie
-                                nowIndicator(in: now)
-
-                                // Inhalt: Zeitleiste oben + Zeilen pro Sender
-                                VStack(alignment: .leading, spacing: 0) {
-                                    timeRuler
-                                        .frame(height: rulerHeight)
-
-                                    Divider().background(Color.white.opacity(0.12))
-
-                                    ForEach(entries) { entry in
-                                        let items = buildTimelineItems(for: entry, start: start, end: end)
-                                        channelTimelineRow(entry: entry, items: items, now: now)
-                                            .frame(height: rowHeight)
-                                        Divider().background(Color.white.opacity(0.06))
-                                    }
-                                }
-                            }
-                            .frame(width: totalTimelineWidth)
-                        }
-                        .onAppear {
-                            self.horizontalProxy = hProxy
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-                                withAnimation(.easeOut(duration: 0.25)) {
-                                    hProxy.scrollTo("timeline_now", anchor: .leading)
-                                }
-                            }
-                        }
+                    nowLine(now: now, offset: offset)
+                    if all.isEmpty {
+                        Text(nav.filter == .favorites
+                             ? "Noch keine „Meine Sender“ – in den Details einer Sendung oder unter Einstellungen › Sendersortierung hinzufügen."
+                             : "Gerade keine Sendungen in „\(nav.filter.title)“. \(UI.playPause): anderer Filter.")
+                            .font(EPGMetrics.font(16, .medium))
+                            .foregroundStyle(EPGColors.secondaryText)
+                            .padding(EPGMetrics.s(24))
                     }
                 }
+                .frame(width: geo.size.width, height: rowsHeight, alignment: .topLeading)
+                .clipped()
             }
-            .onChange(of: model.epgSelectedKey) { _, _ in
-                if let newNum = selectedChannelNumber {
-                    withAnimation(.easeOut(duration: 0.15)) {
-                        verticalProxy.scrollTo("channel_\(newNum)", anchor: .center)
-                    }
-                }
-            }
-            .onAppear {
-                let num = selectedChannelNumber ?? model.currentNumber
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-                    verticalProxy.scrollTo("channel_\(num)", anchor: .center)
-                }
-            }
+            .frame(width: geo.size.width, height: geo.size.height, alignment: .topLeading)
+            .onAppear { updateVisibleRows(height: rowsHeight) }
+            .onChange(of: rowsHeight) { _, height in updateVisibleRows(height: height) }
+        }
+        .animation(.easeInOut(duration: 0.25), value: nav.cursorTime)
+    }
+
+    private func updateVisibleRows(height: CGFloat) {
+        let rows = max(3, Int(height / rowHeight))
+        nav.pageSize = rows
+        if rows != visibleRows {
+            visibleRows = rows
+            topIndex = clampedTop(for: selectedIndex, current: topIndex)
         }
     }
 
-    // MARK: - Channel Header Cell
+    private func row(entry: LineupEntry, items: [TimelineItem], isSelected: Bool,
+                     focus: Date, now: Date, offset: CGFloat, timelineWidth: CGFloat) -> some View {
+        HStack(spacing: 0) {
+            ChannelCell(number: entry.number,
+                        name: entry.group.displayName,
+                        isCurrent: entry.number == model.currentNumber,
+                        isSelected: isSelected,
+                        isFavorite: settings.favoriteKeys.contains(AppModel.key(entry)),
+                        width: channelColumnWidth,
+                        height: rowHeight)
+                .equatable()
 
-    private func channelHeaderCell(_ entry: LineupEntry) -> some View {
-        let isCurrent = entry.number == model.currentNumber
-        let isSelected = selectedChannelNumber == entry.number
+            // Nur der sichtbare Ausschnitt wird gezeichnet: Ein 24-Stunden-Streifen (über 9000 pt
+            // breit) je Zeile kostete auf dem Apple TV bei jeder Änderung Sekunden.
+            TimelineRow(items: visibleItems(items, offset: offset, width: timelineWidth),
+                        focusedID: isSelected ? Self.programID(in: items, at: focus) : nil,
+                        liveID: Self.programID(in: items, at: now),
+                        isSelected: isSelected,
+                        progress: Self.liveProgress(in: items, at: now),
+                        width: timelineWidth,
+                        height: rowHeight)
+                .equatable()
+                .frame(width: timelineWidth, height: rowHeight, alignment: .leading)
+                .clipped()
+        }
+        .frame(width: channelColumnWidth + timelineWidth, height: rowHeight, alignment: .leading)
+        .overlay(alignment: .bottom) {
+            Rectangle().fill(EPGColors.line.opacity(0.5)).frame(height: 1)
+        }
+        .contentShape(Rectangle())
+        .onTapGesture { model.tuneFromEPG(key: AppModel.key(entry)) }
+    }
 
-        return HStack(spacing: 10) {
-            Text("\(entry.number)")
+    /// Kacheln im sichtbaren Ausschnitt, Lage relativ zu dessen linkem Rand.
+    private func visibleItems(_ items: [TimelineItem], offset: CGFloat, width: CGFloat) -> [TimelineItem] {
+        items.compactMap { item in
+            let start = max(item.x, offset)
+            let end = min(item.x + item.width, offset + width)
+            guard end > start + 1 else { return nil }
+            return TimelineItem(id: item.id, program: item.program, x: start - offset, width: end - start)
+        }
+    }
+
+    /// Zeitleiste oben; bleibt beim senkrechten Blättern stehen.
+    private func rulerRow(now: Date, offset: CGFloat, timelineWidth: CGFloat) -> some View {
+        HStack(spacing: 0) {
+            HStack(spacing: 8) {
+                if let cursor = nav.cursorTime {
+                    Text("ab \(Self.formatTime(cursor))")
+                        .font(EPGMetrics.font(15, .bold))
+                        .foregroundStyle(EPGColors.accent)
+                } else {
+                    Text("Jetzt")
+                        .font(EPGMetrics.font(15, .bold))
+                        .foregroundStyle(EPGColors.secondaryText)
+                }
+            }
+            .padding(.horizontal, 14)
+            .frame(width: channelColumnWidth, height: rulerHeight, alignment: .leading)
+            .background(EPGColors.ruler)
+
+            TimeRuler(start: windowStart.addingTimeInterval(Double(offset / pointsPerMinute) * 60),
+                      width: timelineWidth, pointsPerMinute: pointsPerMinute, height: rulerHeight)
+                .equatable()
+                .frame(width: timelineWidth, height: rulerHeight, alignment: .leading)
+                .clipped()
+                .background(EPGColors.ruler)
+        }
+        .frame(height: rulerHeight)
+        .overlay(alignment: .bottom) { Rectangle().fill(EPGColors.line).frame(height: 1) }
+    }
+
+    /// Senkrechte Linie für „jetzt“ über alle Zeilen.
+    @ViewBuilder
+    private func nowLine(now: Date, offset: CGFloat) -> some View {
+        let xPos = channelColumnWidth + x(for: now) - offset
+        if xPos >= channelColumnWidth {
+            Rectangle()
+                .fill(EPGColors.nowLine)
+                .frame(width: 2)
+                .frame(maxHeight: .infinity)
+                .offset(x: xPos - 1)
+                .allowsHitTesting(false)
+        }
+    }
+
+    // MARK: - Kacheln berechnen
+
+    struct TimelineItem: Identifiable, Equatable {
+        let id: String
+        let program: EPGProgram?
+        let x: CGFloat
+        let width: CGFloat
+
+        static func == (lhs: TimelineItem, rhs: TimelineItem) -> Bool {
+            lhs.id == rhs.id && lhs.x == rhs.x && lhs.width == rhs.width
+                && lhs.program?.title == rhs.program?.title
+        }
+    }
+
+    private func buildTimelineItems(for entry: LineupEntry, start: Date, end: Date) -> [TimelineItem] {
+        let schedule = player.epgStore.schedule(forChannelNames: entry.group.epgNames)
+        let programs = (schedule?.programs ?? []).sorted { $0.startDate < $1.startDate }
+        var items: [TimelineItem] = []
+        var cursor = start
+        for prog in programs {
+            guard prog.endDate > start else { continue }
+            guard prog.startDate < end else { break }
+            let from = max(prog.startDate, cursor)
+            let to = min(prog.endDate, end)
+            guard to > from else { continue }
+            let xPos = CGFloat(from.timeIntervalSince(start) / 60) * pointsPerMinute
+            let width = max(EPGMetrics.s(36), CGFloat(to.timeIntervalSince(from) / 60) * pointsPerMinute - 3)
+            items.append(TimelineItem(id: prog.id, program: prog, x: xPos, width: width))
+            cursor = to
+        }
+        return items
+    }
+
+    /// Kachel, die den Zeitpunkt enthält.
+    static func programID(in items: [TimelineItem], at date: Date) -> String? {
+        items.first { item in
+            guard let p = item.program else { return false }
+            return p.startDate <= date && date < p.endDate
+        }?.id
+    }
+
+    /// Fortschritt der laufenden Sendung, auf 2 % gerundet (seltener neu zeichnen).
+    static func liveProgress(in items: [TimelineItem], at date: Date) -> Double {
+        guard let id = programID(in: items, at: date),
+              let p = items.first(where: { $0.id == id })?.program else { return 0 }
+        return (p.progress(at: date) * 50).rounded() / 50
+    }
+
+    static func formatTime(_ date: Date) -> String {
+        UI.timeFormatter.string(from: date)
+    }
+}
+
+// MARK: - Farben
+
+/// Blautöne der Programmübersicht.
+enum EPGColors {
+    static let background = Color(red: 0.03, green: 0.06, blue: 0.12)
+    static let header = Color(red: 0.05, green: 0.09, blue: 0.17)
+    static let column = Color(red: 0.04, green: 0.08, blue: 0.15)
+    static let ruler = Color(red: 0.06, green: 0.11, blue: 0.21)
+    static let line = Color(red: 0.25, green: 0.38, blue: 0.60).opacity(0.45)
+    static let cell = Color(red: 0.13, green: 0.22, blue: 0.40).opacity(0.55)
+    static let cellBorder = Color(red: 0.45, green: 0.62, blue: 0.95).opacity(0.18)
+    static let liveCell = Color(red: 0.13, green: 0.33, blue: 0.66).opacity(0.75)
+    static let focusCell = Color(red: 0.22, green: 0.50, blue: 0.95)
+    static let selectedRow = Color(red: 0.30, green: 0.50, blue: 0.90).opacity(0.16)
+    static let accent = Color(red: 0.50, green: 0.78, blue: 1.0)
+    static let nowLine = Color(red: 0.55, green: 0.85, blue: 1.0)
+    static let secondaryText = Color(red: 0.70, green: 0.78, blue: 0.90)
+    static let tertiaryText = Color(red: 0.68, green: 0.75, blue: 0.86)
+}
+
+// MARK: - Zeilenbausteine
+
+private struct ChannelCell: View, Equatable {
+    let number: Int
+    let name: String
+    let isCurrent: Bool
+    let isSelected: Bool
+    let isFavorite: Bool
+    let width: CGFloat
+    let height: CGFloat
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Text("\(number)")
                 .font(EPGMetrics.font(18, .bold))
-                .foregroundStyle(isCurrent ? UI.accent : Color.white.opacity(0.5))
+                .foregroundStyle(isCurrent ? EPGColors.accent : EPGColors.tertiaryText)
                 .frame(width: EPGMetrics.s(34), alignment: .trailing)
 
-            ChannelLogoView(channelName: entry.group.displayName, height: EPGMetrics.s(26), maxWidth: EPGMetrics.s(46))
+            ChannelLogoView(channelName: name, height: EPGMetrics.s(26), maxWidth: EPGMetrics.s(46))
 
-            Text(entry.group.displayName)
+            Text(name)
                 .font(EPGMetrics.font(17, .semibold))
-                .foregroundStyle(isCurrent ? UI.accent : Color.white)
+                .foregroundStyle(isCurrent ? EPGColors.accent : Color.white)
                 .lineLimit(1)
+
+            if isFavorite {
+                Image(systemName: "star.fill")
+                    .font(EPGMetrics.font(12, .bold))
+                    .foregroundStyle(EPGColors.accent)
+            }
 
             Spacer(minLength: 0)
 
             if isCurrent {
                 Text("LÄUFT")
                     .font(EPGMetrics.font(11, .heavy))
-                    .foregroundStyle(Color.black)
+                    .foregroundStyle(EPGColors.background)
                     .padding(.horizontal, 6)
                     .padding(.vertical, 3)
-                    .background(UI.accent, in: Capsule())
+                    .background(EPGColors.accent, in: Capsule())
             }
         }
         .padding(.horizontal, EPGMetrics.s(12))
-        .frame(width: channelColumnWidth, height: rowHeight, alignment: .leading)
-        .background(
-            isSelected ? Color.white.opacity(0.14) : (isCurrent ? Color.white.opacity(0.06) : Color.clear)
-        )
-        .contentShape(Rectangle())
-        .onTapGesture {
-            model.tuneFromEPG(key: AppModel.key(entry))
-        }
-    }
-
-    // MARK: - Channel Timeline Row
-
-    private func channelTimelineRow(entry: LineupEntry, items: [TimelineItem], now: Date) -> some View {
-        HStack(spacing: 3) {
-            if items.isEmpty || (items.count == 1 && items[0].isGap) {
-                HStack {
-                    Text("Keine Programmdaten empfangen")
-                        .font(EPGMetrics.font(14, .regular))
-                        .foregroundStyle(Color.white.opacity(0.35))
-                        .padding(.horizontal, 14)
-                    Spacer()
-                }
-                .frame(width: EPGMetrics.s(340), height: rowHeight - 8)
-                .background(Color.white.opacity(0.03), in: RoundedRectangle(cornerRadius: 8))
-                Spacer(minLength: 0)
-            } else {
-                ForEach(items) { item in
-                    if let prog = item.program {
-                        ProgramBlockView(
-                            prog: prog,
-                            isLive: prog.isLive(at: now),
-                            width: item.width,
-                            now: now
-                        )
-                    } else {
-                        Spacer(minLength: item.width)
-                            .frame(width: item.width)
-                    }
-                }
+        .frame(width: width, height: height, alignment: .leading)
+        .background(isSelected ? EPGColors.focusCell.opacity(0.35) : EPGColors.column)
+        .overlay(alignment: .leading) {
+            if isSelected {
+                Rectangle().fill(EPGColors.accent).frame(width: 4)
             }
         }
-        .frame(width: totalTimelineWidth, height: rowHeight, alignment: .leading)
-        .background(entry.number == selectedChannelNumber ? Color.white.opacity(0.08) : Color.clear)
-        .contentShape(Rectangle())
-        .onTapGesture {
-            model.tuneFromEPG(key: AppModel.key(entry))
-        }
-    }
-
-    // MARK: - Time Ruler (Oberste Zeitleiste)
-
-    private var timeRuler: some View {
-        HStack(spacing: 0) {
-            ForEach(0..<(totalHours * 2), id: \.self) { halfHourIndex in
-                let minuteOffset = halfHourIndex * 30
-                let date = timelineStart.addingTimeInterval(Double(minuteOffset * 60))
-                let isFullHour = (halfHourIndex % 2 == 0)
-                let isMidnight = Calendar.current.component(.hour, from: date) == 0 && isFullHour
-
-                VStack(alignment: .leading, spacing: 3) {
-                    HStack(alignment: .center, spacing: 5) {
-                        Rectangle()
-                            .fill(isFullHour ? Color.white.opacity(0.75) : Color.white.opacity(0.35))
-                            .frame(width: isFullHour ? 2 : 1, height: isFullHour ? 14 : 8)
-
-                        if isMidnight {
-                            Text(dayName(from: date))
-                                .font(EPGMetrics.font(13, .bold))
-                                .foregroundStyle(UI.accent)
-                        }
-
-                        Text(Self.formatTime(date))
-                            .font(EPGMetrics.font(isFullHour ? 15 : 13, isFullHour ? .bold : .medium))
-                            .foregroundStyle(isFullHour ? Color.white.opacity(0.95) : Color.white.opacity(0.5))
-                    }
-                    Spacer(minLength: 0)
-                }
-                .padding(.top, 8)
-                .frame(width: 30 * pointsPerMinute, height: rulerHeight, alignment: .topLeading)
-            }
-        }
-        .background(Color(red: 0.09, green: 0.09, blue: 0.12))
-    }
-
-    // MARK: - Background Grid
-
-    private var timelineGridBackground: some View {
-        HStack(spacing: 0) {
-            ForEach(0..<(totalHours * 2), id: \.self) { halfHourIndex in
-                let isFullHour = (halfHourIndex % 2 == 0)
-                Rectangle()
-                    .fill(Color.clear)
-                    .frame(width: 30 * pointsPerMinute)
-                    .overlay(alignment: .leading) {
-                        Rectangle()
-                            .fill(isFullHour ? Color.white.opacity(0.07) : Color.white.opacity(0.03))
-                            .frame(width: 1)
-                    }
-            }
-        }
-    }
-
-    // MARK: - Now Indicator (Rote Zeitlinie)
-
-    @ViewBuilder
-    private func nowIndicator(in now: Date) -> some View {
-        let offsetMinutes = now.timeIntervalSince(timelineStart) / 60.0
-        let xPos = CGFloat(offsetMinutes) * pointsPerMinute
-        if xPos >= 0 && xPos <= totalTimelineWidth {
-            ZStack(alignment: .topLeading) {
-                // Rote vertikale Linie durch alle Senderzeilen
-                Rectangle()
-                    .fill(Color.red.opacity(0.92))
-                    .frame(width: 2)
-                    .frame(maxHeight: .infinity)
-                    .offset(x: xPos - 1)
-
-                // Roter Badge im Zeitstrahl-Kopf
-                HStack(spacing: 5) {
-                    Circle().fill(Color.white).frame(width: 6, height: 6)
-                    Text("JETZT \(Self.formatTime(now))")
-                        .font(EPGMetrics.font(12, .heavy))
-                        .foregroundStyle(.white)
-                }
-                .padding(.horizontal, 8)
-                .padding(.vertical, 4)
-                .background(Color.red, in: Capsule())
-                .shadow(color: .black.opacity(0.6), radius: 4)
-                .offset(x: max(0, xPos - EPGMetrics.s(40)), y: 4)
-                .id("timeline_now")
-            }
-        }
-    }
-
-    // MARK: - Timeline Item Computation
-
-    struct TimelineItem: Identifiable {
-        let id: String
-        let isGap: Bool
-        let program: EPGProgram?
-        let width: CGFloat
-    }
-
-    private func buildTimelineItems(for entry: LineupEntry, start: Date, end: Date) -> [TimelineItem] {
-        let schedule = player.epgStore.schedule(forChannelNames: entry.group.epgNames)
-        let rawPrograms = (schedule?.programs ?? []).sorted { $0.startDate < $1.startDate }
-
-        var items: [TimelineItem] = []
-        var cursor = start
-
-        for prog in rawPrograms {
-            guard prog.endDate > start else { continue }
-            guard prog.startDate < end else { break }
-
-            let effectiveStart = max(prog.startDate, cursor)
-            let effectiveEnd = min(prog.endDate, end)
-            guard effectiveEnd > effectiveStart else { continue }
-
-            // Lücke vor diesem Programm
-            if effectiveStart > cursor {
-                let gapSeconds = effectiveStart.timeIntervalSince(cursor)
-                let gapWidth = CGFloat(gapSeconds / 60.0) * pointsPerMinute
-                if gapWidth > 2 {
-                    items.append(TimelineItem(
-                        id: "gap_\(entry.number)_\(cursor.timeIntervalSince1970)",
-                        isGap: true,
-                        program: nil,
-                        width: gapWidth
-                    ))
-                }
-            }
-
-            // Programm-Kachel
-            let cardSeconds = effectiveEnd.timeIntervalSince(effectiveStart)
-            let cardWidth = max(EPGMetrics.s(36), CGFloat(cardSeconds / 60.0) * pointsPerMinute - 3)
-
-            items.append(TimelineItem(
-                id: prog.id,
-                isGap: false,
-                program: prog,
-                width: cardWidth
-            ))
-
-            cursor = effectiveEnd
-        }
-
-        if cursor < end {
-            let remainingSeconds = end.timeIntervalSince(cursor)
-            let remainingWidth = CGFloat(remainingSeconds / 60.0) * pointsPerMinute
-            if remainingWidth > 2 {
-                items.append(TimelineItem(
-                    id: "gap_end_\(entry.number)_\(cursor.timeIntervalSince1970)",
-                    isGap: true,
-                    program: nil,
-                    width: remainingWidth
-                ))
-            }
-        }
-
-        return items
-    }
-
-    private func close() {
-        model.closeEPGOverview()
-    }
-
-    static func formatTime(_ date: Date) -> String {
-        UI.timeFormatter.string(from: date)
-    }
-
-    private func dayName(from date: Date) -> String {
-        let f = DateFormatter()
-        f.locale = Locale(identifier: "de_DE")
-        f.dateFormat = "EEE"
-        return f.string(from: date)
     }
 }
 
-// MARK: - ProgramBlockView
+private struct TimelineRow: View, Equatable {
+    let items: [EPGOverviewView.TimelineItem]
+    let focusedID: String?
+    let liveID: String?
+    let isSelected: Bool
+    let progress: Double
+    let width: CGFloat
+    let height: CGFloat
+
+    var body: some View {
+        ZStack(alignment: .topLeading) {
+            if isSelected {
+                Rectangle().fill(EPGColors.selectedRow)
+            }
+            if items.isEmpty {
+                Text("Keine Programmdaten")
+                    .font(EPGMetrics.font(14, .regular))
+                    .foregroundStyle(EPGColors.tertiaryText)
+                    .padding(.horizontal, 14)
+                    .frame(height: height)
+            }
+            ForEach(items) { item in
+                if let prog = item.program {
+                    ProgramBlockView(prog: prog,
+                                     isLive: item.id == liveID,
+                                     isFocused: item.id == focusedID,
+                                     progress: item.id == liveID ? progress : 0,
+                                     width: item.width)
+                        .frame(height: height - 6)
+                        .offset(x: item.x, y: 3)
+                        .zIndex(item.id == focusedID ? 1 : 0)
+                }
+            }
+        }
+        .frame(width: width, height: height, alignment: .topLeading)
+    }
+}
+
+private struct TimeRuler: View, Equatable {
+    /// Zeit am linken Rand des sichtbaren Ausschnitts.
+    let start: Date
+    let width: CGFloat
+    let pointsPerMinute: CGFloat
+    let height: CGFloat
+
+    var body: some View {
+        let step: TimeInterval = 30 * 60
+        let first = Date(timeIntervalSince1970: floor(start.timeIntervalSince1970 / step) * step)
+        let count = Int(ceil(Double(width / pointsPerMinute) / 30)) + 2
+        ZStack(alignment: .topLeading) {
+            ForEach(0..<count, id: \.self) { index in
+                let date = first.addingTimeInterval(Double(index) * step)
+                let isFullHour = Calendar.current.component(.minute, from: date) == 0
+                HStack(spacing: 5) {
+                    Rectangle()
+                        .fill(Color.white.opacity(isFullHour ? 0.7 : 0.3))
+                        .frame(width: isFullHour ? 2 : 1, height: isFullHour ? 14 : 8)
+                    if isFullHour && Calendar.current.component(.hour, from: date) == 0 {
+                        Text(Self.dayName(date))
+                            .font(EPGMetrics.font(13, .bold))
+                            .foregroundStyle(EPGColors.accent)
+                    }
+                    Text(EPGOverviewView.formatTime(date))
+                        .font(EPGMetrics.font(isFullHour ? 15 : 13, isFullHour ? .bold : .medium))
+                        .foregroundStyle(Color.white.opacity(isFullHour ? 0.95 : 0.5))
+                }
+                .frame(width: 30 * pointsPerMinute, height: height, alignment: .leading)
+                .offset(x: CGFloat(date.timeIntervalSince(start) / 60) * pointsPerMinute)
+            }
+        }
+        .frame(width: width, height: height, alignment: .topLeading)
+    }
+
+    private static let dayFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "de_DE")
+        f.dateFormat = "EEE"
+        return f
+    }()
+
+    static func dayName(_ date: Date) -> String { dayFormatter.string(from: date) }
+}
 
 private struct ProgramBlockView: View {
     let prog: EPGProgram
     let isLive: Bool
+    let isFocused: Bool
+    let progress: Double
     let width: CGFloat
-    let now: Date
-    @State private var isHovered = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
             HStack(alignment: .center, spacing: 6) {
                 Text("\(EPGOverviewView.formatTime(prog.startDate)) – \(EPGOverviewView.formatTime(prog.endDate))")
                     .font(EPGMetrics.font(13, .bold))
-                    .foregroundStyle(isLive ? UI.accent : Color.white.opacity(0.7))
+                    .foregroundStyle(isFocused ? Color.white : (isLive ? EPGColors.accent : EPGColors.secondaryText))
                     .lineLimit(1)
-
                 if isLive {
                     Text("LIVE")
                         .font(EPGMetrics.font(11, .heavy))
-                        .foregroundStyle(Color.black)
+                        .foregroundStyle(EPGColors.background)
                         .padding(.horizontal, 5)
                         .padding(.vertical, 2)
-                        .background(UI.accent, in: Capsule())
+                        .background(EPGColors.accent, in: Capsule())
                 }
             }
 
@@ -596,19 +645,18 @@ private struct ProgramBlockView: View {
                 .foregroundStyle(Color.white)
                 .lineLimit(1)
 
-            if width >= EPGMetrics.s(140), let sub = prog.subtitle ?? prog.description, !sub.isEmpty {
+            if !isLive, width >= EPGMetrics.s(140), let sub = prog.subtitle ?? prog.description, !sub.isEmpty {
                 Text(sub)
                     .font(EPGMetrics.font(13, .regular))
-                    .foregroundStyle(Color.white.opacity(0.6))
+                    .foregroundStyle(isFocused ? Color.white.opacity(0.85) : EPGColors.tertiaryText)
                     .lineLimit(1)
             }
 
             if isLive {
                 GeometryReader { geo in
-                    let progress = prog.progress(at: now)
                     ZStack(alignment: .leading) {
                         Capsule().fill(Color.white.opacity(0.18))
-                        Capsule().fill(UI.accent)
+                        Capsule().fill(EPGColors.accent)
                             .frame(width: max(geo.size.width * progress, 5))
                     }
                 }
@@ -622,38 +670,27 @@ private struct ProgramBlockView: View {
         .frame(maxHeight: .infinity)
         .background(
             RoundedRectangle(cornerRadius: 8)
-                .fill(
-                    isHovered
-                        ? Color.white.opacity(0.2)
-                        : (isLive ? Color(red: 0.85, green: 0.42, blue: 0.05).opacity(0.28) : Color.white.opacity(0.07))
-                )
+                .fill(isFocused ? EPGColors.focusCell : (isLive ? EPGColors.liveCell : EPGColors.cell))
         )
         .overlay(
             RoundedRectangle(cornerRadius: 8)
-                .strokeBorder(
-                    isLive ? UI.accent.opacity(0.85) : (isHovered ? Color.white.opacity(0.45) : Color.white.opacity(0.12)),
-                    lineWidth: isLive ? 1.5 : 1
-                )
+                .strokeBorder(isFocused ? Color.white.opacity(0.9) : (isLive ? EPGColors.accent.opacity(0.7) : EPGColors.cellBorder),
+                              lineWidth: isFocused ? 2 : 1)
         )
-        .contentShape(Rectangle())
+        // Fokus wie im System: angewählte Kachel hebt sich leicht an.
+        .scaleEffect(isFocused ? 1.06 : 1)
+        .shadow(color: .black.opacity(isFocused ? 0.5 : 0), radius: isFocused ? 10 : 0, y: isFocused ? 5 : 0)
+        .animation(.easeOut(duration: 0.15), value: isFocused)
         #if os(macOS)
-        .onHover { hovering in
-            isHovered = hovering
-        }
         .help(tooltipText)
         #endif
     }
 
     private var tooltipText: String {
-        var lines: [String] = []
-        lines.append(prog.title)
-        lines.append("\(EPGOverviewView.formatTime(prog.startDate)) – \(EPGOverviewView.formatTime(prog.endDate)) (\(Int(prog.duration / 60)) Min.)")
-        if let sub = prog.subtitle, !sub.isEmpty {
-            lines.append(sub)
-        }
-        if let desc = prog.description, !desc.isEmpty, desc != prog.subtitle {
-            lines.append(desc)
-        }
+        var lines = [prog.title,
+                     "\(EPGOverviewView.formatTime(prog.startDate)) – \(EPGOverviewView.formatTime(prog.endDate)) (\(Int(prog.duration / 60)) Min.)"]
+        if let sub = prog.subtitle, !sub.isEmpty { lines.append(sub) }
+        if let desc = prog.description, !desc.isEmpty, desc != prog.subtitle { lines.append(desc) }
         return lines.joined(separator: "\n\n")
     }
 }
@@ -662,18 +699,121 @@ private struct ProgramBlockView: View {
 /// deutlich größer als auf dem Mac.
 enum EPGMetrics {
     #if os(tvOS)
-    // 1,6-fach: Sendungstitel ~26 pt, Zeilen ~110 pt hoch – lesbar, und es passen noch
-    // gut fünf Sender unter Kopfzeile und Vorschau.
     static let k: CGFloat = 1.6
-    static let previewSize = CGSize(width: 480, height: 270)
+    static let previewSize = CGSize(width: 384, height: 216)
     #else
     static let k: CGFloat = 0.85
-    static let previewSize = CGSize(width: 320, height: 180)
+    static let previewSize = CGSize(width: 256, height: 144)
     #endif
 
     static func s(_ value: CGFloat) -> CGFloat { value * k }
 
+    /// Apple TV: mindestens 23 pt (Apple-Richtlinien).
     static func font(_ size: CGFloat, _ weight: Font.Weight = .regular) -> Font {
+        #if os(tvOS)
+        .system(size: max(size * k, UI.minimumFontSize), weight: weight)
+        #else
         .system(size: size * k, weight: weight)
+        #endif
+    }
+}
+
+/// Auswahl in der Programmübersicht (siehe `AppModel.epgNav`).
+@MainActor
+final class EPGNavigation: ObservableObject {
+    @Published var selectedKey: String?
+    @Published var cursorTime: Date?
+    @Published var filter: EPGFilter = .all
+    /// Geöffnete Detailtafel zu einer späteren Sendung.
+    @Published var detail: EPGDetail?
+    /// Ganz sichtbare Zeilen (für seitenweises Blättern), setzt die Übersicht.
+    var pageSize = 5
+}
+
+/// Filter der Programmübersicht; Play/Pause schaltet weiter.
+enum EPGFilter: Hashable {
+    case all, favorites, genre(EPGGenre)
+
+    static var cycle: [EPGFilter] { [.all, .favorites] + EPGGenre.allCases.map { .genre($0) } }
+
+    var id: String {
+        switch self {
+        case .all: return "all"
+        case .favorites: return "favorites"
+        case .genre(let genre): return genre.rawValue
+        }
+    }
+
+    var title: String {
+        switch self {
+        case .all: return "Alle"
+        case .favorites: return "Meine Sender"
+        case .genre(let genre): return genre.title
+        }
+    }
+}
+
+struct EPGDetail: Equatable {
+    let key: String
+    let program: EPGProgram
+    /// Gewählte Aktion (siehe `AppModel.epgDetailActions`).
+    var action: Int
+}
+
+/// Detailtafel zu einer späteren Sendung (Klick in der Programmübersicht).
+private struct EPGDetailPanel: View {
+    let detail: EPGDetail
+    let channelName: String
+    let actions: [String]
+
+    private static let dayFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "de_DE")
+        f.dateFormat = "EEEE, d. MMMM"
+        return f
+    }()
+
+    var body: some View {
+        let p = detail.program
+        ZStack {
+            Color.black.opacity(0.55).ignoresSafeArea()
+            VStack(alignment: .leading, spacing: UI.s(20)) {
+                Text("\(channelName) · \(Self.dayFormatter.string(from: p.startDate)) · \(EPGOverviewView.formatTime(p.startDate)) – \(EPGOverviewView.formatTime(p.endDate)) Uhr")
+                    .font(UI.font(26, .semibold))
+                    .foregroundStyle(EPGColors.accent)
+                Text(p.title)
+                    .font(UI.font(48, .bold))
+                    .foregroundStyle(.white)
+                    .lineLimit(2)
+                if let sub = p.subtitle, !sub.isEmpty {
+                    Text(sub)
+                        .font(UI.font(30, .medium))
+                        .foregroundStyle(EPGColors.secondaryText)
+                        .lineLimit(2)
+                }
+                if let desc = p.description, !desc.isEmpty, desc != p.subtitle {
+                    Text(desc)
+                        .font(UI.font(29))
+                        .foregroundStyle(EPGColors.secondaryText)
+                        .lineLimit(6)
+                }
+                HStack(spacing: UI.s(20)) {
+                    ForEach(actions.indices, id: \.self) { index in
+                        let selected = index == detail.action
+                        Text(actions[index])
+                            .font(UI.font(29, .semibold))
+                            .foregroundStyle(selected ? Color.black : .white)
+                            .padding(.horizontal, UI.s(32))
+                            .padding(.vertical, UI.s(16))
+                            .background(selected ? Color.white : Color.white.opacity(0.14), in: Capsule())
+                            .focusLift(selected, scale: 1.08)
+                    }
+                }
+                .padding(.top, UI.s(12))
+            }
+            .padding(UI.s(56))
+            .frame(maxWidth: UI.s(1300), alignment: .leading)
+            .background { PanelBackground(cornerRadius: UI.s(32)) }
+        }
     }
 }

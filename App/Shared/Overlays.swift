@@ -3,6 +3,26 @@ import FritzTVKit
 
 // MARK: Bausteine
 
+/// Listenzeilen ohne Druck-Darstellung: Auf dem Apple TV zeigten beim Klick (der über
+/// `AppModel.handle` läuft) alle Zeilen kurz den gedrückten, weißen Zustand.
+struct ListRowButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+    }
+}
+
+extension View {
+    /// Fokus wie im System (Apple-Richtlinien): das gewählte Element hebt sich leicht an –
+    /// etwas größer, mit Schatten, kurz animiert.
+    func focusLift(_ focused: Bool, scale: CGFloat = 1.03) -> some View {
+        self
+            .scaleEffect(focused ? scale : 1)
+            .shadow(color: .black.opacity(focused ? 0.45 : 0), radius: focused ? 12 : 0, y: focused ? 6 : 0)
+            .zIndex(focused ? 1 : 0)
+            .animation(.easeOut(duration: 0.15), value: focused)
+    }
+}
+
 struct Badge: View {
     let text: String
     var dark = false
@@ -27,10 +47,41 @@ private struct BottomPanel<Content: View>: View {
                 .padding(.horizontal, UI.s(48))
                 .padding(.vertical, UI.s(36))
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background(UI.panel, in: RoundedRectangle(cornerRadius: UI.s(32)))
-                .padding(.horizontal, UI.s(96))
-                .padding(.bottom, UI.s(60))
+                .background { PanelBackground(cornerRadius: UI.s(32)) }
+                .padding(.horizontal, UI.s(16))
         }
+        // Unten genau am sicheren Bereich (60 pt vom Bildrand, Apple-Richtlinien): so tief wie
+        // möglich, ohne dass ein Fernseher mit Überscan etwas abschneidet.
+    }
+}
+
+/// Tafel am oberen Rand (Info, wie die Info-Reiter des Apple-Players: Wischen nach unten).
+private struct TopPanel<Content: View>: View {
+    @ViewBuilder let content: Content
+
+    var body: some View {
+        VStack {
+            content
+                .padding(.horizontal, UI.s(48))
+                .padding(.vertical, UI.s(36))
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background { PanelBackground(cornerRadius: UI.s(32)) }
+                .padding(.horizontal, UI.s(16))
+            Spacer()
+        }
+    }
+}
+
+/// Durchscheinender Hintergrund für Tafeln über dem Video (Apple: Overlays zurückhaltend und
+/// eher durchscheinend; dichtes Material plus Abdunklung für Lesbarkeit bei hellem Bild).
+struct PanelBackground: View {
+    var cornerRadius: CGFloat
+
+    var body: some View {
+        RoundedRectangle(cornerRadius: cornerRadius)
+            .fill(.thickMaterial)
+            .overlay(RoundedRectangle(cornerRadius: cornerRadius).fill(UI.panelDim))
+            .environment(\.colorScheme, .dark)
     }
 }
 
@@ -170,7 +221,7 @@ struct InfoPanel: View {
     let selection: Int
 
     var body: some View {
-        BottomPanel {
+        TopPanel {
             VStack(alignment: .leading, spacing: UI.s(28)) {
                 // Schalter oben
                 let pills = model.availableInfoPills
@@ -283,7 +334,7 @@ struct InfoPanel: View {
                 .foregroundStyle(UI.secondary)
                 .padding(.top, UI.s(4))
 
-                Text("\(UI.leftRight): auswählen · \(UI.select): Aktion ausführen · \(UI.back): schließen")
+                Text("\(UI.leftRight): auswählen · \(UI.select): Aktion ausführen · \(UI.back) oder nach oben wischen: schließen")
                     .font(UI.font(22))
                     .foregroundStyle(UI.secondary)
             }
@@ -309,6 +360,9 @@ struct InfoPanel: View {
             .padding(.horizontal, UI.s(28))
             .padding(.vertical, UI.s(14))
             .background(selected ? UI.text : Color.white.opacity(0.14), in: Capsule())
+            .scaleEffect(selected ? 1.08 : 1)
+            .shadow(color: .black.opacity(selected ? 0.45 : 0), radius: 8, y: 4)
+            .animation(.easeOut(duration: 0.15), value: selected)
     }
 
     static func formatTime(_ date: Date) -> String {
@@ -374,6 +428,9 @@ struct ChannelListOverlay: View {
                             settingsRow(selected: selectedID == "settings")
                                 .id("settings")
                         }
+                        // Platz für die leicht vergrößerte Auswahl (sonst rechts abgeschnitten).
+                        .padding(.horizontal, UI.s(20))
+                        .padding(.vertical, UI.s(10))
                     }
                     .onAppear { proxy.scrollTo(selectedID, anchor: .center) }
                     .onChange(of: selectedID) { _, new in
@@ -387,7 +444,7 @@ struct ChannelListOverlay: View {
                     .padding(.horizontal, UI.s(24))
             }
             .padding(.vertical, UI.s(56))
-            .padding(.horizontal, UI.s(40))
+            .padding(.horizontal, UI.s(20))
             .frame(width: UI.s(760))
             .frame(maxHeight: .infinity)
             .background(Color(red: 0.055, green: 0.063, blue: 0.086).opacity(0.97))
@@ -539,8 +596,9 @@ struct ChannelListOverlay: View {
                 .padding(.vertical, UI.s(14))
                 .background(selected ? UI.text : Color.clear, in: RoundedRectangle(cornerRadius: UI.s(16)))
                 .overlay(RoundedRectangle(cornerRadius: UI.s(16)).stroke(Color.white.opacity(selected ? 0 : 0.25), lineWidth: UI.s(2)))
+                .focusLift(selected)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(ListRowButtonStyle())
         // Die Fernbedienung steuert die Liste über AppModel.handle; auf dem Apple TV dürfen die
         // Knöpfe den Fokus nicht übernehmen (sonst wirken Klick und Pfeile auf eine andere Zeile).
         .focusable(false)
@@ -584,8 +642,9 @@ struct ChannelListOverlay: View {
                     .stroke(strokeColor, lineWidth: UI.s(1.5))
             )
             .contentShape(Rectangle())
+            .focusLift(selected)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(ListRowButtonStyle())
         // Die Fernbedienung steuert die Liste über AppModel.handle; auf dem Apple TV dürfen die
         // Knöpfe den Fokus nicht übernehmen (sonst wirken Klick und Pfeile auf eine andere Zeile).
         .focusable(false)
@@ -653,8 +712,9 @@ struct ChannelListOverlay: View {
             .background(selected ? UI.text : (isCurrent ? Color.white.opacity(0.08) : Color.clear),
                         in: RoundedRectangle(cornerRadius: UI.s(16)))
             .contentShape(Rectangle())
+            .focusLift(selected)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(ListRowButtonStyle())
         // Die Fernbedienung steuert die Liste über AppModel.handle; auf dem Apple TV dürfen die
         // Knöpfe den Fokus nicht übernehmen (sonst wirken Klick und Pfeile auf eine andere Zeile).
         .focusable(false)
@@ -685,6 +745,7 @@ struct DirectEntryOverlay: View {
                             .foregroundStyle(index == key ? Color.black : UI.text)
                             .background(index == key ? UI.text : Color.white.opacity(0.1),
                                         in: RoundedRectangle(cornerRadius: UI.s(16)))
+                            .focusLift(index == key, scale: 1.08)
                     }
                 }
                 #if os(macOS)
@@ -693,7 +754,7 @@ struct DirectEntryOverlay: View {
             }
             .foregroundStyle(UI.text)
             .padding(UI.s(48))
-            .background(UI.panel, in: RoundedRectangle(cornerRadius: UI.s(32)))
+            .background { PanelBackground(cornerRadius: UI.s(32)) }
         }
     }
 
@@ -701,5 +762,99 @@ struct DirectEntryOverlay: View {
         guard !digits.isEmpty else { return " " }
         guard let entry = model.directPreview(digits) else { return "Kein Sender auf diesem Platz" }
         return entry.group.displayName
+    }
+}
+
+// MARK: Senderleiste unten (Wischen nach oben)
+
+/// Senderleiste zum Stöbern während der Wiedergabe (Apple: „content footer“): Logo, laufende
+/// Sendung und Fortschritt; der laufende Sender ist markiert. Links/Rechts wählt, Klick schaltet um.
+struct ChannelFooter: View {
+    @ObservedObject var model: AppModel
+    @ObservedObject var player: PlayerController
+    let index: Int
+
+    private let cardWidth: CGFloat = UI.s(330)
+    private let spacing: CGFloat = UI.s(28)
+
+    var body: some View {
+        let entries = model.lineup?.entries ?? []
+        VStack(spacing: 0) {
+            Spacer()
+            ZStack(alignment: .bottom) {
+                // Dezente Abdunklung, damit Schrift und Karten vom Bild abgesetzt sind.
+                LinearGradient(colors: [.clear, .black.opacity(0.75)], startPoint: .top, endPoint: .bottom)
+                    .frame(height: UI.s(420))
+                    .ignoresSafeArea(edges: .bottom)
+                VStack(alignment: .leading, spacing: UI.s(16)) {
+                    Text("\(UI.leftRight): Sender wählen · \(UI.select): umschalten · nach unten wischen: schließen")
+                        .font(UI.font(23))
+                        .foregroundStyle(UI.secondary)
+                    GeometryReader { geo in
+                        let center = geo.size.width / 2 - cardWidth / 2
+                        ZStack(alignment: .topLeading) {
+                            ForEach(max(0, index - 4)..<min(entries.count, index + 5), id: \.self) { i in
+                                card(entries[i], selected: i == index)
+                                    .offset(x: center + CGFloat(i - index) * (cardWidth + spacing))
+                            }
+                        }
+                        .frame(width: geo.size.width, height: geo.size.height, alignment: .topLeading)
+                    }
+                    .frame(height: UI.s(210))
+                }
+            }
+        }
+        .animation(.easeOut(duration: 0.2), value: index)
+        .transition(.move(edge: .bottom).combined(with: .opacity))
+    }
+
+    private func card(_ entry: LineupEntry, selected: Bool) -> some View {
+        let isCurrent = entry.number == model.currentNumber
+        let program = (isCurrent ? player.currentProgram : nil)
+            ?? player.epgStore.currentProgram(forChannelNames: entry.group.epgNames)
+        return VStack(alignment: .leading, spacing: UI.s(10)) {
+            HStack(spacing: UI.s(12)) {
+                ChannelLogoView(channelName: entry.group.displayName, height: UI.s(40), maxWidth: UI.s(90))
+                Text("\(entry.number)")
+                    .font(UI.font(26, .bold))
+                    .foregroundStyle(selected ? Color.black.opacity(0.6) : UI.secondary)
+                Spacer(minLength: 0)
+                if isCurrent {
+                    Text("LÄUFT")
+                        .font(UI.font(23, .heavy))
+                        .foregroundStyle(selected ? Color.white : Color.black)
+                        .padding(.horizontal, UI.s(8))
+                        .background(selected ? Color.black.opacity(0.7) : UI.accent, in: Capsule())
+                }
+            }
+            Text(entry.group.displayName)
+                .font(UI.font(26, .semibold))
+                .foregroundStyle(selected ? Color.black : UI.text)
+                .lineLimit(1)
+            Text(program?.title ?? "Keine Programmdaten")
+                .font(UI.font(23))
+                .foregroundStyle(selected ? Color.black.opacity(0.75) : UI.secondary)
+                .lineLimit(1)
+            if let program {
+                GeometryReader { geo in
+                    ZStack(alignment: .leading) {
+                        Capsule().fill((selected ? Color.black : Color.white).opacity(0.18))
+                        Capsule().fill(isCurrent ? UI.accent : (selected ? Color.black.opacity(0.6) : Color.white.opacity(0.6)))
+                            .frame(width: max(geo.size.width * program.progress(at: Date()), UI.s(6)))
+                    }
+                }
+                .frame(height: UI.s(6))
+            }
+        }
+        .padding(UI.s(20))
+        .frame(width: cardWidth, height: UI.s(190), alignment: .topLeading)
+        .background {
+            if selected {
+                RoundedRectangle(cornerRadius: UI.s(20)).fill(UI.text)
+            } else {
+                PanelBackground(cornerRadius: UI.s(20))
+            }
+        }
+        .focusLift(selected, scale: 1.08)
     }
 }

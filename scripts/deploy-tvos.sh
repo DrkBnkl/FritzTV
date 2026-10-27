@@ -70,6 +70,9 @@ for d in devices:
              or "apple tv" in str(props.get("name", "")).lower())
     if not is_tv:
         continue
+    # Simulatoren überspringen (devicectl listet gebootete Simulatoren ebenfalls als Apple TV).
+    if str(hw.get("reality", "")).lower() == "simulated":
+        continue
     if wanted and wanted not in (d.get("identifier"), hw.get("udid")):
         continue
     print(d.get("identifier", ""), hw.get("udid", ""), props.get("name", "Apple TV"), sep="\t")
@@ -114,7 +117,12 @@ else
     DESTINATION="generic/platform=tvOS"
 fi
 
+# Release: optimierter Code. Die Debug-Variante (ohne Optimierung) ließ die Programmübersicht
+# auf dem Apple TV beim Blättern ruckeln. Für Fehlersuche: CONFIGURATION=Debug setzen.
+CONFIGURATION="${CONFIGURATION:-Release}"
+
 xcodebuild -scheme FritzTV-tvOS \
+    -configuration "$CONFIGURATION" \
     -destination "$DESTINATION" \
     -derivedDataPath "$BUILD_DIR/DerivedData" \
     -allowProvisioningUpdates \
@@ -122,7 +130,7 @@ xcodebuild -scheme FritzTV-tvOS \
     $TEAM_ARG \
     build
 
-APP_PATH="$BUILD_DIR/DerivedData/Build/Products/Debug-appletvos/FritzTV.app"
+APP_PATH="$BUILD_DIR/DerivedData/Build/Products/$CONFIGURATION-appletvos/FritzTV.app"
 
 if [[ ! -d "$APP_PATH" ]]; then
     # Fallback Suche

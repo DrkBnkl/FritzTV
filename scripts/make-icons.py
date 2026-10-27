@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Erzeugt das App-Icon von FritzTV (Apple TV: 3 Ebenen + Top-Shelf-Bilder, Mac: AppIcon).
 
-Motiv: Bildschirm mit Zimmerantenne und orangem Play-Symbol in den Farben der App.
+Motiv: Bildschirm mit Zimmerantenne und blauem Play-Symbol in den Farben der App.
 Aufruf aus dem Projektordner:  python3 scripts/make-icons.py   (braucht Pillow)
 Danach `./setup.sh` bzw. `xcodegen generate`, damit Xcode die Asset-Kataloge kennt.
 """
@@ -12,8 +12,8 @@ from PIL import Image, ImageDraw, ImageFilter
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SS = 4  # Supersampling gegen Treppenkanten
 
-ACCENT_TOP = (255, 190, 112)
-ACCENT_BOTTOM = (255, 128, 52)
+ACCENT_TOP = (150, 212, 255)
+ACCENT_BOTTOM = (58, 140, 255)
 BG_TOP = (36, 41, 76)
 BG_BOTTOM = (10, 12, 20)
 FRAME_TOP = (70, 77, 110)

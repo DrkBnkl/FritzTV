@@ -16,6 +16,9 @@ public final class EPGStore: @unchecked Sendable {
     private let lock = NSLock()
     private var programsByService: [Int: [Int: EPGProgram]] = [:]
     private var serviceIDByName: [String: Int] = [:]
+    /// Programmdaten aus dem Internet (XMLTV), je Schlüssel `XMLTV.key(Sendername)`.
+    /// Ergänzen die Daten aus dem Stream dort, wo diese fehlen.
+    private var externalByKey: [String: [EPGProgram]] = [:]
     private let cacheURL: URL?
     /// Gesetzt, solange ein Speichervorgang geplant ist (geschützt durch `lock`).
     private var savePending = false
@@ -45,7 +48,7 @@ public final class EPGStore: @unchecked Sendable {
 
     // MARK: Speichern und Laden
 
-    /// Fasst viele Änderungen zu einem Speichervorgang nach 3 Sekunden zusammen.
+    /// Fasst viele Änderungen zu einem Speichervorgang nach 10 Sekunden zusammen.
     /// Wird aus VLC-Threads aufgerufen, daher nur unter der Sperre (und nie, während sie gehalten wird).
     private func scheduleSave() {
         guard let url = cacheURL else { return }
@@ -54,7 +57,7 @@ public final class EPGStore: @unchecked Sendable {
         savePending = true
         lock.unlock()
         guard !alreadyPending else { return }
-        DispatchQueue.global(qos: .background).asyncAfter(deadline: .now() + 3) { [weak self] in
+        DispatchQueue.global(qos: .background).asyncAfter(deadline: .now() + 10) { [weak self] in
             guard let self else { return }
             self.lock.lock()
             self.savePending = false
@@ -75,21 +78,32 @@ public final class EPGStore: @unchecked Sendable {
 
     // MARK: Daten aufnehmen
 
-    public func add(program: EPGProgram) {
+    /// Nimmt eine Sendung auf. Gibt `true` zurück, wenn sie neu ist oder sich geändert hat.
+    /// (Die EIT wiederholt dieselben Sendungen alle paar Sekunden; Wiederholungen lösen weder
+    /// Speichern noch Neuzeichnen aus.)
+    @discardableResult
+    public func add(program: EPGProgram) -> Bool {
         lock.lock()
-        programsByService[program.serviceID, default: [:]][program.eventID] = program
+        let changed = programsByService[program.serviceID]?[program.eventID] != program
+        if changed {
+            programsByService[program.serviceID, default: [:]][program.eventID] = program
+        }
         lock.unlock()
-        scheduleSave()
+        if changed { scheduleSave() }
+        return changed
     }
 
-    /// Zuordnung aus der SDT: Service-ID → Sendername.
-    public func setServiceName(_ name: String, for serviceID: Int) {
+    /// Zuordnung aus der SDT: Service-ID → Sendername. `true`, wenn sie neu ist.
+    @discardableResult
+    public func setServiceName(_ name: String, for serviceID: Int) -> Bool {
         let key = Self.normalize(name)
-        guard !key.isEmpty else { return }
+        guard !key.isEmpty else { return false }
         lock.lock()
-        serviceIDByName[key] = serviceID
+        let changed = serviceIDByName[key] != serviceID
+        if changed { serviceIDByName[key] = serviceID }
         lock.unlock()
-        scheduleSave()
+        if changed { scheduleSave() }
+        return changed
     }
 
     /// Lernt eine Zuordnung, wenn genau ein Dienst gerade eine Sendung mit diesem Titel zeigt.
@@ -140,9 +154,51 @@ public final class EPGStore: @unchecked Sendable {
         return EPGChannelSchedule(serviceID: serviceID, programs: Array(map.values))
     }
 
+    /// Programm eines Senders: Daten aus dem Stream (DVB-EIT), ergänzt um Sendungen aus der
+    /// Internet-Quelle in Zeiträumen, die der Stream nicht abdeckt.
     public func schedule(forChannelNames names: [String]) -> EPGChannelSchedule? {
-        guard let sid = serviceID(forChannelNames: names) else { return nil }
-        return schedule(for: sid)
+        let dvb = serviceID(forChannelNames: names).flatMap { schedule(for: $0) }
+        let external = externalPrograms(forChannelNames: names)
+        guard !external.isEmpty else { return dvb }
+        guard let dvb, !dvb.programs.isEmpty else {
+            return EPGChannelSchedule(serviceID: external[0].serviceID, programs: external)
+        }
+        // Sparte aus der Internet-Quelle übernehmen (der Stream liefert keine), wenn eine Sendung
+        // dort fast zur selben Zeit beginnt.
+        let covered = dvb.programs.map { program -> EPGProgram in
+            guard program.genre == nil,
+                  let match = external.first(where: { abs($0.startDate.timeIntervalSince(program.startDate)) < 600 })
+            else { return program }
+            return program.withGenre(match.genre)
+        }
+        // Lücken füllen: externe Sendungen nur, wo keine DVB-Sendung liegt.
+        let extra = external.filter { ext in
+            !covered.contains { $0.startDate < ext.endDate && ext.startDate < $0.endDate }
+        }
+        return EPGChannelSchedule(serviceID: dvb.serviceID, programs: covered + extra)
+    }
+
+    private func externalPrograms(forChannelNames names: [String]) -> [EPGProgram] {
+        lock.lock()
+        defer { lock.unlock() }
+        guard !externalByKey.isEmpty else { return [] }
+        for name in names {
+            if let programs = externalByKey[XMLTV.key(name)], !programs.isEmpty { return programs }
+        }
+        return []
+    }
+
+    /// Ersetzt die Programmdaten aus dem Internet.
+    public func setExternal(_ programsByKey: [String: [EPGProgram]]) {
+        lock.lock()
+        externalByKey = programsByKey
+        lock.unlock()
+    }
+
+    public var hasExternalData: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return !externalByKey.isEmpty
     }
 
     public func currentProgram(forChannelNames names: [String], at date: Date = Date()) -> EPGProgram? {

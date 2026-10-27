@@ -8,6 +8,11 @@ struct MediathekSearchResultsView: View {
     let onSelect: (URL) -> Void
     @Environment(\.dismiss) private var dismiss
     @State private var selectedIndex = 0
+    #if os(tvOS)
+    /// Apple TV: Die Fernbedienung bewegt den System-Fokus (im Sheet kommen die Tasten nicht bei
+    /// der App an). Hervorgehoben wird daher die Zeile mit dem Fokus.
+    @FocusState private var focusedIndex: Int?
+    #endif
 
     var body: some View {
         NavigationStack {
@@ -52,6 +57,9 @@ struct MediathekSearchResultsView: View {
                                         selectedIndex = index
                                         selectCurrent()
                                     }
+                                    #if os(tvOS)
+                                    .focused($focusedIndex, equals: index)
+                                    #endif
                                     .id(index)
                                 }
                             }
@@ -63,10 +71,20 @@ struct MediathekSearchResultsView: View {
                                 proxy.scrollTo(newIndex, anchor: .center)
                             }
                         }
+                        #if os(tvOS)
+                        .onChange(of: focusedIndex) { _, newIndex in
+                            if let newIndex { selectedIndex = newIndex }
+                        }
+                        .onAppear {
+                            DispatchQueue.main.async { focusedIndex = 0 }
+                        }
+                        #endif
                     }
                 }
             }
             .preferredColorScheme(.dark)
+            // Deckender Hintergrund: Das Sheet war auf dem Apple TV durchsichtig und schwer lesbar.
+            .settingsPageBackground()
             .onReceive(NotificationCenter.default.publisher(for: .searchResultMove)) { notification in
                 if let delta = notification.object as? Int, !results.isEmpty {
                     selectedIndex = min(max(selectedIndex + delta, 0), results.count - 1)
@@ -151,6 +169,15 @@ struct MediathekSearchResultsView: View {
             )
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        // Eigener Stil ohne System-Fokuseffekt: Der helle Fokus-Effekt von tvOS lag über der
+        // eigenen Hervorhebung und machte den Text unlesbar.
+        .buttonStyle(ResultRowButtonStyle())
+    }
+}
+
+private struct ResultRowButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.98 : 1)
     }
 }

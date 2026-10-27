@@ -9,13 +9,13 @@ import MobileVLCKit
 import VLCKit
 #endif
 
-/// Scannt im Hintergrund andere Multiplex-Frequenzen mit einer leisen VLC-Instanz ab,
-/// um den EPG für alle Sender schnell und zuverlässig zu befüllen.
+/// Scannt die Multiplex-Frequenzen mit einer leisen VLC-Instanz ab, um den EPG für alle Sender
+/// zu befüllen. Läuft nur auf Knopfdruck und bei angehaltenem Live-Bild: Eine zweite Verbindung
+/// zur FRITZ!Box unterbricht den Live-Stream (im Test sofort keine Daten mehr).
 ///
 /// Sicherheit & Performance:
 /// 1. Verwendet `epgOnlyStreamURL` (`pids=0,16,17,18,20`): Es fließen weder Bild- noch Tondaten
-///    (nur ca. 150 kbit/s statt 15–20 Mbit/s), sodass Audio- und Videowiedergabe des Hauptplayers
-///    völlig ungestört bleiben.
+///    (nur ca. 150 kbit/s statt 15–20 Mbit/s).
 /// 2. Priorisiert die Senderliste des Nutzers (Plätze 1, 2, 3…), damit die Lieblingssender
 ///    innerhalb weniger Sekunden vollständig geladen sind.
 /// 3. Überspringt die Frequenz des gerade laufenden Senders (dieser empfängt ohnehin live).
@@ -43,29 +43,43 @@ final class BackgroundEPGScanner: ObservableObject {
         }
     }
 
-    /// Startet den Hintergrund-Scan für alle Multiplexe, priorisiert nach der Senderliste des Nutzers.
+    /// Zählt die Suchläufe, damit ein abgebrochener Lauf den Zustand eines neuen nicht zurücksetzt.
+    private var generation = 0
+
+    /// Startet den Scan für alle Multiplexe, priorisiert nach der Senderliste des Nutzers.
+    /// - Parameters:
+    ///   - force: Auch Frequenzen, die vor weniger als 2 Stunden gescannt wurden.
+    ///   - onFinished: Wird am Ende eines vollständigen oder an Tunern gescheiterten Laufs
+    ///     aufgerufen (nicht nach `stop()`).
+    /// - Returns: `false`, wenn nichts zu tun war (dann kommt kein `onFinished`).
+    @discardableResult
     func startScanIfNeeded(
         lineup: ChannelLineup?,
         catalog: ChannelCatalog,
         epgStore: EPGStore,
         host: String,
         activeFrequency: Int? = nil,
-        deadIDs: Set<String> = []
-    ) {
-        guard !isScanning else { return }
+        deadIDs: Set<String> = [],
+        force: Bool = false,
+        onFinished: (() -> Void)? = nil
+    ) -> Bool {
+        guard !isScanning else { return false }
 
         let unscanned = findUnscannedChannels(
             lineup: lineup,
             catalog: catalog,
             activeFrequency: activeFrequency,
-            deadIDs: deadIDs
+            deadIDs: deadIDs,
+            force: force
         )
         guard !unscanned.isEmpty else {
             DebugLog.log("EPG-Hintergrundscan: Alle Frequenzen aktuell")
-            return
+            return false
         }
 
         isScanning = true
+        generation += 1
+        let myGeneration = generation
         scanTask = Task { [weak self] in
             guard let self else { return }
             DebugLog.log("Starte EPG-Hintergrundscan für \(unscanned.count) Multiplexe")
@@ -93,14 +107,18 @@ final class BackgroundEPGScanner: ObservableObject {
                 try? await Task.sleep(for: .milliseconds(250))
             }
 
+            guard self.generation == myGeneration, !Task.isCancelled else { return }
             self.isScanning = false
             self.currentScanningChannel = nil
             self.currentScanningFrequency = nil
             DebugLog.log("EPG-Hintergrundscan beendet")
+            onFinished?()
         }
+        return true
     }
 
     func stop() {
+        generation += 1
         scanTask?.cancel()
         scanTask = nil
         scannerPlayer?.stop()
@@ -114,7 +132,8 @@ final class BackgroundEPGScanner: ObservableObject {
         lineup: ChannelLineup?,
         catalog: ChannelCatalog,
         activeFrequency: Int?,
-        deadIDs: Set<String>
+        deadIDs: Set<String>,
+        force: Bool = false
     ) -> [(frequency: Int, channel: Channel)] {
         var result: [(frequency: Int, channel: Channel)] = []
         var seenFreqs = Set<Int>()
@@ -131,7 +150,7 @@ final class BackgroundEPGScanner: ObservableObject {
                 seenFreqs.insert(freq)
 
                 if let active = activeFrequency, active == freq { continue }
-                if let last = lastScanTime[freq], now.timeIntervalSince(last) < 7200 { continue }
+                if !force, let last = lastScanTime[freq], now.timeIntervalSince(last) < 7200 { continue }
 
                 result.append((freq, preferred))
             }
@@ -146,7 +165,7 @@ final class BackgroundEPGScanner: ObservableObject {
             seenFreqs.insert(freq)
 
             if let active = activeFrequency, active == freq { continue }
-            if let last = lastScanTime[freq], now.timeIntervalSince(last) < 7200 { continue }
+            if !force, let last = lastScanTime[freq], now.timeIntervalSince(last) < 7200 { continue }
 
             result.append((freq, channel))
         }
@@ -175,7 +194,7 @@ final class BackgroundEPGScanner: ObservableObject {
         try? await Task.sleep(for: .seconds(5))
 
         player.stop()
-        self.scannerPlayer = nil
+        if self.scannerPlayer === player { self.scannerPlayer = nil }
         self.scannedFrequencies.insert(frequency)
         self.lastScanTime[frequency] = Date()
     }

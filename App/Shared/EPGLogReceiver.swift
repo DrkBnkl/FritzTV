@@ -22,6 +22,16 @@ final class EPGLogReceiver: NSObject, VLCLogging, @unchecked Sendable {
     }
 
     func handleMessage(_ message: String, logLevel level: VLCLogLevel, context: VLCLogContext?) {
+        #if DEBUG
+        // Nur Debug-Builds: Warnungen und Fehler von VLC mitschreiben (Fehlersuche Bildaussetzer).
+        if level.rawValue <= VLCLogLevel.warning.rawValue,
+           !message.contains("picture is too late"), !message.contains("buffer too late"),
+           !message.contains("late frames"), !message.contains("does not exist") {
+            let module = context?.module ?? "?"
+            let id = context.map { String($0.objectId, radix: 16) } ?? "?"
+            DebugLog.log("VLC[\(module) \(id)] \(message.prefix(160))")
+        }
+        #endif
         guard EITLogParser.isRelevant(message) else { return }
         let source = context.map { Int(truncatingIfNeeded: $0.objectId) } ?? 0
         parser.processLine(message, source: source)
