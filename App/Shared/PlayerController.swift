@@ -385,7 +385,9 @@ final class PlayerController: ObservableObject {
     /// Steht die Anzahl angezeigter Frames bei laufendem Player länger als 3.5 s still,
     /// wird der Stream automatisch und schnell neu verbunden.
     private func checkStreamHealth() {
-        guard wasPlaying, status == .playing, !isReplaying, !(replayAnchor.paused) else {
+        // Nur live prüfen. (Früher stand hier zusätzlich `!replayAnchor.paused` – das ist zu Beginn
+        // `true` und schaltete die Überwachung im Live-Betrieb komplett ab.)
+        guard wasPlaying, status == .playing, !isReplaying else {
             lastPictureChangeAt = Date()
             return
         }
