@@ -3,6 +3,14 @@ import FritzTVKit
 
 // MARK: Bausteine
 
+/// Listenzeilen ohne Druck-Darstellung: Auf dem Apple TV zeigten beim Klick (der über
+/// `AppModel.handle` läuft) alle Zeilen kurz den gedrückten, weißen Zustand.
+struct ListRowButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+    }
+}
+
 extension View {
     /// Fokus wie im System (Apple-Richtlinien): das gewählte Element hebt sich leicht an –
     /// etwas größer, mit Schatten, kurz animiert.
@@ -420,6 +428,9 @@ struct ChannelListOverlay: View {
                             settingsRow(selected: selectedID == "settings")
                                 .id("settings")
                         }
+                        // Platz für die leicht vergrößerte Auswahl (sonst rechts abgeschnitten).
+                        .padding(.horizontal, UI.s(20))
+                        .padding(.vertical, UI.s(10))
                     }
                     .onAppear { proxy.scrollTo(selectedID, anchor: .center) }
                     .onChange(of: selectedID) { _, new in
@@ -433,7 +444,7 @@ struct ChannelListOverlay: View {
                     .padding(.horizontal, UI.s(24))
             }
             .padding(.vertical, UI.s(56))
-            .padding(.horizontal, UI.s(40))
+            .padding(.horizontal, UI.s(20))
             .frame(width: UI.s(760))
             .frame(maxHeight: .infinity)
             .background(Color(red: 0.055, green: 0.063, blue: 0.086).opacity(0.97))
@@ -587,7 +598,7 @@ struct ChannelListOverlay: View {
                 .overlay(RoundedRectangle(cornerRadius: UI.s(16)).stroke(Color.white.opacity(selected ? 0 : 0.25), lineWidth: UI.s(2)))
                 .focusLift(selected)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(ListRowButtonStyle())
         // Die Fernbedienung steuert die Liste über AppModel.handle; auf dem Apple TV dürfen die
         // Knöpfe den Fokus nicht übernehmen (sonst wirken Klick und Pfeile auf eine andere Zeile).
         .focusable(false)
@@ -633,7 +644,7 @@ struct ChannelListOverlay: View {
             .contentShape(Rectangle())
             .focusLift(selected)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(ListRowButtonStyle())
         // Die Fernbedienung steuert die Liste über AppModel.handle; auf dem Apple TV dürfen die
         // Knöpfe den Fokus nicht übernehmen (sonst wirken Klick und Pfeile auf eine andere Zeile).
         .focusable(false)
@@ -703,7 +714,7 @@ struct ChannelListOverlay: View {
             .contentShape(Rectangle())
             .focusLift(selected)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(ListRowButtonStyle())
         // Die Fernbedienung steuert die Liste über AppModel.handle; auf dem Apple TV dürfen die
         // Knöpfe den Fokus nicht übernehmen (sonst wirken Klick und Pfeile auf eine andere Zeile).
         .focusable(false)
