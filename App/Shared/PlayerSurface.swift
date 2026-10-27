@@ -49,10 +49,10 @@ struct PlayerSurface: UIViewRepresentable {
     }
 }
 
-/// Behälter für die VLC-Zeichenfläche. Verkleinern und Verschieben für die Programmübersicht
-/// geschieht per UIKit-Transformation an der inneren Fläche `videoView`; der Behälter selbst,
-/// den SwiftUI verwaltet, bleibt unverändert. (SwiftUI-Effekte direkt an der eingebetteten
-/// Ansicht bzw. eine Transformation am Behälter führten zu stehendem Bild bzw. Abstürzen.)
+/// Behälter für die VLC-Zeichenfläche. Für die Programmübersicht bekommt die innere Fläche
+/// `videoView` den Rahmen des Vorschaufensters; der Behälter selbst, den SwiftUI verwaltet,
+/// bleibt unverändert. (SwiftUI-Effekte direkt an der eingebetteten Ansicht bzw. eine
+/// Transformation am Behälter führten zu Abstürzen.)
 final class VideoHostView: UIView {
     let videoView = UIView()
 
@@ -71,25 +71,16 @@ final class VideoHostView: UIView {
 
     override func layoutSubviews() {
         super.layoutSubviews()
-        // Größe immer bildschirmfüllend, nur über bounds/center (nie frame, solange transformiert).
-        videoView.bounds = CGRect(origin: .zero, size: bounds.size)
-        videoView.center = CGPoint(x: bounds.midX, y: bounds.midY)
-
-        guard let target = previewFrame, target.width >= 10, target.height >= 10,
-              target.minX.isFinite, target.minY.isFinite,
-              bounds.width > 0, bounds.height > 0, window != nil else {
-            videoView.transform = .identity
-            videoView.layer.cornerRadius = 0
-            videoView.layer.masksToBounds = false
-            return
+        // Vorschau: Die VLC-Fläche bekommt wirklich die kleine Größe (kein Skalieren per
+        // Transformation, keine Maske). Auf dem Apple TV hielt das skalierte, abgerundete
+        // Vollbild-Video den Hauptthread pro Bild auf – die Übersicht reagierte nur zäh.
+        var target = bounds
+        if let preview = previewFrame, preview.width >= 10, preview.height >= 10,
+           preview.minX.isFinite, preview.minY.isFinite, window != nil {
+            target = convert(preview, from: nil)
         }
-        let scale = target.width / bounds.width
-        let targetCenter = convert(CGPoint(x: target.midX, y: target.midY), from: nil)
-        videoView.transform = CGAffineTransform(translationX: targetCenter.x - bounds.midX,
-                                                y: targetCenter.y - bounds.midY)
-            .scaledBy(x: scale, y: scale)
-        videoView.layer.cornerRadius = 10 / scale
-        videoView.layer.masksToBounds = true
+        if videoView.transform != .identity { videoView.transform = .identity }
+        if videoView.frame != target { videoView.frame = target }
     }
 
     override func didMoveToWindow() {
