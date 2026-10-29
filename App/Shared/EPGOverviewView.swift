@@ -513,13 +513,6 @@ private struct ChannelCell: View, Equatable {
 
     var body: some View {
         HStack(spacing: EPGMetrics.s(10)) {
-            // Aktive Zeilenauswahl: dezente Pille am linken Rand
-            if isSelected {
-                Capsule()
-                    .fill(EPGColors.accent)
-                    .frame(width: EPGMetrics.s(3.5), height: height * 0.45)
-            }
-
             Text("\(number)")
                 .font(EPGMetrics.font(18, .bold))
                 .foregroundStyle(isCurrent ? EPGColors.accent : (isSelected ? Color.white : EPGColors.secondaryText))
@@ -546,6 +539,16 @@ private struct ChannelCell: View, Equatable {
         .padding(.horizontal, EPGMetrics.s(14))
         .frame(width: width, height: height, alignment: .leading)
         .background(isSelected ? Color.white.opacity(0.12) : EPGColors.column)
+        .overlay(alignment: .leading) {
+            // Aktive Zeilenauswahl: dezente Pille am linken Rand als Overlay,
+            // damit das Senderlogo und die Sendernummer beim Weiterspringen nicht nach rechts verrutschen
+            if isSelected {
+                Capsule()
+                    .fill(EPGColors.accent)
+                    .frame(width: EPGMetrics.s(3.5), height: height * 0.45)
+                    .padding(.leading, EPGMetrics.s(3))
+            }
+        }
         .overlay(alignment: .trailing) {
             Rectangle().fill(EPGColors.line).frame(width: 1)
         }

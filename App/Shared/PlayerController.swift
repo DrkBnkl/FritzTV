@@ -48,7 +48,14 @@ enum PlayerStatus: Equatable {
 /// Das ist robuster gegenüber Unterschieden zwischen den VLCKit-Versionen.
 @MainActor
 final class PlayerController: ObservableObject {
-    let mediaPlayer = VLCMediaPlayer()
+    /// libVLC-Bibliothek mit Optionen zur Unterdrückung störender OSD-Einblendungen
+    /// (z. B. Miniatur-Vorschau und Dateipfad bei Screenshots für das macOS-Dock-Icon).
+    private static let vlcLibrary = VLCLibrary(options: [
+        "--no-snapshot-preview",
+        "--no-osd"
+    ])
+
+    let mediaPlayer = VLCMediaPlayer(library: vlcLibrary)
     let epgStore: EPGStore
     let epgParser: EITLogParser
     private var logReceiver: EPGLogReceiver?
@@ -76,7 +83,7 @@ final class PlayerController: ObservableObject {
     /// Gesetzt, solange das Bild angehalten ist.
     @Published private(set) var pausedSince: Date?
     /// Zweiter Player für Timeshift: spielt die Mitschnittdatei, solange nicht live geschaut wird.
-    let replayPlayer = VLCMediaPlayer()
+    let replayPlayer = VLCMediaPlayer(library: vlcLibrary)
     /// Gesetzt, solange der Mitschnitt statt des Live-Bilds zu sehen ist.
     @Published private(set) var isReplaying = false
 
@@ -112,6 +119,7 @@ final class PlayerController: ObservableObject {
         }
         let receiver = EPGLogReceiver(parser: parser)
         self.logReceiver = receiver
+        Self.vlcLibrary.loggers = [receiver]
         VLCLibrary.shared().loggers = [receiver]
     }
 
