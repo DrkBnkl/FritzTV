@@ -224,11 +224,69 @@ public final class EPGStore: @unchecked Sendable {
     }
 
     public func currentProgram(forChannelNames names: [String], at date: Date = Date()) -> EPGProgram? {
-        schedule(forChannelNames: names)?.currentProgram(at: date)
+        lock.lock()
+        defer { lock.unlock() }
+
+        // 1. Zuerst im DVB-Speicher nachsehen (kein Array-Kopieren, kein Sortieren, O(1)-Lookup)
+        for name in names {
+            if let sid = serviceIDByName[Self.normalize(name)],
+               let map = programsByService[sid], !map.isEmpty {
+                if let explicit = map.values.first(where: {
+                    $0.isRunningStatus && $0.startDate <= date && date < $0.endDate.addingTimeInterval(EPGChannelSchedule.overrunGrace)
+                }) {
+                    return explicit
+                }
+                if let prog = map.values.first(where: { date >= $0.startDate && date < $0.endDate }) {
+                    return prog
+                }
+            }
+        }
+
+        // 2. Falls per DVB nichts gefunden: in externen Daten nachsehen
+        for name in names {
+            if let list = externalByKey[XMLTV.key(name)], !list.isEmpty {
+                if let prog = list.first(where: { date >= $0.startDate && date < $0.endDate }) {
+                    return prog
+                }
+            }
+        }
+        return nil
     }
 
     public func nextProgram(forChannelNames names: [String], at date: Date = Date()) -> EPGProgram? {
-        schedule(forChannelNames: names)?.nextProgram(at: date)
+        lock.lock()
+        defer { lock.unlock() }
+
+        // 1. DVB-Sendung direkt nach `date` suchen
+        var candidate: EPGProgram?
+        for name in names {
+            if let sid = serviceIDByName[Self.normalize(name)],
+               let map = programsByService[sid], !map.isEmpty {
+                for p in map.values where p.startDate >= date {
+                    if let c = candidate {
+                        if p.startDate < c.startDate { candidate = p }
+                    } else {
+                        candidate = p
+                    }
+                }
+                if candidate != nil { return candidate }
+            }
+        }
+
+        // 2. Externe Daten
+        for name in names {
+            if let list = externalByKey[XMLTV.key(name)], !list.isEmpty {
+                for p in list where p.startDate >= date {
+                    if let c = candidate {
+                        if p.startDate < c.startDate { candidate = p }
+                    } else {
+                        candidate = p
+                    }
+                }
+                if candidate != nil { return candidate }
+            }
+        }
+        return nil
     }
 
     /// Entfernt Sendungen, die vor mehr als 12 Stunden endeten.
