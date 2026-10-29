@@ -20,12 +20,14 @@ mkdir -p "$BUILD_DIR"
 
 CONFIGURATION="${CONFIGURATION:-Release}"
 
-echo "→ Baue FritzTV-macOS ($CONFIGURATION)..."
+echo "→ Baue FritzTV-macOS ($CONFIGURATION, Universal 2: Apple Silicon & Intel)..."
 xcodebuild -project FritzTV.xcodeproj \
     -scheme FritzTV-macOS \
     -configuration "$CONFIGURATION" \
-    -destination "platform=macOS" \
+    -destination "generic/platform=macOS" \
     -derivedDataPath "$BUILD_DIR/DerivedData" \
+    ARCHS="arm64 x86_64" \
+    ONLY_ACTIVE_ARCH=NO \
     build
 
 APP_PATH="$BUILD_DIR/DerivedData/Build/Products/$CONFIGURATION/FritzTV.app"

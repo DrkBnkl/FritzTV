@@ -119,6 +119,8 @@ targets:
       base:
         PRODUCT_NAME: FritzTV
         PRODUCT_BUNDLE_IDENTIFIER: de.home.fritztv.mac
+        ARCHS: [arm64, x86_64]
+        ONLY_ACTIVE_ARCH: NO
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         CODE_SIGN_IDENTITY: "-"
         ENABLE_HARDENED_RUNTIME: NO
