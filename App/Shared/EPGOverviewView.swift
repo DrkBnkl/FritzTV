@@ -131,7 +131,7 @@ struct EPGOverviewView: View {
             DebugLog.log("Übersicht: Auswahl geändert")
             let vh = rasterHeight > 0 ? rasterHeight : (EPGMetrics.s(68) * CGFloat(visibleRows))
             let target = targetScrollOffset(for: selectedIndex, viewportHeight: vh)
-            withAnimation(.interactiveSpring(response: 0.12, dampingFraction: 0.90)) {
+            withAnimation(.interactiveSpring(response: 0.10, dampingFraction: 0.92)) {
                 scrollOffset = target
             }
         }
@@ -546,15 +546,14 @@ private struct ChannelCell: View, Equatable {
         .padding(.horizontal, EPGMetrics.s(14))
         .frame(width: width, height: height, alignment: .leading)
         .background(isSelected ? Color.white.opacity(0.12) : EPGColors.column)
+        .animation(.none, value: isSelected)
         .overlay(alignment: .leading) {
-            // Aktive Zeilenauswahl: dezente Pille am linken Rand als Overlay,
-            // damit das Senderlogo und die Sendernummer beim Weiterspringen nicht nach rechts verrutschen
-            if isSelected {
-                Capsule()
-                    .fill(EPGColors.accent)
-                    .frame(width: EPGMetrics.s(3.5), height: height * 0.45)
-                    .padding(.leading, EPGMetrics.s(3))
-            }
+            Capsule()
+                .fill(EPGColors.accent)
+                .frame(width: EPGMetrics.s(3.5), height: height * 0.45)
+                .padding(.leading, EPGMetrics.s(3))
+                .opacity(isSelected ? 1 : 0)
+                .animation(.none, value: isSelected)
         }
         .overlay(alignment: .trailing) {
             Rectangle().fill(EPGColors.line).frame(width: 1)
