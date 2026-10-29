@@ -20,83 +20,86 @@ struct RootView: View {
     private var previewFrame: CGRect? { model.showEPGOverview ? epgPreviewFrame : nil }
 
     var body: some View {
-        ZStack {
-            Color.black.ignoresSafeArea()
-            // Die Programmübersicht liegt UNTER der Bildfläche. Die Bildfläche behält so immer
-            // ihren Platz in der Ansichtshierarchie: Wurde sie (per zIndex) über die Übersicht
-            // gehoben, blieb das VLC-Bild stehen – auch nach dem Schließen der Übersicht.
-            if model.showEPGOverview && model.activeHLSReplay == nil && model.activeMediathekURL == nil {
-                EPGOverviewView(model: model, player: player)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .transition(.opacity)
-            }
-            // In der Programmübersicht läuft das Bild verkleinert im Vorschaufenster weiter.
-            // Dieselbe Ansicht wird nur verschoben (kein zweiter Player, kein Neuaufbau).
-            PlayerSurface(player: player.mediaPlayer, previewFrame: previewFrame)
-                .modifier(EPGPreviewPlacement(frame: previewFrame))
-            // Schwarzer Bildschirm beim Umschalten: Blendet Standbilder des alten Senders aus,
-            // bis der neue Sender ein Bild zeigt. Aus der Programmübersicht immer – das kleine
-            // Vorschaubild wächst sonst kurz mit dem alten Sender auf Vollbild.
-            if (model.settings.blackScreenOnZap || model.zapFromEPG)
-                && (player.status.isTransitioning || player.awaitingFirstPicture)
-                && !player.isReplaying && !model.showEPGOverview {
+        GeometryReader { windowGeo in
+            ZStack {
                 Color.black.ignoresSafeArea()
-            }
-            // Timeshift: Mitschnitt-Wiedergabe liegt über dem stumm weiterlaufenden Live-Bild.
-            PlayerSurface(player: player.replayPlayer, previewFrame: previewFrame)
-                .opacity(player.isReplaying ? 1 : 0)
-                .allowsHitTesting(false)
-                .modifier(EPGPreviewPlacement(frame: previewFrame))
-            if let replay = model.activeHLSReplay {
-                HLSReplayPlayerView(url: replay.url, startDate: replay.startDate) {
-                    model.hlsReplayClosed()
+                // Die Programmübersicht liegt UNTER der Bildfläche. Die Bildfläche behält so immer
+                // ihren Platz in der Ansichtshierarchie: Wurde sie (per zIndex) über die Übersicht
+                // gehoben, blieb das VLC-Bild stehen – auch nach dem Schließen der Übersicht.
+                if model.showEPGOverview && model.activeHLSReplay == nil && model.activeMediathekURL == nil {
+                    EPGOverviewView(model: model, player: player)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .transition(.opacity)
                 }
-                .ignoresSafeArea()
-            } else if let url = model.activeMediathekURL {
-                MediathekPlayer(url: url, subtitleURL: model.activeMediathekSubtitle) {
-                    model.mediathekPlayClosed()
+                // In der Programmübersicht läuft das Bild verkleinert im Vorschaufenster weiter.
+                // Dieselbe Ansicht wird nur verschoben (kein zweiter Player, kein Neuaufbau).
+                PlayerSurface(player: player.mediaPlayer, previewFrame: previewFrame)
+                    .modifier(EPGPreviewPlacement(frame: previewFrame))
+                // Schwarzer Bildschirm beim Umschalten: Blendet Standbilder des alten Senders aus,
+                // bis der neue Sender ein Bild zeigt. Aus der Programmübersicht immer – das kleine
+                // Vorschaubild wächst sonst kurz mit dem alten Sender auf Vollbild.
+                if (model.settings.blackScreenOnZap || model.zapFromEPG)
+                    && (player.status.isTransitioning || player.awaitingFirstPicture)
+                    && !player.isReplaying && !model.showEPGOverview {
+                    Color.black.ignoresSafeArea()
                 }
-                .ignoresSafeArea()
-            } else if !model.showEPGOverview {
-                #if os(macOS)
-                // Mausbedienung im Live-Bild auf dem Mac:
-                // - Doppelklick: Vollbild umschalten
-                // - Einfacher Klick: Senderliste öffnen
-                // - Rechtsklick: Kontextmenü mit allen Aktionen
-                // - Mausbewegung: im Timeshift Steuerleiste einblenden, nach 3 s Ruhe Mauszeiger ausblenden
-                Color.clear
-                    .contentShape(Rectangle())
-                    .onContinuousHover { phase in
-                        switch phase {
-                        case .active:
-                            if player.isTimeshifted && model.overlay == .none {
-                                model.showBanner()
+                // Timeshift: Mitschnitt-Wiedergabe liegt über dem stumm weiterlaufenden Live-Bild.
+                PlayerSurface(player: player.replayPlayer, previewFrame: previewFrame)
+                    .opacity(player.isReplaying ? 1 : 0)
+                    .allowsHitTesting(false)
+                    .modifier(EPGPreviewPlacement(frame: previewFrame))
+                if let replay = model.activeHLSReplay {
+                    HLSReplayPlayerView(url: replay.url, startDate: replay.startDate) {
+                        model.hlsReplayClosed()
+                    }
+                    .ignoresSafeArea()
+                } else if let url = model.activeMediathekURL {
+                    MediathekPlayer(url: url, subtitleURL: model.activeMediathekSubtitle) {
+                        model.mediathekPlayClosed()
+                    }
+                    .ignoresSafeArea()
+                } else if !model.showEPGOverview {
+                    #if os(macOS)
+                    // Mausbedienung im Live-Bild auf dem Mac:
+                    // - Doppelklick: Vollbild umschalten
+                    // - Einfacher Klick: Senderliste öffnen
+                    // - Rechtsklick: Kontextmenü mit allen Aktionen
+                    // - Mausbewegung: im Timeshift Steuerleiste einblenden, nach 3 s Ruhe Mauszeiger ausblenden
+                    Color.clear
+                        .contentShape(Rectangle())
+                        .onContinuousHover { phase in
+                            switch phase {
+                            case .active:
+                                if player.isTimeshifted && model.overlay == .none {
+                                    model.showBanner()
+                                }
+                                scheduleCursorAutoHide()
+                            case .ended:
+                                cursorHideTask?.cancel()
                             }
-                            scheduleCursorAutoHide()
-                        case .ended:
-                            cursorHideTask?.cancel()
                         }
-                    }
-                    .onTapGesture(count: 2) {
-                        singleClickTask?.cancel()
-                        NSApp.keyWindow?.toggleFullScreen(nil)
-                    }
-                    .onTapGesture {
-                        singleClickTask?.cancel()
-                        singleClickTask = Task { @MainActor in
-                            try? await Task.sleep(for: .milliseconds(200))
-                            guard !Task.isCancelled else { return }
-                            if model.overlay == .none {
-                                model.handle(.back)
+                        .onTapGesture(count: 2) {
+                            singleClickTask?.cancel()
+                            NSApp.keyWindow?.toggleFullScreen(nil)
+                        }
+                        .onTapGesture {
+                            singleClickTask?.cancel()
+                            singleClickTask = Task { @MainActor in
+                                try? await Task.sleep(for: .milliseconds(200))
+                                guard !Task.isCancelled else { return }
+                                if model.overlay == .none {
+                                    model.handle(.back)
+                                }
                             }
                         }
-                    }
-                    .contextMenu {
-                        macContextMenu
-                    }
-                #endif
-                OverlayLayer(model: model, player: player)
+                        .contextMenu {
+                            macContextMenu
+                        }
+                    #endif
+                    OverlayLayer(model: model, player: player)
+                }
             }
+            .environment(\.windowSize, windowGeo.size)
         }
         .onPreferenceChange(EPGPreviewFrameKey.self) { epgPreviewFrame = $0 }
         .modifier(RemoteInputModifier(model: model))
@@ -435,5 +438,18 @@ enum KeepAwake {
             activity = nil
         }
         #endif
+    }
+}
+
+/// Schlüssel im SwiftUI-Environment für die aktuelle Fenstergröße des Inhaltsbereichs.
+/// Auf dem Mac reagieren Overlays dadurch dynamisch auf kleine/kompakte Fenstergrößen.
+struct WindowSizeKey: EnvironmentKey {
+    static let defaultValue: CGSize = CGSize(width: 1920, height: 1080)
+}
+
+extension EnvironmentValues {
+    var windowSize: CGSize {
+        get { self[WindowSizeKey.self] }
+        set { self[WindowSizeKey.self] = newValue }
     }
 }

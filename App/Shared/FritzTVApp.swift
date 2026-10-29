@@ -29,9 +29,13 @@ struct FritzTVApp: App {
         WindowGroup {
             RootView(model: model, player: model.player)
             #if os(macOS)
-                .frame(minWidth: 960, minHeight: 540)
+                .frame(minWidth: 640, minHeight: 360)
+                .modifier(WindowAspectRatioModifier(aspectRatio: NSSize(width: 16, height: 9), minSize: NSSize(width: 640, height: 360)))
             #endif
         }
+        #if os(macOS)
+        .defaultSize(width: 960, height: 540)
+        #endif
         #if os(macOS)
         .commands {
             CommandGroup(replacing: .appSettings) {

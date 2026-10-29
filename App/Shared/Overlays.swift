@@ -38,17 +38,27 @@ struct Badge: View {
 }
 
 private struct BottomPanel<Content: View>: View {
+    @Environment(\.windowSize) private var windowSize
     @ViewBuilder let content: Content
+
+    private var isCompact: Bool {
+        #if os(macOS)
+        return windowSize.height < 450
+        #else
+        return false
+        #endif
+    }
 
     var body: some View {
         VStack {
             Spacer()
             content
-                .padding(.horizontal, UI.s(48))
-                .padding(.vertical, UI.s(36))
+                .padding(.horizontal, isCompact ? 16 : UI.s(48))
+                .padding(.vertical, isCompact ? 12 : UI.s(36))
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background { PanelBackground(cornerRadius: UI.s(32)) }
-                .padding(.horizontal, UI.s(16))
+                .background { PanelBackground(cornerRadius: isCompact ? 16 : UI.s(32)) }
+                .padding(.horizontal, isCompact ? 10 : UI.s(16))
+                .padding(.bottom, isCompact ? 8 : 0)
         }
         // Unten genau am sicheren Bereich (60 pt vom Bildrand, Apple-Richtlinien): so tief wie
         // möglich, ohne dass ein Fernseher mit Überscan etwas abschneidet.
@@ -124,44 +134,53 @@ struct StatusCard: View {
 struct InfoBanner: View {
     @ObservedObject var model: AppModel
     @ObservedObject var player: PlayerController
+    @Environment(\.windowSize) private var windowSize
+
+    private var isCompact: Bool {
+        #if os(macOS)
+        return windowSize.width < 760
+        #else
+        return false
+        #endif
+    }
 
     var body: some View {
         if let entry = model.currentEntry {
             BottomPanel {
-                HStack(spacing: UI.s(48)) {
+                HStack(spacing: isCompact ? 16 : UI.s(48)) {
                     VStack(spacing: UI.s(4)) {
-                        Text("\(entry.number)").font(UI.font(96, .heavy))
-                        ChannelLogoView(channelName: entry.group.displayName, height: UI.s(44), maxWidth: UI.s(180))
-                        Text(entry.group.displayName).font(UI.font(26, .semibold)).lineLimit(1)
+                        Text("\(entry.number)").font(UI.font(isCompact ? 56 : 96, .heavy))
+                        ChannelLogoView(channelName: entry.group.displayName, height: isCompact ? 28 : UI.s(44), maxWidth: isCompact ? 90 : UI.s(180))
+                        Text(entry.group.displayName).font(UI.font(isCompact ? 20 : 26, .semibold)).lineLimit(1)
                     }
-                    .frame(width: UI.s(220))
+                    .frame(width: isCompact ? 95 : UI.s(220))
 
-                    VStack(alignment: .leading, spacing: UI.s(8)) {
+                    VStack(alignment: .leading, spacing: isCompact ? 4 : UI.s(8)) {
                         let current = player.displayedProgram
                         let timeString = current.map { "\(Self.formatTime($0.startDate)) – \(Self.formatTime($0.endDate))" } ?? ""
-                        HStack(spacing: UI.s(16)) {
-                            Text("JETZT").font(UI.font(24, .semibold)).foregroundStyle(UI.secondary)
+                        HStack(spacing: isCompact ? 8 : UI.s(16)) {
+                            Text("JETZT").font(UI.font(isCompact ? 18 : 24, .semibold)).foregroundStyle(UI.secondary)
                             if !timeString.isEmpty {
-                                Text(timeString).font(UI.font(24, .semibold)).foregroundStyle(UI.accent)
+                                Text(timeString).font(UI.font(isCompact ? 18 : 24, .semibold)).foregroundStyle(UI.accent)
                             }
                         }
                         Text(current?.title ?? player.nowPlaying ?? "Keine Programminformation")
-                            .font(UI.font(40, .bold))
+                            .font(UI.font(isCompact ? 26 : 40, .bold))
                             .lineLimit(2)
 
                         if let next = player.displayedNextProgram {
                             Text("Danach ab \(Self.formatTime(next.startDate)): \(next.title)")
-                                .font(UI.font(24))
+                                .font(UI.font(isCompact ? 18 : 24))
                                 .foregroundStyle(UI.secondary)
                                 .lineLimit(1)
                         }
                     }
 
-                    Spacer(minLength: UI.s(24))
+                    Spacer(minLength: isCompact ? 12 : UI.s(24))
 
-                    VStack(alignment: .trailing, spacing: UI.s(16)) {
+                    VStack(alignment: .trailing, spacing: isCompact ? 8 : UI.s(16)) {
                         TimelineView(.periodic(from: .now, by: 30)) { context in
-                            Text(context.date, format: .dateTime.hour().minute()).font(UI.font(44, .semibold))
+                            Text(context.date, format: .dateTime.hour().minute()).font(UI.font(isCompact ? 30 : 44, .semibold))
                         }
                         Badge(text: player.channel?.isHD == false ? "SD" : "HD")
                     }
@@ -475,10 +494,19 @@ struct ChannelListOverlay: View {
     @ObservedObject var model: AppModel
     @ObservedObject var player: PlayerController
     let selectedID: String
+    @Environment(\.windowSize) private var windowSize
 
     @State private var scrollOffset: CGFloat = 0
     @State private var viewportHeight: CGFloat = 0
     @State private var hoveredEntry: LineupEntry?
+
+    private var isCompact: Bool {
+        #if os(macOS)
+        return windowSize.width < 760
+        #else
+        return false
+        #endif
+    }
 
     private let specialRowHeight: CGFloat = UI.s(58)
     private let sectionHeaderRecentHeight: CGFloat = UI.s(32)
@@ -534,23 +562,6 @@ struct ChannelListOverlay: View {
         return h
     }
 
-    private var allChannelsStartY: CGFloat {
-        var y: CGFloat = UI.s(8) + specialRowHeight + itemSpacing
-        if !model.recentEntries.isEmpty {
-            y += sectionHeaderRecentHeight + itemSpacing + CGFloat(model.recentEntries.count) * (channelRowHeight + itemSpacing)
-        }
-        y += sectionHeaderAllHeight + itemSpacing
-        return y
-    }
-
-    private func isChannelRowVisible(index: Int) -> Bool {
-        let rowY = allChannelsStartY + CGFloat(index) * (channelRowHeight + itemSpacing)
-        let screenY = rowY + scrollOffset
-        let vh = viewportHeight > 0 ? viewportHeight : 1080
-        let buffer = 4 * (channelRowHeight + itemSpacing)
-        return screenY + channelRowHeight >= -buffer && screenY <= vh + buffer
-    }
-
     private var selectedChannelEntry: LineupEntry? {
         if let hoveredEntry {
             return hoveredEntry
@@ -598,17 +609,10 @@ struct ChannelListOverlay: View {
                                 .padding(.bottom, UI.s(2))
                                 .padding(.horizontal, UI.s(20))
                                 .frame(height: sectionHeaderAllHeight, alignment: .leading)
-                            let entries = model.lineup?.entries ?? []
-                            ForEach(Array(entries.enumerated()), id: \.element.id) { index, entry in
-                                if isChannelRowVisible(index: index) {
-                                    row(entry, isRecentSection: false, selected: selectedID == "channel-\(entry.number)")
-                                        .frame(height: channelRowHeight)
-                                        .id("channel-\(entry.number)")
-                                } else {
-                                    Color.clear
-                                        .frame(height: channelRowHeight)
-                                        .id("channel-\(entry.number)")
-                                }
+                            ForEach(model.lineup?.entries ?? []) { entry in
+                                row(entry, isRecentSection: false, selected: selectedID == "channel-\(entry.number)")
+                                    .frame(height: channelRowHeight)
+                                    .id("channel-\(entry.number)")
                             }
 
                             settingsRow(selected: selectedID == "settings")
@@ -640,30 +644,34 @@ struct ChannelListOverlay: View {
                     .foregroundStyle(UI.secondary)
                     .padding(.horizontal, UI.s(20))
             }
-            .padding(.vertical, UI.s(44))
-            .padding(.horizontal, UI.s(20))
-            .frame(width: UI.s(760))
+            .padding(.vertical, isCompact ? 16 : UI.s(44))
+            .padding(.horizontal, isCompact ? 12 : UI.s(20))
+            .frame(width: isCompact ? windowSize.width : UI.s(760))
             .frame(maxHeight: .infinity)
             .background(Color(red: 0.055, green: 0.063, blue: 0.086).opacity(0.97))
             .overlay(alignment: .trailing) {
-                Rectangle().fill(Color.white.opacity(0.10)).frame(width: 1)
+                if !isCompact {
+                    Rectangle().fill(Color.white.opacity(0.10)).frame(width: 1)
+                }
             }
             .foregroundStyle(UI.text)
 
-            // Rechte Seite: EPG-Detailansicht für den fokussierten Sender
-            ZStack(alignment: .topLeading) {
-                Color.black.opacity(0.7)
-                    .contentShape(Rectangle())
-                    .onTapGesture {
-                        model.overlay = .none
-                    }
+            if !isCompact {
+                // Rechte Seite: EPG-Detailansicht für den fokussierten Sender
+                ZStack(alignment: .topLeading) {
+                    Color.black.opacity(0.7)
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            model.overlay = .none
+                        }
 
-                if let entry = selectedChannelEntry {
-                    epgDetailPane(for: entry)
-                        .padding(UI.s(48))
+                    if let entry = selectedChannelEntry {
+                        epgDetailPane(for: entry)
+                            .padding(UI.s(48))
+                    }
                 }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .ignoresSafeArea()
         #if os(macOS)

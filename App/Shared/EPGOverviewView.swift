@@ -15,6 +15,7 @@ struct EPGOverviewView: View {
     @ObservedObject var model: AppModel
     @ObservedObject var player: PlayerController
     @ObservedObject private var nav: EPGNavigation
+    @Environment(\.windowSize) private var windowSize
 
     // Timeline-Konfiguration; alle Maße über EPGMetrics (auf dem Apple TV deutlich größer)
     private let pointsPerMinute: CGFloat = EPGMetrics.s(4.0)
@@ -128,7 +129,8 @@ struct EPGOverviewView: View {
         .onChange(of: model.lineup?.entries.count) { _, _ in rebuildRows() }
         .onChange(of: nav.selectedKey) { _, _ in
             DebugLog.log("Übersicht: Auswahl geändert")
-            let target = targetScrollOffset(for: selectedIndex, viewportHeight: rasterHeight)
+            let vh = rasterHeight > 0 ? rasterHeight : (EPGMetrics.s(68) * CGFloat(visibleRows))
+            let target = targetScrollOffset(for: selectedIndex, viewportHeight: vh)
             withAnimation(.interactiveSpring(response: 0.12, dampingFraction: 0.90)) {
                 scrollOffset = target
             }
@@ -240,12 +242,21 @@ struct EPGOverviewView: View {
     }
     #endif
 
+    private var livePreviewSize: CGSize {
+        #if os(macOS)
+        if windowSize.height < 500 {
+            return CGSize(width: 140, height: 79)
+        }
+        #endif
+        return EPGMetrics.previewSize
+    }
+
     /// Platzhalter für das Live-Bild: Die Bildfläche selbst liegt in `RootView` und wird
     /// über `EPGPreviewFrameKey` verkleinert genau hierher gelegt.
     private var livePreview: some View {
         RoundedRectangle(cornerRadius: 10)
             .fill(Color.black)
-            .frame(width: EPGMetrics.previewSize.width, height: EPGMetrics.previewSize.height)
+            .frame(width: livePreviewSize.width, height: livePreviewSize.height)
             .background(GeometryReader { geo in
                 Color.clear.preference(key: EPGPreviewFrameKey.self, value: geo.frame(in: .global))
             })
@@ -268,23 +279,19 @@ struct EPGOverviewView: View {
         return GeometryReader { geo in
             let timelineWidth = max(0, geo.size.width - channelColumnWidth)
             let rowsHeight = max(0, geo.size.height - rulerHeight)
-            let effectiveHeight = rowsHeight > 0 ? rowsHeight : 800
-            let firstVisible = max(0, Int(floor(scrollOffset / rowHeight)) - 3)
-            let lastVisible = min(all.count - 1, Int(ceil((scrollOffset + effectiveHeight) / rowHeight)) + 3)
 
             VStack(spacing: 0) {
                 rulerRow(now: now, offset: offset, timelineWidth: timelineWidth)
                 ZStack(alignment: .topLeading) {
-                    if firstVisible <= lastVisible {
-                        ForEach(firstVisible...lastVisible, id: \.self) { index in
-                            let entry = all[index]
+                    VStack(spacing: 0) {
+                        ForEach(all) { entry in
                             let isSelected = entry.number == selected
                             let items = rowItems[entry.number] ?? []
                             row(entry: entry, items: items, isSelected: isSelected,
                                 focus: focus, now: now, offset: offset, timelineWidth: timelineWidth)
-                                .offset(y: CGFloat(index) * rowHeight - scrollOffset)
                         }
                     }
+                    .offset(y: -scrollOffset)
 
                     nowLine(now: now, offset: offset)
                 }
