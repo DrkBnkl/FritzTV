@@ -23,14 +23,12 @@ struct RootView: View {
         GeometryReader { windowGeo in
             ZStack {
                 Color.black.ignoresSafeArea()
-                // Die Programmübersicht liegt UNTER der Bildfläche. Die Bildfläche behält so immer
-                // ihren Platz in der Ansichtshierarchie: Wurde sie (per zIndex) über die Übersicht
-                // gehoben, blieb das VLC-Bild stehen – auch nach dem Schließen der Übersicht.
-                if model.showEPGOverview && model.activeHLSReplay == nil && model.activeMediathekURL == nil {
-                    EPGOverviewView(model: model, player: player)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .transition(.opacity)
-                }
+                // Die Programmübersicht liegt dauerhaft unter der Bildfläche im Speicher bereit,
+                // damit beim Aufrufen keine Berechnungs- oder Layout-Verzögerung entsteht (sofortige Anzeige).
+                EPGOverviewView(model: model, player: player)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .opacity(model.showEPGOverview && model.activeHLSReplay == nil && model.activeMediathekURL == nil ? 1 : 0)
+                    .allowsHitTesting(model.showEPGOverview && model.activeHLSReplay == nil && model.activeMediathekURL == nil)
                 // In der Programmübersicht läuft das Bild verkleinert im Vorschaufenster weiter.
                 // Dieselbe Ansicht wird nur verschoben (kein zweiter Player, kein Neuaufbau).
                 PlayerSurface(player: player.mediaPlayer, previewFrame: previewFrame)

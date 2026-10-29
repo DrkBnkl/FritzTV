@@ -124,6 +124,15 @@ struct EPGOverviewView: View {
         }
         .onChange(of: player.epgRevision) { _, _ in scheduleRebuild() }
         .onChange(of: model.lineup?.entries.count) { _, _ in rebuildRows() }
+        .onChange(of: model.showEPGOverview) { _, isShowing in
+            if isShowing {
+                if Date().timeIntervalSince(lastRebuild) > 900 {
+                    rebuildRows()
+                }
+                let vh = rasterHeight > 0 ? rasterHeight : (EPGMetrics.s(68) * CGFloat(visibleRows))
+                scrollOffset = targetScrollOffset(for: selectedIndex, viewportHeight: vh)
+            }
+        }
         .onChange(of: nav.selectedKey) { _, _ in
             DebugLog.log("Übersicht: Auswahl geändert")
             let vh = rasterHeight > 0 ? rasterHeight : (EPGMetrics.s(68) * CGFloat(visibleRows))

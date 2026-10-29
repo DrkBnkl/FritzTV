@@ -180,10 +180,24 @@ public final class EPGStore: @unchecked Sendable {
             return EPGChannelSchedule(serviceID: external[0].serviceID, programs: external)
         }
         // Lücken füllen: externe Sendungen nur, wo keine DVB-Sendung liegt.
-        let extra = external.filter { ext in
-            !dvb.programs.contains { $0.startDate < ext.endDate && ext.startDate < $0.endDate }
+        // Schnellere Überlappungsprüfung mit sortierter DVB-Liste (O(N+M) statt O(N*M))
+        let sortedDVB = dvb.programs.sorted { $0.startDate < $1.startDate }
+        var extra: [EPGProgram] = []
+        extra.reserveCapacity(external.count)
+        for ext in external {
+            var overlaps = false
+            for d in sortedDVB {
+                if d.startDate >= ext.endDate { break }
+                if d.endDate > ext.startDate {
+                    overlaps = true
+                    break
+                }
+            }
+            if !overlaps {
+                extra.append(ext)
+            }
         }
-        return EPGChannelSchedule(serviceID: dvb.serviceID, programs: dvb.programs + extra)
+        return EPGChannelSchedule(serviceID: dvb.serviceID, programs: sortedDVB + extra)
     }
 
     private func externalPrograms(forChannelNames names: [String]) -> [EPGProgram] {
