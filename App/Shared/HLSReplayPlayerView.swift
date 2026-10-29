@@ -302,8 +302,7 @@ extension Notification.Name {
 #if os(macOS)
 /// Direkte Einbettung von `AVPlayerView` aus `AVKit` für macOS.
 /// Vermeidet einen Swift-Runtime-Absturz in `_AVKit_SwiftUI` (`getSuperclassMetadata`),
-/// wenn `AVKit.framework` beim Linken von `VideoPlayer` nicht automatisch geladen wurde,
-/// und unterdrückt außerdem das Video-Vorschaubild beim Minimieren ins Dock.
+/// wenn `AVKit.framework` beim Linken von `VideoPlayer` nicht automatisch geladen wurde.
 struct MacAVPlayerView: NSViewRepresentable {
     let player: AVPlayer
 
@@ -323,6 +322,7 @@ struct MacAVPlayerView: NSViewRepresentable {
 final class MacAVPlayerHostView: NSView {
     let playerView = AVPlayerView()
     private var windowObservers: [NSObjectProtocol] = []
+    private var lastSnapshotImage: NSImage?
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -348,25 +348,82 @@ final class MacAVPlayerHostView: NSView {
         super.viewDidMoveToWindow()
         removeObservers()
         guard let window else { return }
-        if let icon = NSApp.applicationIconImage {
-            window.miniwindowImage = icon
-        }
+        window.miniwindowImage = nil
+        window.dockTile.contentView = nil
+        window.dockTile.display()
 
         let nc = NotificationCenter.default
         windowObservers.append(
             nc.addObserver(forName: NSWindow.willMiniaturizeNotification, object: window, queue: .main) { [weak self] _ in
-                guard let self, let win = self.window else { return }
-                self.playerView.isHidden = true
-                if let icon = NSApp.applicationIconImage {
-                    win.miniwindowImage = icon
-                }
+                self?.handleWillMiniaturize()
+            }
+        )
+        windowObservers.append(
+            nc.addObserver(forName: NSWindow.didMiniaturizeNotification, object: window, queue: .main) { [weak self] _ in
+                self?.handleDidMiniaturize()
             }
         )
         windowObservers.append(
             nc.addObserver(forName: NSWindow.didDeminiaturizeNotification, object: window, queue: .main) { [weak self] _ in
-                self?.playerView.isHidden = false
+                self?.handleDidDeminiaturize()
             }
         )
+    }
+
+    private func applyMiniwindowImage(_ image: NSImage) {
+        guard let window else { return }
+        window.miniwindowImage = image
+        if let iv = window.dockTile.contentView as? NSImageView {
+            iv.imageScaling = .scaleProportionallyUpOrDown
+            window.dockTile.display()
+        }
+    }
+
+    private func captureSnapshot() -> NSImage? {
+        if let asset = playerView.player?.currentItem?.asset,
+           let currentTime = playerView.player?.currentTime() {
+            let generator = AVAssetImageGenerator(asset: asset)
+            generator.appliesPreferredTrackTransform = true
+            generator.maximumSize = CGSize(width: 320, height: 180)
+            if let cgImage = try? generator.copyCGImage(at: currentTime, actualTime: nil) {
+                return NSImage(cgImage: cgImage, size: NSSize(width: 320, height: 180))
+            }
+        }
+        if let rep = playerView.bitmapImageRepForCachingDisplay(in: playerView.bounds) {
+            playerView.cacheDisplay(in: playerView.bounds, to: rep)
+            let image = NSImage(size: playerView.bounds.size)
+            image.addRepresentation(rep)
+            return image
+        }
+        return nil
+    }
+
+    private func handleWillMiniaturize() {
+        guard let window else { return }
+        if let snapshot = captureSnapshot() {
+            let fitted = snapshot.aspectFittedForDock()
+            lastSnapshotImage = fitted
+            applyMiniwindowImage(fitted)
+        }
+    }
+
+    private func handleDidMiniaturize() {
+        if let window, window.miniwindowImage == nil, let last = lastSnapshotImage {
+            applyMiniwindowImage(last)
+        }
+        playerView.isHidden = true
+    }
+
+    private func handleDidDeminiaturize() {
+        playerView.isHidden = false
+        window?.miniwindowImage = nil
+        if let window {
+            window.dockTile.contentView = nil
+            window.dockTile.display()
+        }
+        playerView.frame = bounds
+        playerView.needsLayout = true
+        playerView.needsDisplay = true
     }
 
     private func removeObservers() {

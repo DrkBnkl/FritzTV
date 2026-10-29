@@ -12,6 +12,50 @@ import VLCKit
 #if os(macOS)
 import AppKit
 
+extension NSImage {
+    /// Erzeugt ein quadratisches Miniaturbild mit exakt beibehaltenem Seitenverhältnis des Videos
+    /// und abgerundeten Ecken, damit das Dock-Icon die 16:9-Wiedergabe nicht auf ein 1:1-Quadrat verzerrt.
+    func aspectFittedForDock(size targetSize: CGFloat = 256) -> NSImage {
+        let rep = representations.first
+        let pixelWidth = CGFloat(rep?.pixelsWide ?? Int(size.width))
+        let pixelHeight = CGFloat(rep?.pixelsHigh ?? Int(size.height))
+        guard pixelWidth > 0, pixelHeight > 0 else { return self }
+
+        let aspect = pixelWidth / pixelHeight
+        var drawWidth = targetSize
+        var drawHeight = targetSize
+        if aspect > 1.0 { // Breiter als hoch (z. B. 16:9)
+            drawHeight = (targetSize / aspect).rounded()
+        } else { // Höher als breit oder 1:1
+            drawWidth = (targetSize * aspect).rounded()
+        }
+
+        let drawRect = NSRect(
+            x: ((targetSize - drawWidth) / 2.0).rounded(),
+            y: ((targetSize - drawHeight) / 2.0).rounded(),
+            width: drawWidth,
+            height: drawHeight
+        )
+
+        let canvas = NSImage(size: NSSize(width: targetSize, height: targetSize))
+        canvas.lockFocus()
+
+        let cornerRadius: CGFloat = 12.0
+        let clipPath = NSBezierPath(roundedRect: drawRect, xRadius: cornerRadius, yRadius: cornerRadius)
+        clipPath.addClip()
+        draw(in: drawRect, from: .zero, operation: .sourceOver, fraction: 1.0)
+
+        // Subtiler Rahmen für saubere Abgrenzung im Dock
+        NSColor.white.withAlphaComponent(0.25).setStroke()
+        let strokePath = NSBezierPath(roundedRect: drawRect.insetBy(dx: 0.5, dy: 0.5), xRadius: cornerRadius, yRadius: cornerRadius)
+        strokePath.lineWidth = 1.0
+        strokePath.stroke()
+
+        canvas.unlockFocus()
+        return canvas
+    }
+}
+
 struct PlayerSurface: NSViewRepresentable {
     let player: VLCMediaPlayer
     /// Nur Apple TV; auf dem Mac verkleinert `EPGPreviewPlacement`.
@@ -19,23 +63,46 @@ struct PlayerSurface: NSViewRepresentable {
 
     func makeNSView(context: Context) -> MacVideoHostView {
         let view = MacVideoHostView()
-        player.drawable = view.videoView
+        view.player = player
+        bindDrawable(view.videoView)
         return view
     }
 
     func updateNSView(_ nsView: MacVideoHostView, context: Context) {
+        nsView.player = player
         if (player.drawable as? NSView) != nsView.videoView {
-            player.drawable = nsView.videoView
+            bindDrawable(nsView.videoView)
+        }
+    }
+
+    private func bindDrawable(_ videoView: NSView) {
+        let wasPlaying = player.isPlaying
+        player.drawable = videoView
+        // VLCKit bindet seine Videoausgabe (vout) unter macOS nur beim Start der Wiedergabe
+        // an `drawable`. Wird ein neues Fenster geöffnet, während der Player noch läuft,
+        // muss die Wiedergabe kurz neu angestoßen werden, damit das Bild nicht schwarz bleibt.
+        if wasPlaying {
+            player.stop()
+            player.play()
         }
     }
 }
 
 /// Behälter für die VLC-Zeichenfläche auf dem Mac.
-/// Blendet beim Minimieren in das Dock die Videofläche aus und setzt das App-Icon als
-/// Miniaturbild, damit im Dock kein Fernseh-Vorschaubild erscheint.
+/// Zeigt im minimierten Dock-Fenster ein Standbild (Screenshot) des laufenden Programms an.
+/// Die Videofläche wird während der Minimierung ausgeblendet, sodass keine OpenGL-Frames
+/// gerendert werden (kein Ruckeln, 0 % GPU-Last).
 final class MacVideoHostView: NSView {
+    weak var player: VLCMediaPlayer?
     let videoView = NSView()
     private var windowObservers: [NSObjectProtocol] = []
+    private var snapshotTimer: Timer?
+    private var lastSnapshotImage: NSImage?
+    private var snapshotPath: String {
+        FileManager.default.temporaryDirectory
+            .appendingPathComponent("fritztv_dock_snapshot.png")
+            .path
+    }
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -60,27 +127,142 @@ final class MacVideoHostView: NSView {
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         removeObservers()
+        stopSnapshotTimer()
         guard let window else { return }
-        configureMiniaturizedAppearance(for: window)
+        window.miniwindowImage = nil
+        window.dockTile.contentView = nil
+        window.dockTile.display()
 
         let nc = NotificationCenter.default
         windowObservers.append(
             nc.addObserver(forName: NSWindow.willMiniaturizeNotification, object: window, queue: .main) { [weak self] _ in
-                guard let self, let win = self.window else { return }
-                self.videoView.isHidden = true
-                self.configureMiniaturizedAppearance(for: win)
+                self?.handleWillMiniaturize()
+            }
+        )
+        windowObservers.append(
+            nc.addObserver(forName: NSWindow.didMiniaturizeNotification, object: window, queue: .main) { [weak self] _ in
+                self?.handleDidMiniaturize()
             }
         )
         windowObservers.append(
             nc.addObserver(forName: NSWindow.didDeminiaturizeNotification, object: window, queue: .main) { [weak self] _ in
-                self?.videoView.isHidden = false
+                self?.handleDidDeminiaturize()
             }
         )
+        windowObservers.append(
+            nc.addObserver(forName: Notification.Name("VLCMediaPlayerSnapshotTaken"), object: nil, queue: .main) { [weak self] notif in
+                self?.handleSnapshotTaken(notif)
+            }
+        )
+
+        startSnapshotTimer()
     }
 
-    private func configureMiniaturizedAppearance(for window: NSWindow) {
-        if let icon = NSApp.applicationIconImage {
-            window.miniwindowImage = icon
+    private func startSnapshotTimer() {
+        stopSnapshotTimer()
+        // Nach Wiedergabebeginn zeitnah erstes Standbild sichern
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { [weak self] in
+            self?.takeSnapshot()
+        }
+        // Regelmäßig im Hintergrund ein aktuelles Standbild für das Dock-Icon vorhalten
+        snapshotTimer = Timer.scheduledTimer(withTimeInterval: 15.0, repeats: true) { [weak self] _ in
+            guard let self, let window = self.window, !window.isMiniaturized,
+                  let player = self.player, player.isPlaying else { return }
+            self.takeSnapshot()
+        }
+    }
+
+    private func stopSnapshotTimer() {
+        snapshotTimer?.invalidate()
+        snapshotTimer = nil
+    }
+
+    private func takeSnapshot() {
+        guard let player, player.isPlaying else { return }
+        try? FileManager.default.removeItem(atPath: snapshotPath)
+        player.saveVideoSnapshot(at: snapshotPath, withWidth: 320, andHeight: 0)
+    }
+
+    private func applyMiniwindowImage(_ image: NSImage) {
+        guard let window else { return }
+        window.miniwindowImage = image
+        if let iv = window.dockTile.contentView as? NSImageView {
+            iv.imageScaling = .scaleProportionallyUpOrDown
+            window.dockTile.display()
+        }
+    }
+
+    private func handleWillMiniaturize() {
+        guard let window else { return }
+        // Sobald das Fenster beginnt, ins Dock zu gleiten: sofort das aktuellste Standbild setzen
+        if let image = lastSnapshotImage {
+            applyMiniwindowImage(image)
+        } else if let last = player?.lastSnapshot {
+            let fitted = last.aspectFittedForDock()
+            lastSnapshotImage = fitted
+            applyMiniwindowImage(fitted)
+        }
+        takeSnapshot()
+    }
+
+    private func handleSnapshotTaken(_ notif: Notification) {
+        if let notifPlayer = notif.object as? VLCMediaPlayer, let player, notifPlayer !== player {
+            return
+        }
+        let rawImage: NSImage?
+        if let last = player?.lastSnapshot {
+            rawImage = last
+        } else if FileManager.default.fileExists(atPath: snapshotPath),
+                  let fileImage = NSImage(contentsOfFile: snapshotPath) {
+            rawImage = fileImage
+        } else {
+            rawImage = nil
+        }
+        guard let rawImage else { return }
+        let fitted = rawImage.aspectFittedForDock()
+        lastSnapshotImage = fitted
+        if let window, window.isMiniaturized {
+            applyMiniwindowImage(fitted)
+        }
+    }
+
+    private func handleDidMiniaturize() {
+        // Sicherstellen, dass das Standbild im Dock-Icon angezeigt wird
+        if let window, window.miniwindowImage == nil {
+            if let image = lastSnapshotImage {
+                applyMiniwindowImage(image)
+            } else if let rawImage = player?.lastSnapshot ?? (
+                FileManager.default.fileExists(atPath: snapshotPath) ? NSImage(contentsOfFile: snapshotPath) : nil
+            ) {
+                let fitted = rawImage.aspectFittedForDock()
+                lastSnapshotImage = fitted
+                applyMiniwindowImage(fitted)
+            }
+        }
+        // Videofläche ausblenden, damit keine OpenGL-Frames mehr ins Dock gerendert werden (kein Ruckeln, 0 % GPU-Last)
+        videoView.isHidden = true
+    }
+
+    private func handleDidDeminiaturize() {
+        videoView.isHidden = false
+        window?.miniwindowImage = nil
+        if let window {
+            window.dockTile.contentView = nil
+            window.dockTile.display()
+        }
+        videoView.frame = bounds
+        videoView.needsLayout = true
+        videoView.needsDisplay = true
+        videoView.layer?.setNeedsDisplay()
+        for subview in videoView.subviews {
+            subview.frame = videoView.bounds
+            subview.needsLayout = true
+            subview.needsDisplay = true
+            subview.layer?.setNeedsDisplay()
+        }
+        // Nach dem Wiederherstellen direkt ein frisches Standbild für das nächste Minimieren anfordern
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+            self?.takeSnapshot()
         }
     }
 
@@ -92,7 +274,9 @@ final class MacVideoHostView: NSView {
     }
 
     deinit {
+        stopSnapshotTimer()
         removeObservers()
+        try? FileManager.default.removeItem(atPath: snapshotPath)
     }
 }
 #else

@@ -1,8 +1,22 @@
 import SwiftUI
+#if os(macOS)
+import AppKit
+
+/// Beendet die Mac-App vollständig, sobald das Hauptfenster über den roten Schließen-Knopf
+/// geschlossen wird, statt ohne Fenster mit laufendem Ton im Dock weiterzulaufen.
+final class MacAppDelegate: NSObject, NSApplicationDelegate {
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+        true
+    }
+}
+#endif
 
 @main
 struct FritzTVApp: App {
     @StateObject private var model = AppModel()
+    #if os(macOS)
+    @NSApplicationDelegateAdaptor(MacAppDelegate.self) private var appDelegate
+    #endif
 
     init() {
         let memoryCapacity = 50 * 1024 * 1024

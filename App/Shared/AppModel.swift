@@ -4,6 +4,8 @@ import Network
 import FritzTVKit
 #if os(tvOS)
 import TVServices
+#elseif os(macOS)
+import AppKit
 #endif
 
 /// Tasten der Siri Remote bzw. der Mac-Tastatur.
@@ -323,7 +325,12 @@ final class AppModel: ObservableObject {
     private func performTune(to number: Int) {
         guard let entry = lineup?.entry(number: number) else { return }
         let key = Self.key(entry)
-        if playingKey == key {
+        #if os(macOS)
+        let hasActiveDrawableWindow = (player.mediaPlayer.drawable as? NSView)?.window != nil
+        #else
+        let hasActiveDrawableWindow = true
+        #endif
+        if playingKey == key, hasActiveDrawableWindow {
             switch player.status {
             case .failed, .idle:
                 break   // neu versuchen

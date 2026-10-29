@@ -154,6 +154,18 @@ struct RootView: View {
             default: break
             }
         }
+        #if os(macOS)
+        .onDisappear {
+            cursorHideTask?.cancel()
+            singleClickTask?.cancel()
+            player.stop()
+            KeepAwake.update(for: .idle)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
+            player.stop()
+            KeepAwake.update(for: .idle)
+        }
+        #endif
     }
 
     #if os(macOS)

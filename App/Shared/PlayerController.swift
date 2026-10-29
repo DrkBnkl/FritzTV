@@ -1,4 +1,7 @@
 import Foundation
+#if os(macOS)
+import AppKit
+#endif
 import VLCKitSPM
 #if canImport(TVVLCKit)
 import TVVLCKit
@@ -411,6 +414,17 @@ final class PlayerController: ObservableObject {
             lastPictureChangeAt = Date()
             return
         }
+
+        #if os(macOS)
+        // Im Dock minimiert oder ohne sichtbares Fenster ist die Videofläche ausgeblendet;
+        // macOS drosselt dann das Zeichnen, sodass `displayedPictures` stehen bleiben kann,
+        // ohne dass der Stream tatsächlich eingefroren ist.
+        if let view = mediaPlayer.drawable as? NSView,
+           view.window == nil || view.window?.isMiniaturized == true || view.isHidden {
+            lastPictureChangeAt = Date()
+            return
+        }
+        #endif
 
         // Nicht in den ersten 4 Sekunden nach Verbindungsaufbau prüfen
         guard Date().timeIntervalSince(openedAt) > 4.0 else {
