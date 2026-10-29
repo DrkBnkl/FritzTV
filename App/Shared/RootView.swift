@@ -1,0 +1,427 @@
+import SwiftUI
+import FritzTVKit
+#if os(tvOS)
+import UIKit
+#elseif os(macOS)
+import AppKit
+#endif
+
+struct RootView: View {
+    @ObservedObject var model: AppModel
+    @ObservedObject var player: PlayerController
+    @Environment(\.scenePhase) private var scenePhase
+    /// Platz für das Live-Bild in der Programmübersicht (Bildschirmkoordinaten), sonst `nil`.
+    @State private var epgPreviewFrame: CGRect?
+    #if os(macOS)
+    @State private var singleClickTask: Task<Void, Never>?
+    @State private var cursorHideTask: Task<Void, Never>?
+    #endif
+
+    private var previewFrame: CGRect? { model.showEPGOverview ? epgPreviewFrame : nil }
+
+    var body: some View {
+        ZStack {
+            Color.black.ignoresSafeArea()
+            // Die Programmübersicht liegt UNTER der Bildfläche. Die Bildfläche behält so immer
+            // ihren Platz in der Ansichtshierarchie: Wurde sie (per zIndex) über die Übersicht
+            // gehoben, blieb das VLC-Bild stehen – auch nach dem Schließen der Übersicht.
+            if model.showEPGOverview && model.activeHLSReplay == nil && model.activeMediathekURL == nil {
+                EPGOverviewView(model: model, player: player)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .transition(.opacity)
+            }
+            // In der Programmübersicht läuft das Bild verkleinert im Vorschaufenster weiter.
+            // Dieselbe Ansicht wird nur verschoben (kein zweiter Player, kein Neuaufbau).
+            PlayerSurface(player: player.mediaPlayer, previewFrame: previewFrame)
+                .modifier(EPGPreviewPlacement(frame: previewFrame))
+            // Schwarzer Bildschirm beim Umschalten: Blendet Standbilder des alten Senders aus,
+            // bis der neue Sender ein Bild zeigt. Aus der Programmübersicht immer – das kleine
+            // Vorschaubild wächst sonst kurz mit dem alten Sender auf Vollbild.
+            if (model.settings.blackScreenOnZap || model.zapFromEPG)
+                && (player.status.isTransitioning || player.awaitingFirstPicture)
+                && !player.isReplaying && !model.showEPGOverview {
+                Color.black.ignoresSafeArea()
+            }
+            // Timeshift: Mitschnitt-Wiedergabe liegt über dem stumm weiterlaufenden Live-Bild.
+            PlayerSurface(player: player.replayPlayer, previewFrame: previewFrame)
+                .opacity(player.isReplaying ? 1 : 0)
+                .allowsHitTesting(false)
+                .modifier(EPGPreviewPlacement(frame: previewFrame))
+            if let replay = model.activeHLSReplay {
+                HLSReplayPlayerView(url: replay.url, startDate: replay.startDate) {
+                    model.hlsReplayClosed()
+                }
+                .ignoresSafeArea()
+            } else if let url = model.activeMediathekURL {
+                MediathekPlayer(url: url, subtitleURL: model.activeMediathekSubtitle) {
+                    model.mediathekPlayClosed()
+                }
+                .ignoresSafeArea()
+            } else if !model.showEPGOverview {
+                #if os(macOS)
+                // Mausbedienung im Live-Bild auf dem Mac:
+                // - Doppelklick: Vollbild umschalten
+                // - Einfacher Klick: Senderliste öffnen
+                // - Rechtsklick: Kontextmenü mit allen Aktionen
+                // - Mausbewegung: im Timeshift Steuerleiste einblenden, nach 3 s Ruhe Mauszeiger ausblenden
+                Color.clear
+                    .contentShape(Rectangle())
+                    .onContinuousHover { phase in
+                        switch phase {
+                        case .active:
+                            if player.isTimeshifted && model.overlay == .none {
+                                model.showBanner()
+                            }
+                            scheduleCursorAutoHide()
+                        case .ended:
+                            cursorHideTask?.cancel()
+                        }
+                    }
+                    .onTapGesture(count: 2) {
+                        singleClickTask?.cancel()
+                        NSApp.keyWindow?.toggleFullScreen(nil)
+                    }
+                    .onTapGesture {
+                        singleClickTask?.cancel()
+                        singleClickTask = Task { @MainActor in
+                            try? await Task.sleep(for: .milliseconds(200))
+                            guard !Task.isCancelled else { return }
+                            if model.overlay == .none {
+                                model.handle(.back)
+                            }
+                        }
+                    }
+                    .contextMenu {
+                        macContextMenu
+                    }
+                #endif
+                OverlayLayer(model: model, player: player)
+            }
+        }
+        .onPreferenceChange(EPGPreviewFrameKey.self) { epgPreviewFrame = $0 }
+        .modifier(RemoteInputModifier(model: model))
+        .preferredColorScheme(.dark)
+        .onOpenURL { url in
+            model.handleDeepLink(url: url)
+        }
+        #if os(tvOS)
+        // Vollbild statt Sheet: Das halbdurchsichtige Sheet lag über dem laufenden Bild und machte
+        // die Einstellungen schwer lesbar.
+        .fullScreenCover(isPresented: $model.showSettings, onDismiss: { model.applySettings() }) {
+            SettingsView(model: model, settings: model.settings)
+        }
+        #else
+        .sheet(isPresented: $model.showSettings, onDismiss: { model.applySettings() }) {
+            SettingsView(model: model, settings: model.settings)
+        }
+        #endif
+        .searchResultsPresentation(isPresented: Binding(
+            get: { model.searchResultDialog != nil },
+            set: { if !$0 { model.searchResultDialog = nil } }
+        )) {
+            if let dialog = model.searchResultDialog {
+                MediathekSearchResultsView(title: dialog.title, results: dialog.results) { url in
+                    let subtitle = dialog.results.first { $0.bestPlaybackURL == url }?.subtitleURL
+                    model.playMediathekResult(url: url, subtitleURL: subtitle)
+                }
+                #if os(macOS)
+                .frame(minWidth: 600, maxWidth: .infinity, minHeight: 380, maxHeight: .infinity)
+                #endif
+            }
+        }
+        .task { await model.load() }
+        .onChange(of: player.nowPlaying) { _, _ in model.programChanged() }
+        .onChange(of: player.currentProgram) { _, _ in model.programChanged() }
+        .onChange(of: player.status) { oldStatus, newStatus in
+            KeepAwake.update(for: newStatus)
+            if oldStatus != .playing && newStatus == .playing {
+                model.showBanner()
+            }
+            if case .failed = newStatus { model.zapFromEPG = false }
+            #if os(tvOS)
+            if newStatus == .playing, model.settings.match50Hz {
+                DisplayCriteria.request50Hz()
+            }
+            #endif
+        }
+        .onChange(of: player.awaitingFirstPicture) { _, waiting in
+            if !waiting { model.zapFromEPG = false }
+        }
+        .onChange(of: scenePhase) { _, phase in
+            switch phase {
+            case .background: player.stop()
+            case .active: model.returnedToForeground()
+            default: break
+            }
+        }
+    }
+
+    #if os(macOS)
+    private func scheduleCursorAutoHide() {
+        cursorHideTask?.cancel()
+        guard model.isPlainLiveView else { return }
+        cursorHideTask = Task { @MainActor in
+            try? await Task.sleep(for: .seconds(3))
+            guard !Task.isCancelled, model.isPlainLiveView else { return }
+            NSCursor.setHiddenUntilMouseMoves(true)
+        }
+    }
+
+    @ViewBuilder
+    private var macContextMenu: some View {
+        Button {
+            model.openEPGOverview()
+        } label: {
+            Label("Programmübersicht (Zeitstrahl)", systemImage: "calendar.day.timeline.left")
+        }
+
+        Button {
+            model.openInfoPanel()
+        } label: {
+            Label("Sendungsinfo einblenden", systemImage: "info.circle")
+        }
+
+        Button {
+            model.openChannelList()
+        } label: {
+            Label("Senderliste", systemImage: "list.bullet")
+        }
+
+        Divider()
+
+        Button {
+            player.togglePause()
+            model.showBanner()
+        } label: {
+            Label(player.pausedSince != nil ? "Weiterlaufen" : "Anhalten (Timeshift)",
+                  systemImage: player.pausedSince != nil ? "play.fill" : "pause.fill")
+        }
+
+        if player.isTimeshifted {
+            Button {
+                player.goLive()
+            } label: {
+                Label("Zum Live-Bild springen", systemImage: "dot.radiowaves.left.and.right")
+            }
+        }
+
+        if let entry = model.currentEntry, let hls = PublicHLSChannels.hlsURL(for: entry.group.key) {
+            Button {
+                let start = player.displayedProgram?.startDate
+                model.startHLSReplay(url: hls, startDate: start)
+            } label: {
+                Label("Von Anfang an abspielen", systemImage: "clock.arrow.circlepath")
+            }
+        }
+
+        if let title = player.displayedProgram?.title ?? player.nowPlaying, !title.isEmpty {
+            Button {
+                model.searchMediathek(title: title, channel: model.currentEntry?.group.displayName)
+            } label: {
+                Label("In Mediathek suchen", systemImage: "magnifyingglass")
+            }
+        }
+
+        Divider()
+
+        Button {
+            model.handle(.up)
+        } label: {
+            Label("Nächster Sender", systemImage: "chevron.up")
+        }
+
+        Button {
+            model.handle(.down)
+        } label: {
+            Label("Vorheriger Sender", systemImage: "chevron.down")
+        }
+
+        Button {
+            player.cycleAudioTrack()
+            model.showBanner()
+        } label: {
+            Label("Tonspur wechseln (\(player.audioTrackName))", systemImage: "speaker.wave.2")
+        }
+
+        Button {
+            player.cycleSubtitle()
+            model.showBanner()
+        } label: {
+            Label("Untertitel wechseln (\(player.subtitleName))", systemImage: "captions.bubble")
+        }
+
+        Divider()
+
+        Button {
+            NSApp.keyWindow?.toggleFullScreen(nil)
+        } label: {
+            Label("Vollbild umschalten", systemImage: "arrow.up.left.and.arrow.down.right")
+        }
+
+        Button {
+            model.showSettings = true
+        } label: {
+            Label("Einstellungen…", systemImage: "gearshape")
+        }
+    }
+    #endif
+}
+
+/// Alles, was über dem Bild liegt.
+struct OverlayLayer: View {
+    @ObservedObject var model: AppModel
+    @ObservedObject var player: PlayerController
+
+    var body: some View {
+        ZStack {
+            switch model.loadState {
+            case .loading:
+                // Apple-Richtlinien: schwarzer Bildschirm mit zentriertem Ladesymbol, ohne weitere Inhalte.
+                ProgressView()
+                    .scaleEffect(1.5)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(Color.black)
+            case .failed(let message):
+                StatusCard(title: "Keine Verbindung", message: message,
+                           hint: "\(UI.select): erneut versuchen · \(UI.playPause): Einstellungen", busy: false)
+            case .ready:
+                readyLayer
+            }
+        }
+    }
+
+    @ViewBuilder private var readyLayer: some View {
+        if case .failed(let title, let message, let hint) = player.status {
+            StatusCard(title: title, message: message,
+                       hint: hint ?? "\(UI.upDown): anderer Sender · \(UI.back): Senderliste", busy: false)
+        } else if case .reconnecting(let seconds) = player.status, !player.isReplaying {
+            // Beim zeitversetzten Schauen läuft die Wiedergabe aus dem Puffer weiter; das
+            // Neuverbinden im Hintergrund braucht dann keine Meldung über dem Bild.
+            StatusCard(title: "Verbindung unterbrochen", message: "Neuer Versuch in \(seconds) s …",
+                       hint: "Bleibt das Bild weg: Sind alle 4 Tuner der FRITZ!Box belegt?", busy: true)
+        }
+
+        if model.overlay == .none {
+            if player.isTimeshifted {
+                if player.pausedSince != nil || model.bannerVisible {
+                    TimeshiftBar(model: model, player: player)
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                }
+            } else if model.bannerVisible {
+                InfoBanner(model: model, player: player)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+        }
+
+        switch model.overlay {
+        case .none:
+            EmptyView()
+        case .info(let selection):
+            InfoPanel(model: model, player: player, selection: selection)
+                .transition(.move(edge: .top).combined(with: .opacity))
+        case .footer(let index):
+            ChannelFooter(model: model, player: player, index: index)
+        case .channelList(let selectedID):
+            ChannelListOverlay(model: model, player: player, selectedID: selectedID)
+        case .directEntry(let digits, let key):
+            DirectEntryOverlay(model: model, digits: digits, key: key)
+        }
+
+        if let feedback = player.jumpFeedback {
+            Text(feedback)
+                .font(UI.font(44, .bold))
+                .foregroundStyle(UI.text)
+                .padding(.horizontal, UI.s(36))
+                .padding(.vertical, UI.s(18))
+                .background(Color.black.opacity(0.75), in: Capsule())
+                .overlay(Capsule().stroke(Color.white.opacity(0.3), lineWidth: UI.s(2)))
+                .shadow(color: .black.opacity(0.5), radius: 8)
+                .transition(.scale.combined(with: .opacity))
+        }
+    }
+}
+
+private extension View {
+    /// Mediathek-Suchergebnisse: auf dem Apple TV im Vollbild (als Sheet war das Fenster klein,
+    /// die Schrift winzig und das Fernsehbild schien durch), auf dem Mac als Sheet.
+    @ViewBuilder
+    func searchResultsPresentation<Content: View>(isPresented: Binding<Bool>,
+                                                  @ViewBuilder content: @escaping () -> Content) -> some View {
+        #if os(tvOS)
+        fullScreenCover(isPresented: isPresented, content: content)
+        #else
+        sheet(isPresented: isPresented, content: content)
+        #endif
+    }
+}
+
+/// Rahmen des Vorschaufensters in der Programmübersicht (Bildschirmkoordinaten).
+struct EPGPreviewFrameKey: PreferenceKey {
+    static let defaultValue: CGRect? = nil
+    static func reduce(value: inout CGRect?, nextValue: () -> CGRect?) {
+        value = nextValue() ?? value
+    }
+}
+
+/// Bildfläche: normalerweise bildschirmfüllend, in der Programmübersicht im Vorschaufenster.
+///
+/// Apple TV: Die SwiftUI-Modifier bleiben immer gleich; verkleinert wird in
+/// `VideoHostView` per UIKit-Transformation (siehe dort, warum).
+/// Mac: Die Fläche behält die volle Größe und wird per `scaleEffect` verkleinert.
+struct EPGPreviewPlacement: ViewModifier {
+    let frame: CGRect?
+
+    func body(content: Content) -> some View {
+        #if os(macOS)
+        GeometryReader { geo in
+            let full = geo.size
+            let scale = frame.map { $0.width / max(full.width, 1) } ?? 1
+            content
+                .frame(width: full.width, height: full.height)
+                .clipShape(RoundedRectangle(cornerRadius: frame == nil ? 0 : 10 / max(scale, 0.01)))
+                .scaleEffect(scale, anchor: .topLeading)
+                .offset(x: frame?.minX ?? 0, y: frame?.minY ?? 0)
+        }
+        .ignoresSafeArea()
+        .allowsHitTesting(frame == nil)
+        #else
+        content
+            .ignoresSafeArea()
+            .allowsHitTesting(false)
+        #endif
+    }
+}
+
+/// Hält Bildschirm wach, solange live gespielt wird. VLC meldet dem System – anders als Apples
+/// eigene Player – keine laufende Wiedergabe, sonst springt nach einigen Minuten der
+/// Bildschirmschoner (Apple TV) bzw. der Ruhezustand des Displays (Mac) an.
+/// Angehalten (Timeshift) darf der Bildschirmschoner wie üblich kommen.
+@MainActor
+enum KeepAwake {
+    #if os(macOS)
+    private static var activity: NSObjectProtocol?
+    #endif
+
+    static func update(for status: PlayerStatus) {
+        let awake: Bool
+        switch status {
+        case .playing, .connecting, .reconnecting:
+            awake = true
+        case .idle, .paused, .failed:
+            awake = false
+        }
+        #if os(tvOS)
+        if UIApplication.shared.isIdleTimerDisabled != awake {
+            UIApplication.shared.isIdleTimerDisabled = awake
+        }
+        #elseif os(macOS)
+        if awake, activity == nil {
+            activity = ProcessInfo.processInfo.beginActivity(
+                options: [.idleDisplaySleepDisabled, .userInitiated], reason: "Live-TV läuft")
+        } else if !awake, let current = activity {
+            ProcessInfo.processInfo.endActivity(current)
+            activity = nil
+        }
+        #endif
+    }
+}

@@ -1,0 +1,163 @@
+name: FritzTV
+options:
+  bundleIdPrefix: de.home
+  createIntermediateGroups: true
+  deploymentTarget:
+    tvOS: "17.0"
+    macOS: "14.0"
+
+packages:
+  FritzTVKit:
+    path: FritzTVKit
+  VLCKitSPM:
+    url: https://github.com/koombea/vlckit-spm
+    from: 3.6.0
+
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    MARKETING_VERSION: "1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    CODE_SIGN_STYLE: Automatic
+
+targets:
+  FritzTV-tvOS:
+    type: application
+    platform: tvOS
+    sources:
+      - path: App/Shared
+      - path: App/tvOS
+    dependencies:
+      - package: FritzTVKit
+      - package: VLCKitSPM
+        product: VLCKitSPM
+      - target: FritzTV-tvOS-TopShelf
+      - sdk: AVKit.framework
+    info:
+      path: App/tvOS/Info.plist
+      properties:
+        CFBundleDisplayName: FritzTV
+        UIUserInterfaceStyle: Dark
+        CFBundleURLTypes:
+          - CFBundleURLName: de.home.fritztv
+            CFBundleURLSchemes:
+              - fritztv
+        NSLocalNetworkUsageDescription: Zum Abrufen der Sender von deiner FRITZ!Box.
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
+          NSAllowsArbitraryLoadsForMedia: true
+          NSExceptionDomains:
+            fritz.box:
+              NSExceptionAllowsInsecureHTTPLoads: true
+              NSIncludesSubdomains: true
+            fritz.repeater:
+              NSExceptionAllowsInsecureHTTPLoads: true
+              NSIncludesSubdomains: true
+            # Senderlogos vom AVM-Server (nur per http erreichbar)
+            tv.avm.de:
+              NSExceptionAllowsInsecureHTTPLoads: true
+    # Keine App Group: Das kostenlose „Personal Team“ (Apple-ID ohne Entwicklerprogramm) unterstützt
+    # sie nicht. Das Top Shelf zeigt deshalb die Standard-Sender statt der eigenen Senderplätze.
+    # Mit bezahltem Entwickler-Account hier und bei der Top-Shelf-Erweiterung wieder ergänzen:
+    #   entitlements: { path: App/tvOS/FritzTV.entitlements,
+    #                   properties: { com.apple.security.application-groups: [group.de.home.fritztv] } }
+    settings:
+      base:
+        PRODUCT_NAME: FritzTV
+        PRODUCT_BUNDLE_IDENTIFIER: de.home.fritztv
+        TARGETED_DEVICE_FAMILY: "3"
+        # Icon aus App/tvOS/Assets.xcassets (erzeugt mit scripts/make-icons.py)
+        ASSETCATALOG_COMPILER_APPICON_NAME: "App Icon & Top Shelf Image"
+
+  FritzTV-macOS:
+    type: application
+    platform: macOS
+    sources:
+      - path: App/Shared
+      - path: App/macOS
+    dependencies:
+      - package: FritzTVKit
+      - package: VLCKitSPM
+        product: VLCKitSPM
+      - sdk: AVKit.framework
+    info:
+      path: App/macOS/Info.plist
+      properties:
+        CFBundleDisplayName: FritzTV
+        CFBundleIconFile: AppIcon
+        CFBundleIconName: AppIcon
+        LSApplicationCategoryType: public.app-category.entertainment
+        CFBundleURLTypes:
+          - CFBundleURLName: de.home.fritztv.mac
+            CFBundleURLSchemes:
+              - fritztv
+        NSLocalNetworkUsageDescription: Zum Abrufen der Sender von deiner FRITZ!Box.
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
+          NSAllowsArbitraryLoadsForMedia: true
+          NSExceptionDomains:
+            fritz.box:
+              NSExceptionAllowsInsecureHTTPLoads: true
+              NSIncludesSubdomains: true
+            fritz.repeater:
+              NSExceptionAllowsInsecureHTTPLoads: true
+              NSIncludesSubdomains: true
+            # Senderlogos vom AVM-Server (nur per http erreichbar)
+            tv.avm.de:
+              NSExceptionAllowsInsecureHTTPLoads: true
+    postCompileScripts:
+      - name: Vollständiges AppIcon.icns erzeugen
+        basedOnDependencyAnalysis: false
+        script: |
+          ICONSET_TMP=$(mktemp -d -t fritztv-icon).iconset
+          mkdir -p "$ICONSET_TMP"
+          cp "$SRCROOT"/App/macOS/Assets.xcassets/AppIcon.appiconset/icon_*.png "$ICONSET_TMP/"
+          mkdir -p "$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH"
+          iconutil -c icns "$ICONSET_TMP" -o "$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/AppIcon.icns"
+          rm -rf "$ICONSET_TMP"
+    settings:
+      base:
+        PRODUCT_NAME: FritzTV
+        PRODUCT_BUNDLE_IDENTIFIER: de.home.fritztv.mac
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        CODE_SIGN_IDENTITY: "-"
+        ENABLE_HARDENED_RUNTIME: NO
+        ENABLE_APP_SANDBOX: NO
+
+  FritzTV-tvOS-TopShelf:
+    type: app-extension
+    platform: tvOS
+    sources:
+      - path: App/TopShelf
+    dependencies:
+      - package: FritzTVKit
+    info:
+      path: App/TopShelf/Info.plist
+      properties:
+        CFBundleDisplayName: FritzTV
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.tv-top-shelf
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).ContentProvider
+        NSAppTransportSecurity:
+          NSExceptionDomains:
+            tv.avm.de:
+              NSExceptionAllowsInsecureHTTPLoads: true
+    settings:
+      base:
+        PRODUCT_NAME: FritzTVTopShelf
+        PRODUCT_BUNDLE_IDENTIFIER: de.home.fritztv.topshelf
+        TARGETED_DEVICE_FAMILY: "3"
+
+schemes:
+  FritzTV-tvOS:
+    build:
+      targets:
+        FritzTV-tvOS: all
+    run:
+      config: Debug
+  FritzTV-macOS:
+    build:
+      targets:
+        FritzTV-macOS: all
+    run:
+      config: Debug
