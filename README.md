@@ -41,13 +41,29 @@ Voraussetzung ist eine FRITZ!Box mit integriertem **DVB-C-Tuner** und aktivierte
 | **Sendungsinfo, „Von Anfang an“ & Timeshift** | **Mediathek-Suche („Sendung verpasst“)** |
 | ![Sendungsinfo & Timeshift](docs/screenshots/sendungsinfo-timeshift.png) | ![Mediathek-Suche](docs/screenshots/mediathek-suche.png) |
 
-## Starten
+## Installation & Starten
+
+### Option A: Fertige Mac-App herunterladen (schnellster Weg)
+
+1. Unter **[Releases](https://github.com/DrkBnkl/FritzTV/releases)** die Datei `FritzTV-macOS-Universal.zip` herunterladen und entpacken.
+2. Die entpackte `FritzTV.app` in den Ordner `/Applications` (Programme) ziehen.
+3. **Wichtiger Hinweis zum ersten Start (macOS Gatekeeper):**  
+   Da es sich um ein privates Open-Source-Projekt ohne kostenpflichtiges Apple-Entwicklerzertifikat handelt, ist die App ad-hoc signiert. macOS blockiert Apps aus dem Internet beim einfachen Doppelklick zunächst mit dem Hinweis *„App kann nicht geöffnet werden, da der Entwickler nicht verifiziert werden kann“*.
+   - **Lösung:** Beim ersten Start **Rechtsklick** (oder `Control`-Taste + Klick) auf `FritzTV.app` machen und im Menü **Öffnen** wählen, danach im Dialogfeld auf **Öffnen** klicken.  
+   - *Alternativ im Terminal:*  
+     ```bash
+     xattr -cr /Applications/FritzTV.app
+     ```
+
+---
+
+### Option B: Aus dem Quellcode selbst bauen (Mac & Apple TV)
 
 1. Im Terminal in diesen Ordner wechseln und `./setup.sh` ausführen.
    Das installiert bei Bedarf XcodeGen (über Homebrew), erzeugt `FritzTV.xcodeproj` und öffnet es.
 2. Xcode lädt beim ersten Öffnen VLCKit herunter (rund 200 MB, dauert etwas).
-3. **Mac:** Oben das Schema `FritzTV-macOS` und „My Mac“ wählen, ⌘R – oder direkt `./scripts/deploy-macos.sh` ausführen, um die fertige Release-Version nach `/Applications/FritzTV.app` zu installieren.
-4. **Apple TV:** Zum Aktualisieren auf dem eigenen Apple TV im Heimnetz `./scripts/deploy-tvos.sh` ausführen (baut die Release-Version und installiert sie per `xcrun devicectl` ohne Daten- oder Einstellungsverlust).
+3. **Mac:** Oben das Schema `FritzTV-macOS` und „My Mac“ wählen, ⌘R – oder direkt `./scripts/deploy-macos.sh` ausführen, um die fertige Universal-Version nach `/Applications/FritzTV.app` zu installieren.
+4. **Apple TV:** Zum Installieren auf dem eigenen Apple TV im Heimnetz `./scripts/deploy-tvos.sh` ausführen (baut die Release-Version und installiert sie per `xcrun devicectl` ohne Daten- oder Einstellungsverlust).
 
 Unterwegs (z. B. über Mobilfunk oder im Hotel): vorher das WireGuard-VPN der FRITZ!Box verbinden. Klappt die Namensauflösung von `fritz.box` über das VPN nicht, nimmt die App automatisch `192.168.178.1`.
 
