@@ -58,45 +58,6 @@ struct RemoteInputModifier: ViewModifier {
     }
 }
 
-/// Gestenerkenner, der sofort bei `pressesBegan` (Tastendruck unten, 0 ms Latenz) auslöst,
-/// statt wie `UITapGestureRecognizer` erst beim Loslassen (`pressesEnded`).
-final class DirectPressGestureRecognizer: UIGestureRecognizer {
-    let pressType: UIPress.PressType
-    let onTrigger: () -> Void
-
-    init(pressType: UIPress.PressType, onTrigger: @escaping () -> Void) {
-        self.pressType = pressType
-        self.onTrigger = onTrigger
-        super.init(target: nil, action: nil)
-        allowedPressTypes = [NSNumber(value: pressType.rawValue)]
-        allowedTouchTypes = []
-        cancelsTouchesInView = false
-        delaysTouchesBegan = false
-        delaysTouchesEnded = false
-    }
-
-    override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent) {
-        for press in presses where press.type == pressType {
-            state = .recognized
-            onTrigger()
-            return
-        }
-        state = .failed
-    }
-
-    override func pressesEnded(_ presses: Set<UIPress>, with event: UIPressesEvent) {
-        state = .failed
-    }
-
-    override func pressesCancelled(_ presses: Set<UIPress>, with event: UIPressesEvent) {
-        state = .failed
-    }
-
-    override func reset() {
-        state = .possible
-    }
-}
-
 /// Hängt Gestenerkenner an das Fenster, um auf dem Apple TV zu unterscheiden, was SwiftUI nicht
 /// trennt: Klick auf den Ring oben/unten (zappen) und Wischen auf der Touch-Fläche (Senderleiste
 /// bzw. Info, wie bei Apple). Dazu die Seitentasten kompatibler Fernbedienungen.
@@ -138,40 +99,13 @@ private struct RemotePressBridge: UIViewRepresentable {
             guard installedWindow !== window else { return }
             installedWindow = window
 
-            // Physische Klicks mit 0 ms Latenz direkt auf pressesBegan abfangen
-            addDirect(press: .select, to: window) { [weak self] in
-                guard let self else { return }
-                RemoteInputArbiter.shared.handlePhysicalPress(.select, model: self.model)
-            }
-            addDirect(press: .upArrow, to: window) { [weak self] in
-                guard let self else { return }
-                RemoteInputArbiter.shared.handlePhysicalPress(.up, model: self.model)
-            }
-            addDirect(press: .downArrow, to: window) { [weak self] in
-                guard let self else { return }
-                RemoteInputArbiter.shared.handlePhysicalPress(.down, model: self.model)
-            }
-            addDirect(press: .leftArrow, to: window) { [weak self] in
-                guard let self else { return }
-                RemoteInputArbiter.shared.handlePhysicalPress(.left, model: self.model)
-            }
-            addDirect(press: .rightArrow, to: window) { [weak self] in
-                guard let self else { return }
-                RemoteInputArbiter.shared.handlePhysicalPress(.right, model: self.model)
-            }
-
+            add(press: .select, to: window, action: #selector(selectPress))
             add(press: .pageUp, to: window, action: #selector(pageUp))
             add(press: .pageDown, to: window, action: #selector(pageDown))
             add(swipe: .up, to: window, action: #selector(swipeUp))
             add(swipe: .down, to: window, action: #selector(swipeDown))
             add(hold: .upArrow, to: window, action: #selector(holdUp(_:)))
             add(hold: .downArrow, to: window, action: #selector(holdDown(_:)))
-        }
-
-        private func addDirect(press: UIPress.PressType, to view: UIView, onTrigger: @escaping () -> Void) {
-            let recognizer = DirectPressGestureRecognizer(pressType: press, onTrigger: onTrigger)
-            recognizer.delegate = self
-            view.addGestureRecognizer(recognizer)
         }
 
         /// Gedrückt halten (Ring oben/unten): nach kurzer Zeit wiederholt weiterblättern.
@@ -219,6 +153,7 @@ private struct RemotePressBridge: UIViewRepresentable {
         func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
                                shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool { true }
 
+        @objc private func selectPress() { RemoteInputArbiter.shared.handle(.select, model: model) }
         @objc private func swipeUp() { RemoteSwipeArbiter.shared.swiped(.swipeUp, model: model) }
         @objc private func swipeDown() { RemoteSwipeArbiter.shared.swiped(.swipeDown, model: model) }
         @objc private func pageUp() {
@@ -233,26 +168,13 @@ private struct RemotePressBridge: UIViewRepresentable {
 }
 
 /// Schnelle, verzögerungsfreie Eingabeverarbeitung für die Siri Remote auf dem Apple TV.
-/// Verarbeitet physische Klicks direkt auf UIKit-Ebene mit 0 ms Latenz und verwirft Focus-Engine-Echos.
+/// Verarbeitet Auswahl-Klicks direkt auf UIKit-Ebene und Richtungsbefehle ohne Zwischenschritte.
 @MainActor
 final class RemoteInputArbiter {
     static let shared = RemoteInputArbiter()
-    private var lastPhysicalPressTime = Date.distantPast
 
-    /// Physischer Klick auf das Touchpad oder den Klickpad-Ring (0 ms Latenz über pressesBegan).
-    func handlePhysicalPress(_ command: RemoteCommand, model: AppModel) {
-        lastPhysicalPressTime = Date()
-        handle(command, model: model)
-    }
-
-    /// Verarbeitet die Richtungsbefehle von SwiftUIs `onMoveCommand` (z. B. bei Wischbewegungen auf der Glasfläche).
+    /// Verarbeitet die Richtungsbefehle von SwiftUIs `onMoveCommand` (sowohl Klicks auf den Ring als auch Wischen).
     func handleMoveCommand(_ direction: MoveCommandDirection, model: AppModel) {
-        let now = Date()
-        // Wenn kurz zuvor bereits ein physischer Klick verarbeitet wurde: Echo verwerfen.
-        if now.timeIntervalSince(lastPhysicalPressTime) < 0.18 {
-            return
-        }
-
         // Bei gehaltenem Blättern verwerfen
         if (direction == .up || direction == .down), RemoteHoldRepeater.shared.swallowReleaseMove() {
             return

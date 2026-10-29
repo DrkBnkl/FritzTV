@@ -108,11 +108,8 @@ struct EPGOverviewView: View {
         }
         .animation(.easeOut(duration: 0.2), value: nav.detail)
         .background {
-            ZStack {
-                Color.black.opacity(0.88)
-                Rectangle().fill(.ultraThickMaterial).opacity(0.4)
-            }
-            .ignoresSafeArea()
+            Color.black.opacity(0.92)
+                .ignoresSafeArea()
         }
         // Keine eigene Fokus- oder Tastensteuerung: Fernbedienung und Tastatur laufen wie bei der
         // Senderliste über `AppModel.handle`. Zwei konkurrierende Steuerungen führten dazu, dass
@@ -130,10 +127,7 @@ struct EPGOverviewView: View {
         .onChange(of: nav.selectedKey) { _, _ in
             DebugLog.log("Übersicht: Auswahl geändert")
             let vh = rasterHeight > 0 ? rasterHeight : (EPGMetrics.s(68) * CGFloat(visibleRows))
-            let target = targetScrollOffset(for: selectedIndex, viewportHeight: vh)
-            withAnimation(.interactiveSpring(response: 0.10, dampingFraction: 0.92)) {
-                scrollOffset = target
-            }
+            scrollOffset = targetScrollOffset(for: selectedIndex, viewportHeight: vh)
         }
         #if os(macOS)
         .onMacScrollWheel { dx, dy in
@@ -310,7 +304,6 @@ struct EPGOverviewView: View {
                 scrollOffset = targetScrollOffset(for: selectedIndex, viewportHeight: height)
             }
         }
-        .animation(.interactiveSpring(response: 0.14, dampingFraction: 0.90), value: nav.cursorTime)
     }
 
     private func updateVisibleRows(height: CGFloat) {
@@ -718,10 +711,6 @@ private struct ProgramBlockView: View {
                 .strokeBorder(isFocused ? Color.white : (isLive ? EPGColors.accent.opacity(0.35) : EPGColors.cellBorder),
                               lineWidth: isFocused ? 2 : 1)
         )
-        // Fokus wie im System: angewählte Kachel hebt sich leicht an.
-        .scaleEffect(isFocused ? 1.03 : 1)
-        .shadow(color: .black.opacity(isFocused ? 0.5 : 0), radius: isFocused ? 10 : 0, y: isFocused ? 4 : 0)
-        .animation(.easeOut(duration: 0.12), value: isFocused)
         #if os(macOS)
         .help(tooltipText)
         #endif
