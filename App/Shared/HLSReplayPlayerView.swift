@@ -322,6 +322,8 @@ struct MacAVPlayerView: NSViewRepresentable {
 final class MacAVPlayerHostView: NSView {
     let playerView = AVPlayerView()
     private var windowObservers: [NSObjectProtocol] = []
+    private var snapshotTimer: Timer?
+    private var crossfadeTimer: Timer?
     private var lastSnapshotImage: NSImage?
 
     override init(frame frameRect: NSRect) {
@@ -347,6 +349,7 @@ final class MacAVPlayerHostView: NSView {
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         removeObservers()
+        stopSnapshotTimer()
         guard let window else { return }
         window.miniwindowImage = nil
         window.dockTile.contentView = nil
@@ -368,14 +371,98 @@ final class MacAVPlayerHostView: NSView {
                 self?.handleDidDeminiaturize()
             }
         )
+
+        startSnapshotTimer()
     }
 
-    private func applyMiniwindowImage(_ image: NSImage) {
+    private func startSnapshotTimer() {
+        stopSnapshotTimer()
+        // Nach Wiedergabebeginn zeitnah erstes Standbild sichern
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { [weak self] in
+            self?.performSnapshotCheck()
+        }
+        // Regelmäßig im Hintergrund ein aktuelles Standbild für das Dock-Icon vorhalten.
+        // Intervall: 12 Sekunden (angenehm ruhig, kein nerviges Stroboskop/Flimmern im Augenwinkel).
+        snapshotTimer = Timer.scheduledTimer(withTimeInterval: 12.0, repeats: true) { [weak self] _ in
+            self?.performSnapshotCheck()
+        }
+    }
+
+    private func stopSnapshotTimer() {
+        crossfadeTimer?.invalidate()
+        crossfadeTimer = nil
+        snapshotTimer?.invalidate()
+        snapshotTimer = nil
+    }
+
+    private func performSnapshotCheck() {
+        guard let player = playerView.player,
+              player.timeControlStatus == .playing,
+              let snapshot = captureSnapshot() else { return }
+        let fitted = snapshot.aspectFittedForDock()
+        if let window, window.isMiniaturized {
+            transitionToDockImage(fitted)
+        } else {
+            lastSnapshotImage = fitted
+        }
+    }
+
+    private func ensureDockImageView() -> NSImageView? {
+        guard let window else { return nil }
+        if let iv = window.dockTile.contentView as? NSImageView {
+            return iv
+        }
+        let iv = NSImageView(frame: NSRect(x: 0, y: 0, width: 256, height: 256))
+        iv.imageScaling = .scaleProportionallyUpOrDown
+        window.dockTile.contentView = iv
+        return iv
+    }
+
+    private func applyDockImage(_ image: NSImage) {
         guard let window else { return }
         window.miniwindowImage = image
-        if let iv = window.dockTile.contentView as? NSImageView {
-            iv.imageScaling = .scaleProportionallyUpOrDown
+        if let iv = ensureDockImageView() {
+            iv.image = image
             window.dockTile.display()
+        }
+    }
+
+    private func transitionToDockImage(_ newImage: NSImage) {
+        guard let window, window.isMiniaturized else {
+            lastSnapshotImage = newImage
+            applyDockImage(newImage)
+            return
+        }
+
+        crossfadeTimer?.invalidate()
+
+        guard let fromImage = lastSnapshotImage else {
+            lastSnapshotImage = newImage
+            applyDockImage(newImage)
+            return
+        }
+
+        // Sanfter Übergang: 10 Schritte à 80 ms = 800 ms Gesamtdauer.
+        // Keine harten Sprünge, kein Flackern im Augenwinkel.
+        let steps = 10
+        let stepDuration = 0.08
+        var currentStep = 0
+
+        crossfadeTimer = Timer.scheduledTimer(withTimeInterval: stepDuration, repeats: true) { [weak self] timer in
+            guard let self, let win = self.window, win.isMiniaturized else {
+                timer.invalidate()
+                return
+            }
+            currentStep += 1
+            let progress = min(1.0, CGFloat(currentStep) / CGFloat(steps))
+            let blended = fromImage.crossfaded(with: newImage, progress: progress)
+            self.applyDockImage(blended)
+
+            if currentStep >= steps {
+                timer.invalidate()
+                self.crossfadeTimer = nil
+                self.lastSnapshotImage = newImage
+            }
         }
     }
 
@@ -400,21 +487,27 @@ final class MacAVPlayerHostView: NSView {
 
     private func handleWillMiniaturize() {
         guard let window else { return }
+        crossfadeTimer?.invalidate()
+        crossfadeTimer = nil
         if let snapshot = captureSnapshot() {
             let fitted = snapshot.aspectFittedForDock()
             lastSnapshotImage = fitted
-            applyMiniwindowImage(fitted)
+            applyDockImage(fitted)
+        } else if let last = lastSnapshotImage {
+            applyDockImage(last)
         }
     }
 
     private func handleDidMiniaturize() {
         if let window, window.miniwindowImage == nil, let last = lastSnapshotImage {
-            applyMiniwindowImage(last)
+            applyDockImage(last)
         }
         playerView.isHidden = true
     }
 
     private func handleDidDeminiaturize() {
+        crossfadeTimer?.invalidate()
+        crossfadeTimer = nil
         playerView.isHidden = false
         window?.miniwindowImage = nil
         if let window {
@@ -434,6 +527,7 @@ final class MacAVPlayerHostView: NSView {
     }
 
     deinit {
+        stopSnapshotTimer()
         removeObservers()
     }
 }

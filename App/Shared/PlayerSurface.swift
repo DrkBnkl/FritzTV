@@ -54,6 +54,22 @@ extension NSImage {
         canvas.unlockFocus()
         return canvas
     }
+
+    /// Überblendet zwei Dock-Bilder für einen sanften, ablenkungsfreien Übergang im Dock.
+    func crossfaded(with other: NSImage, progress: CGFloat) -> NSImage {
+        let canvas = NSImage(size: size)
+        canvas.lockFocus()
+        draw(in: NSRect(origin: .zero, size: size),
+             from: .zero,
+             operation: .sourceOver,
+             fraction: 1.0 - progress)
+        other.draw(in: NSRect(origin: .zero, size: size),
+                   from: .zero,
+                   operation: .sourceOver,
+                   fraction: progress)
+        canvas.unlockFocus()
+        return canvas
+    }
 }
 
 struct PlayerSurface: NSViewRepresentable {
@@ -97,6 +113,7 @@ final class MacVideoHostView: NSView {
     let videoView = NSView()
     private var windowObservers: [NSObjectProtocol] = []
     private var snapshotTimer: Timer?
+    private var crossfadeTimer: Timer?
     private var lastSnapshotImage: NSImage?
     private var snapshotPath: String {
         FileManager.default.temporaryDirectory
@@ -164,15 +181,17 @@ final class MacVideoHostView: NSView {
         DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { [weak self] in
             self?.takeSnapshot()
         }
-        // Regelmäßig im Hintergrund ein aktuelles Standbild für das Dock-Icon vorhalten
-        snapshotTimer = Timer.scheduledTimer(withTimeInterval: 15.0, repeats: true) { [weak self] _ in
-            guard let self, let window = self.window, !window.isMiniaturized,
-                  let player = self.player, player.isPlaying else { return }
+        // Regelmäßig im Hintergrund ein aktuelles Standbild für das Dock-Icon vorhalten.
+        // Intervall: 12 Sekunden (angenehm ruhig, kein nerviges Stroboskop/Flimmern im Augenwinkel).
+        snapshotTimer = Timer.scheduledTimer(withTimeInterval: 12.0, repeats: true) { [weak self] _ in
+            guard let self, let player = self.player, player.isPlaying else { return }
             self.takeSnapshot()
         }
     }
 
     private func stopSnapshotTimer() {
+        crossfadeTimer?.invalidate()
+        crossfadeTimer = nil
         snapshotTimer?.invalidate()
         snapshotTimer = nil
     }
@@ -183,24 +202,76 @@ final class MacVideoHostView: NSView {
         player.saveVideoSnapshot(at: snapshotPath, withWidth: 320, andHeight: 0)
     }
 
-    private func applyMiniwindowImage(_ image: NSImage) {
+    private func ensureDockImageView() -> NSImageView? {
+        guard let window else { return nil }
+        if let iv = window.dockTile.contentView as? NSImageView {
+            return iv
+        }
+        let iv = NSImageView(frame: NSRect(x: 0, y: 0, width: 256, height: 256))
+        iv.imageScaling = .scaleProportionallyUpOrDown
+        window.dockTile.contentView = iv
+        return iv
+    }
+
+    private func applyDockImage(_ image: NSImage) {
         guard let window else { return }
         window.miniwindowImage = image
-        if let iv = window.dockTile.contentView as? NSImageView {
-            iv.imageScaling = .scaleProportionallyUpOrDown
+        if let iv = ensureDockImageView() {
+            iv.image = image
             window.dockTile.display()
+        }
+    }
+
+    private func transitionToDockImage(_ newImage: NSImage) {
+        guard let window, window.isMiniaturized else {
+            lastSnapshotImage = newImage
+            applyDockImage(newImage)
+            return
+        }
+
+        crossfadeTimer?.invalidate()
+
+        guard let fromImage = lastSnapshotImage else {
+            lastSnapshotImage = newImage
+            applyDockImage(newImage)
+            return
+        }
+
+        // Sanfter Übergang: 10 Schritte à 80 ms = 800 ms Gesamtdauer.
+        // Keine harten Sprünge, kein Flackern im Augenwinkel.
+        let steps = 10
+        let stepDuration = 0.08
+        var currentStep = 0
+
+        crossfadeTimer = Timer.scheduledTimer(withTimeInterval: stepDuration, repeats: true) { [weak self] timer in
+            guard let self, let win = self.window, win.isMiniaturized else {
+                timer.invalidate()
+                return
+            }
+            currentStep += 1
+            let progress = min(1.0, CGFloat(currentStep) / CGFloat(steps))
+            let blended = fromImage.crossfaded(with: newImage, progress: progress)
+            self.applyDockImage(blended)
+
+            if currentStep >= steps {
+                timer.invalidate()
+                self.crossfadeTimer = nil
+                self.lastSnapshotImage = newImage
+            }
         }
     }
 
     private func handleWillMiniaturize() {
         guard let window else { return }
+        crossfadeTimer?.invalidate()
+        crossfadeTimer = nil
         // Sobald das Fenster beginnt, ins Dock zu gleiten: sofort das aktuellste Standbild setzen
         if let image = lastSnapshotImage {
-            applyMiniwindowImage(image)
+            applyDockImage(image)
         } else if let last = player?.lastSnapshot {
             let fitted = last.aspectFittedForDock()
             lastSnapshotImage = fitted
-            applyMiniwindowImage(fitted)
+            applyDockImage(fitted)
         }
         takeSnapshot()
     }
@@ -220,9 +291,10 @@ final class MacVideoHostView: NSView {
         }
         guard let rawImage else { return }
         let fitted = rawImage.aspectFittedForDock()
-        lastSnapshotImage = fitted
         if let window, window.isMiniaturized {
-            applyMiniwindowImage(fitted)
+            transitionToDockImage(fitted)
+        } else {
+            lastSnapshotImage = fitted
         }
     }
 
@@ -230,13 +302,13 @@ final class MacVideoHostView: NSView {
         // Sicherstellen, dass das Standbild im Dock-Icon angezeigt wird
         if let window, window.miniwindowImage == nil {
             if let image = lastSnapshotImage {
-                applyMiniwindowImage(image)
+                applyDockImage(image)
             } else if let rawImage = player?.lastSnapshot ?? (
                 FileManager.default.fileExists(atPath: snapshotPath) ? NSImage(contentsOfFile: snapshotPath) : nil
             ) {
                 let fitted = rawImage.aspectFittedForDock()
                 lastSnapshotImage = fitted
-                applyMiniwindowImage(fitted)
+                applyDockImage(fitted)
             }
         }
         // Videofläche ausblenden, damit keine OpenGL-Frames mehr ins Dock gerendert werden (kein Ruckeln, 0 % GPU-Last)
@@ -244,6 +316,8 @@ final class MacVideoHostView: NSView {
     }
 
     private func handleDidDeminiaturize() {
+        crossfadeTimer?.invalidate()
+        crossfadeTimer = nil
         videoView.isHidden = false
         window?.miniwindowImage = nil
         if let window {
