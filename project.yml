@@ -129,6 +129,7 @@ targets:
         CODE_SIGN_IDENTITY: "-"
         ENABLE_HARDENED_RUNTIME: NO
         ENABLE_APP_SANDBOX: NO
+        SWIFT_OBJC_BRIDGING_HEADER: App/macOS/FritzTV-Bridging-Header.h
 
   FritzTV-tvOS-TopShelf:
     type: app-extension

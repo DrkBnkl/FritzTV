@@ -32,7 +32,11 @@ struct RootView: View {
                 // In der Programmübersicht läuft das Bild verkleinert im Vorschaufenster weiter.
                 // Dieselbe Ansicht wird nur verschoben (kein zweiter Player, kein Neuaufbau).
                 PlayerSurface(player: player.mediaPlayer, previewFrame: previewFrame, dockLivePreview: model.settings.dockLivePreview)
-                    .modifier(EPGPreviewPlacement(frame: previewFrame))
+                    .modifier(EPGPreviewPlacement(
+                        frame: previewFrame,
+                        channelText: model.currentEntry.map { "\($0.number) · \($0.group.displayName)" } ?? "Live-TV",
+                        showOverlay: true
+                    ))
                 // Schwarzer Bildschirm beim Umschalten: Blendet Standbilder des alten Senders aus,
                 // bis der neue Sender ein Bild zeigt. Aus der Programmübersicht immer – das kleine
                 // Vorschaubild wächst sonst kurz mit dem alten Sender auf Vollbild.
@@ -45,7 +49,7 @@ struct RootView: View {
                 PlayerSurface(player: player.replayPlayer, previewFrame: previewFrame, dockLivePreview: model.settings.dockLivePreview)
                     .opacity(player.isReplaying ? 1 : 0)
                     .allowsHitTesting(false)
-                    .modifier(EPGPreviewPlacement(frame: previewFrame))
+                    .modifier(EPGPreviewPlacement(frame: previewFrame, showOverlay: false))
                 if let replay = model.activeHLSReplay {
                     HLSReplayPlayerView(url: replay.url, startDate: replay.startDate) {
                         model.hlsReplayClosed()
@@ -380,20 +384,49 @@ struct EPGPreviewFrameKey: PreferenceKey {
 ///
 /// Apple TV: Die SwiftUI-Modifier bleiben immer gleich; verkleinert wird in
 /// `VideoHostView` per UIKit-Transformation (siehe dort, warum).
-/// Mac: Die Fläche behält die volle Größe und wird per `scaleEffect` verkleinert.
+/// Mac: Die Fläche behält die volle Größe und wird passgenau verkleinert und positioniert,
+/// ohne ihre Identität zu verlieren (kein Player-Neuaufbau, unterbrechungsfreier Ton).
 struct EPGPreviewPlacement: ViewModifier {
     let frame: CGRect?
+    var channelText: String? = nil
+    var showOverlay: Bool = true
 
     func body(content: Content) -> some View {
         #if os(macOS)
         GeometryReader { geo in
             let full = geo.size
-            let scale = frame.map { $0.width / max(full.width, 1) } ?? 1
-            content
-                .frame(width: full.width, height: full.height)
-                .clipShape(RoundedRectangle(cornerRadius: frame == nil ? 0 : 10 / max(scale, 0.01)))
-                .scaleEffect(scale, anchor: .topLeading)
-                .offset(x: frame?.minX ?? 0, y: frame?.minY ?? 0)
+            let isPreview = frame != nil
+            let targetFrame = frame ?? CGRect(origin: .zero, size: full)
+            let scaleX = targetFrame.width / max(full.width, 1)
+            let scaleY = targetFrame.height / max(full.height, 1)
+
+            ZStack(alignment: .topLeading) {
+                content
+                    .frame(width: full.width, height: full.height)
+                    .scaleEffect(x: scaleX, y: scaleY, anchor: .topLeading)
+                    .frame(width: targetFrame.width, height: targetFrame.height, alignment: .topLeading)
+                    .clipShape(RoundedRectangle(cornerRadius: isPreview ? 12 : 0, style: .continuous))
+
+                if isPreview && showOverlay {
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .strokeBorder(EPGColors.accent, lineWidth: 2)
+
+                    if let channelText {
+                        HStack(spacing: 6) {
+                            Circle().fill(EPGColors.liveGreen).frame(width: 8, height: 8)
+                            Text(channelText)
+                                .font(.system(size: 13, weight: .bold))
+                                .foregroundStyle(EPGColors.text)
+                        }
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
+                        .background(Color.black.opacity(0.72), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                        .padding(10)
+                    }
+                }
+            }
+            .frame(width: targetFrame.width, height: targetFrame.height)
+            .offset(x: targetFrame.minX, y: targetFrame.minY)
         }
         .ignoresSafeArea()
         .allowsHitTesting(frame == nil)
