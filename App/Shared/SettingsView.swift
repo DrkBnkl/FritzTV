@@ -18,16 +18,16 @@ struct SettingsView: View {
     enum SettingsRow: Int, CaseIterable {
         case backTarget = 0
         case bannerSeconds = 1
-        case channelManager = 2
-        case reloadList = 3
-        case networkCaching = 4
-        case rtspTCP = 5
-        case preferHD = 6
-        case deinterlaceSD = 7
-        case blackScreenOnZap = 8
-        case timeshift = 9
-        case timeshiftMinutes = 10
-        case dockLivePreview = 11
+        case dockLivePreview = 2
+        case channelManager = 3
+        case reloadList = 4
+        case networkCaching = 5
+        case rtspTCP = 6
+        case preferHD = 7
+        case deinterlaceSD = 8
+        case blackScreenOnZap = 9
+        case timeshift = 10
+        case timeshiftMinutes = 11
         case audioDelay = 12
         case audioDelayAC3 = 13
         case mediathekSubtitles = 14
@@ -50,6 +50,14 @@ struct SettingsView: View {
                     OptionRow(title: "Sendungsinfo einblenden", selection: $settings.bannerSeconds,
                               options: bannerValues) { "\($0) s" }
                     .cursorRow(.bannerSeconds, focusedIndex: $focusedIndex)
+
+                    #if os(macOS)
+                    Toggle("Dock-Vorschau aktualisieren", isOn: $settings.dockLivePreview)
+                        .cursorRow(.dockLivePreview, focusedIndex: $focusedIndex)
+                    Text("Bei minimiertem Fenster per Überblendung aktualisieren. Ausgeschaltet: festes Standbild.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    #endif
                 }
 
                 Section("Sendersortierung") {
@@ -122,11 +130,6 @@ struct SettingsView: View {
                               options: timeshiftMinuteValues) { "\($0) Min." }
                     .disabled(!settings.timeshift)
                     .cursorRow(.timeshiftMinutes, focusedIndex: $focusedIndex)
-
-                    #if os(macOS)
-                    Toggle("Dock-Vorschau aktualisieren (Überblendung)", isOn: $settings.dockLivePreview)
-                        .cursorRow(.dockLivePreview, focusedIndex: $focusedIndex)
-                    #endif
 
                     #if os(tvOS)
                     Toggle("Bildwiederholrate auf 50 Hz", isOn: $settings.match50Hz)
