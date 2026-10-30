@@ -17,14 +17,31 @@ enum BoxPasswordStore {
         ]
         var item: CFTypeRef?
         guard SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess,
-              let data = item as? Data else { return nil }
-        return String(data: data, encoding: .utf8)
+              let data = item as? Data,
+              let password = String(data: data, encoding: .utf8) else { return nil }
+        #if os(macOS)
+        // Migration: Falls das Kennwort zuvor ohne uneingeschränkte SecAccess-ACL gespeichert war,
+        // einmalig neu speichern, damit bei künftigen Zugriffen keine Abfrage mehr erfolgt.
+        _ = save(password)
+        #endif
+        return password
     }
 
     @discardableResult
     static func save(_ password: String) -> Bool {
         delete()
         guard !password.isEmpty else { return true }
+        #if os(macOS)
+        var attributes: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account,
+            kSecValueData as String: Data(password.utf8)
+        ]
+        if let access = CreateUnrestrictedKeychainAccess("FRITZ!Box") {
+            attributes[kSecAttrAccess as String] = access
+        }
+        #else
         let attributes: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
@@ -32,6 +49,7 @@ enum BoxPasswordStore {
             kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly,
             kSecValueData as String: Data(password.utf8)
         ]
+        #endif
         return SecItemAdd(attributes as CFDictionary, nil) == errSecSuccess
     }
 
@@ -44,7 +62,16 @@ enum BoxPasswordStore {
         SecItemDelete(query as CFDictionary)
     }
 
-    static var hasPassword: Bool { load()?.isEmpty == false }
+    static var hasPassword: Bool {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account,
+            kSecReturnAttributes as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne
+        ]
+        return SecItemCopyMatching(query as CFDictionary, nil) == errSecSuccess
+    }
 }
 
 /// Ablauf des Sendersuchlaufs aus der App: Fernsehbild stoppen (der Suchlauf braucht die Tuner),
