@@ -183,12 +183,13 @@ final class MacVideoHostView: NSView {
         stopSnapshotTimer()
         // Nach Wiedergabebeginn zeitnah erstes Standbild sichern
         DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { [weak self] in
-            self?.takeSnapshot()
+            guard let self, let player = self.player, player.isPlaying, player.hasVideoOut else { return }
+            self.takeSnapshot()
         }
         // Regelmäßig im Hintergrund ein aktuelles Standbild für das Dock-Icon vorhalten.
         // Intervall: 12 Sekunden (angenehm ruhig, kein nerviges Stroboskop/Flimmern im Augenwinkel).
         snapshotTimer = Timer.scheduledTimer(withTimeInterval: 12.0, repeats: true) { [weak self] _ in
-            guard let self, let player = self.player, player.isPlaying else { return }
+            guard let self, let player = self.player, player.isPlaying, player.hasVideoOut else { return }
             // Wenn das Fenster minimiert ist und die Dock-Vorschau deaktiviert wurde,
             // bleibt das Standbild stehen und es werden keine neuen Snapshots angefordert.
             if let window = self.window, window.isMiniaturized, !self.dockLivePreview {
@@ -206,9 +207,12 @@ final class MacVideoHostView: NSView {
     }
 
     private func takeSnapshot() {
-        guard let player, player.isPlaying else { return }
+        guard let player, player.isPlaying, player.hasVideoOut, player.videoSize.width > 0 else { return }
         try? FileManager.default.removeItem(atPath: snapshotPath)
-        player.saveVideoSnapshot(at: snapshotPath, withWidth: 320, andHeight: 0)
+        let path = snapshotPath
+        _ = SafeObjCExecute {
+            player.saveVideoSnapshot(at: path, withWidth: 320, andHeight: 0)
+        }
     }
 
     private func ensureDockImageView() -> NSImageView? {

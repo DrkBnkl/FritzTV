@@ -196,7 +196,7 @@ struct EPGScreenshotView: View {
                             .font(.system(size: 15, weight: .bold))
                             .foregroundStyle(uiAccent)
                         Spacer()
-                        Text("Donnerstag, 29. Oktober · 20:42 Uhr")
+                        Text("Freitag, 30. Oktober · 20:42 Uhr")
                             .font(.system(size: 15, weight: .medium))
                             .foregroundStyle(uiSecondary)
                     }
@@ -690,7 +690,7 @@ struct MediathekScreenshotView: View {
 
     let items: [Item] = [
         Item(channel: "ZDF", topic: "Terra X", title: "Wunder der Erde – Die Alpen von oben",
-             date: "29.10.2026 · 20:15 Uhr", duration: "44 Min.", hd: true, ut: true,
+             date: "30.10.2026 · 20:15 Uhr", duration: "44 Min.", hd: true, ut: true,
              desc: "Vom Mont Blanc bis zum Großglockner: Spektakuläre Luftaufnahmen zeigen das empfindliche Ökosystem der Alpen im Wandel der Jahreszeiten.",
              selected: true),
         Item(channel: "ZDF", topic: "Terra X", title: "Wunder der Erde – Skandinaviens wilder Norden",

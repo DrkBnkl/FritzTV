@@ -9,4 +9,5 @@
    - **Verpflichtendes macOS-Release:** Jede Aktualisierung im Branch `main` erfordert zwingend das Kompilieren einer neuen **macOS Universal-Version** (`FritzTV-macOS-Universal.zip` für Apple Silicon & Intel) und deren Bereitstellung/Aktualisierung im GitHub-Release.
 
 ## Lokales Testen & Deployment
-- Nach relevanten Codeänderungen wird die macOS-App weiterhin lokal mit `./scripts/deploy-macos.sh` kompiliert und nach `/Applications/FritzTV.app` installiert, damit der Benutzer die Änderungen sofort lokal testen kann.
+- Nach relevanten Codeänderungen wird die macOS-App lokal mit `./scripts/deploy-macos.sh` kompiliert und nach `/Applications/FritzTV.app` installiert, damit der Benutzer die Änderungen sofort lokal testen kann.
+- Nach relevanten Codeänderungen wird die aktuelle Version ebenfalls automatisch mit `./scripts/deploy-tvos.sh` auf das Apple TV aktualisiert (sofern gekoppelt/erreichbar).
