@@ -44,6 +44,9 @@ final class AppSettings: ObservableObject {
     @Published var xmltvSource: String { didSet { defaults.set(xmltvSource, forKey: Keys.xmltvSource) } }
     /// Nur Apple TV: Bildwiederholrate auf 50 Hz umschalten.
     @Published var match50Hz: Bool { didSet { defaults.set(match50Hz, forKey: Keys.match50Hz) } }
+    /// Nur macOS: Dock-Vorschau bei minimiertem Fenster regelmäßig per Überblendung aktualisieren.
+    /// Ist die Option deaktiviert, bleibt ein statisches Standbild des Minimierungszeitpunkts stehen.
+    @Published var dockLivePreview: Bool { didSet { defaults.set(dockLivePreview, forKey: Keys.dockLivePreview) } }
     /// Benutzername für die TR-064-Anmeldung (Sendersuchlauf). Das Kennwort liegt im Schlüsselbund.
     @Published var boxUsername: String { didSet { defaults.set(boxUsername, forKey: Keys.boxUsername) } }
     /// Zuletzt gesehene Sender (maximal 2 Schlüssel).
@@ -76,7 +79,8 @@ final class AppSettings: ObservableObject {
             Keys.timeshift: true,
             Keys.timeshiftMinutes: 90,
             Keys.bannerSeconds: 7,
-            Keys.match50Hz: true
+            Keys.match50Hz: true,
+            Keys.dockLivePreview: true
         ])
         host = defaults.string(forKey: Keys.host) ?? ""
         preferHD = defaults.bool(forKey: Keys.preferHD)
@@ -107,6 +111,7 @@ final class AppSettings: ObservableObject {
         bannerSeconds = storedBanner > 0 ? storedBanner : 7
         backTarget = defaults.string(forKey: Keys.backTarget).flatMap(BackTarget.init(rawValue:)) ?? .lastChannel
         match50Hz = defaults.bool(forKey: Keys.match50Hz)
+        dockLivePreview = defaults.object(forKey: Keys.dockLivePreview) != nil ? defaults.bool(forKey: Keys.dockLivePreview) : true
         xmltvSource = defaults.string(forKey: Keys.xmltvSource) ?? ""
         boxUsername = defaults.string(forKey: Keys.boxUsername) ?? ""
         recentKeys = Array((defaults.stringArray(forKey: Keys.recentKeys) ?? []).prefix(2))
@@ -161,6 +166,7 @@ final class AppSettings: ObservableObject {
         static let backTarget = "backTarget"
         static let variantResetV2 = "variantStateResetV2"
         static let match50Hz = "match50Hz"
+        static let dockLivePreview = "dockLivePreview"
         static let xmltvSource = "xmltvSource"
         static let boxUsername = "boxUsername"
         static let lastChannel = "lastChannelKey"

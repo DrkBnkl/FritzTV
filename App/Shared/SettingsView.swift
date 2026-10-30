@@ -27,10 +27,11 @@ struct SettingsView: View {
         case blackScreenOnZap = 8
         case timeshift = 9
         case timeshiftMinutes = 10
-        case audioDelay = 11
-        case audioDelayAC3 = 12
-        case mediathekSubtitles = 13
-        case reloadXMLTV = 14
+        case dockLivePreview = 11
+        case audioDelay = 12
+        case audioDelayAC3 = 13
+        case mediathekSubtitles = 14
+        case reloadXMLTV = 15
     }
 
     private let cachingValues = [500, 1000, 2000, 3000, 5000]
@@ -121,6 +122,11 @@ struct SettingsView: View {
                               options: timeshiftMinuteValues) { "\($0) Min." }
                     .disabled(!settings.timeshift)
                     .cursorRow(.timeshiftMinutes, focusedIndex: $focusedIndex)
+
+                    #if os(macOS)
+                    Toggle("Dock-Vorschau aktualisieren (Überblendung)", isOn: $settings.dockLivePreview)
+                        .cursorRow(.dockLivePreview, focusedIndex: $focusedIndex)
+                    #endif
 
                     #if os(tvOS)
                     Toggle("Bildwiederholrate auf 50 Hz", isOn: $settings.match50Hz)
@@ -285,6 +291,8 @@ struct SettingsView: View {
             settings.timeshift = (delta > 0)
         case .timeshiftMinutes:
             settings.timeshiftMinutes = Self.step(timeshiftMinuteValues, from: settings.timeshiftMinutes, by: delta)
+        case .dockLivePreview:
+            settings.dockLivePreview = (delta > 0)
         case .audioDelay:
             let next = min(max(settings.audioDelayMs + delta * 25, -500), 500)
             settings.audioDelayMs = next
@@ -333,6 +341,8 @@ struct SettingsView: View {
             settings.timeshift.toggle()
         case .timeshiftMinutes:
             adjustSetting(delta: 1)
+        case .dockLivePreview:
+            settings.dockLivePreview.toggle()
         case .audioDelay, .audioDelayAC3:
             break
         case .mediathekSubtitles:

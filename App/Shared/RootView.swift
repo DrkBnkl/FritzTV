@@ -31,7 +31,7 @@ struct RootView: View {
                 }
                 // In der Programmübersicht läuft das Bild verkleinert im Vorschaufenster weiter.
                 // Dieselbe Ansicht wird nur verschoben (kein zweiter Player, kein Neuaufbau).
-                PlayerSurface(player: player.mediaPlayer, previewFrame: previewFrame)
+                PlayerSurface(player: player.mediaPlayer, previewFrame: previewFrame, dockLivePreview: model.settings.dockLivePreview)
                     .modifier(EPGPreviewPlacement(frame: previewFrame))
                 // Schwarzer Bildschirm beim Umschalten: Blendet Standbilder des alten Senders aus,
                 // bis der neue Sender ein Bild zeigt. Aus der Programmübersicht immer – das kleine
@@ -42,7 +42,7 @@ struct RootView: View {
                     Color.black.ignoresSafeArea()
                 }
                 // Timeshift: Mitschnitt-Wiedergabe liegt über dem stumm weiterlaufenden Live-Bild.
-                PlayerSurface(player: player.replayPlayer, previewFrame: previewFrame)
+                PlayerSurface(player: player.replayPlayer, previewFrame: previewFrame, dockLivePreview: model.settings.dockLivePreview)
                     .opacity(player.isReplaying ? 1 : 0)
                     .allowsHitTesting(false)
                     .modifier(EPGPreviewPlacement(frame: previewFrame))

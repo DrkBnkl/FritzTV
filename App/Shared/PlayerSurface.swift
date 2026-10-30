@@ -76,16 +76,19 @@ struct PlayerSurface: NSViewRepresentable {
     let player: VLCMediaPlayer
     /// Nur Apple TV; auf dem Mac verkleinert `EPGPreviewPlacement`.
     var previewFrame: CGRect? = nil
+    var dockLivePreview: Bool = true
 
     func makeNSView(context: Context) -> MacVideoHostView {
         let view = MacVideoHostView()
         view.player = player
+        view.dockLivePreview = dockLivePreview
         bindDrawable(view.videoView)
         return view
     }
 
     func updateNSView(_ nsView: MacVideoHostView, context: Context) {
         nsView.player = player
+        nsView.dockLivePreview = dockLivePreview
         if (player.drawable as? NSView) != nsView.videoView {
             bindDrawable(nsView.videoView)
         }
@@ -110,6 +113,7 @@ struct PlayerSurface: NSViewRepresentable {
 /// gerendert werden (kein Ruckeln, 0 % GPU-Last).
 final class MacVideoHostView: NSView {
     weak var player: VLCMediaPlayer?
+    var dockLivePreview: Bool = true
     let videoView = NSView()
     private var windowObservers: [NSObjectProtocol] = []
     private var snapshotTimer: Timer?
@@ -185,6 +189,11 @@ final class MacVideoHostView: NSView {
         // Intervall: 12 Sekunden (angenehm ruhig, kein nerviges Stroboskop/Flimmern im Augenwinkel).
         snapshotTimer = Timer.scheduledTimer(withTimeInterval: 12.0, repeats: true) { [weak self] _ in
             guard let self, let player = self.player, player.isPlaying else { return }
+            // Wenn das Fenster minimiert ist und die Dock-Vorschau deaktiviert wurde,
+            // bleibt das Standbild stehen und es werden keine neuen Snapshots angefordert.
+            if let window = self.window, window.isMiniaturized, !self.dockLivePreview {
+                return
+            }
             self.takeSnapshot()
         }
     }
@@ -292,7 +301,9 @@ final class MacVideoHostView: NSView {
         guard let rawImage else { return }
         let fitted = rawImage.aspectFittedForDock()
         if let window, window.isMiniaturized {
-            transitionToDockImage(fitted)
+            if dockLivePreview {
+                transitionToDockImage(fitted)
+            }
         } else {
             lastSnapshotImage = fitted
         }
@@ -358,6 +369,7 @@ struct PlayerSurface: UIViewRepresentable {
     let player: VLCMediaPlayer
     /// Vorschaufenster der Programmübersicht (Bildschirmkoordinaten) oder `nil` für Vollbild.
     var previewFrame: CGRect? = nil
+    var dockLivePreview: Bool = true
 
     func makeUIView(context: Context) -> VideoHostView {
         let view = VideoHostView()

@@ -325,6 +325,9 @@ final class MacAVPlayerHostView: NSView {
     private var snapshotTimer: Timer?
     private var crossfadeTimer: Timer?
     private var lastSnapshotImage: NSImage?
+    private var dockLivePreview: Bool {
+        UserDefaults.standard.object(forKey: "dockLivePreview") != nil ? UserDefaults.standard.bool(forKey: "dockLivePreview") : true
+    }
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -397,11 +400,16 @@ final class MacAVPlayerHostView: NSView {
 
     private func performSnapshotCheck() {
         guard let player = playerView.player,
-              player.timeControlStatus == .playing,
-              let snapshot = captureSnapshot() else { return }
+              player.timeControlStatus == .playing else { return }
+        if let window, window.isMiniaturized, !dockLivePreview {
+            return
+        }
+        guard let snapshot = captureSnapshot() else { return }
         let fitted = snapshot.aspectFittedForDock()
         if let window, window.isMiniaturized {
-            transitionToDockImage(fitted)
+            if dockLivePreview {
+                transitionToDockImage(fitted)
+            }
         } else {
             lastSnapshotImage = fitted
         }
