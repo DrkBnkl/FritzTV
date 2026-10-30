@@ -113,11 +113,15 @@ struct RootView: View {
         // Vollbild statt Sheet: Das halbdurchsichtige Sheet lag über dem laufenden Bild und machte
         // die Einstellungen schwer lesbar.
         .fullScreenCover(isPresented: $model.showSettings, onDismiss: { model.applySettings() }) {
-            SettingsView(model: model, settings: model.settings)
+            if model.showSettings {
+                SettingsView(model: model, settings: model.settings)
+            }
         }
         #else
         .sheet(isPresented: $model.showSettings, onDismiss: { model.applySettings() }) {
-            SettingsView(model: model, settings: model.settings)
+            if model.showSettings {
+                SettingsView(model: model, settings: model.settings)
+            }
         }
         #endif
         .searchResultsPresentation(isPresented: Binding(
