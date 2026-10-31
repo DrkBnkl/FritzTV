@@ -39,6 +39,11 @@ public struct ChannelGroup: Identifiable, Hashable, Sendable {
     public func areAllVariantsDead(deadIDs: Set<String>) -> Bool {
         !variants.isEmpty && variants.allSatisfy { deadIDs.contains($0.id) }
     }
+
+    /// Gibt an, ob es sich um einen öffentlich-rechtlichen Sender handelt.
+    public var isPublicBroadcaster: Bool {
+        variants.first?.isPublicBroadcaster ?? false
+    }
 }
 
 /// Senderliste der App, gebaut aus den M3U-Listen der Box.
@@ -47,10 +52,18 @@ public struct ChannelCatalog: Sendable {
 
     /// Fasst Einträge mit gleichem `groupKey` zusammen. Die Reihenfolge folgt dem
     /// ersten Auftreten in der Liste der Box, die wiederum HD vor SD sortiert.
-    public init(channels: [Channel]) {
+    ///
+    /// Öffentlich-rechtliche SD-Sender werden standardmäßig herausgefiltert (`filterPublicSD = true`),
+    /// da ARD und ZDF ihre SD-Ausstrahlungen eingestellt haben und solche Einträge nur ein
+    /// schwarzes Bild oder Hinweistafeln liefern.
+    public init(channels: [Channel], filterPublicSD: Bool = true) {
+        let effectiveChannels = filterPublicSD
+            ? channels.filter { !( $0.kind == .tv && $0.isPublicBroadcaster && !$0.isHD ) }
+            : channels
+
         var order: [String] = []
         var buckets: [String: [Channel]] = [:]
-        for channel in channels {
+        for channel in effectiveChannels {
             let key = "\(channel.kind.rawValue):\(channel.groupKey)"
             if buckets[key] == nil { order.append(key) }
             buckets[key, default: []].append(channel)
@@ -61,7 +74,8 @@ public struct ChannelCatalog: Sendable {
                 if lhs.isHD != rhs.isHD { return lhs.isHD }
                 return lhs.position < rhs.position
             }
-            return ChannelGroup(key: key, displayName: first.displayName, variants: sorted)
+            let display = sorted.first(where: { $0.isHD })?.displayName ?? first.displayName
+            return ChannelGroup(key: key, displayName: display, variants: sorted)
         }
     }
 

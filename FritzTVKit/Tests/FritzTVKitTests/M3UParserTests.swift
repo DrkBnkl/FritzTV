@@ -42,21 +42,33 @@ final class M3UParserTests: XCTestCase {
     }
 
     func testGroupsHDAndSDVariants() throws {
+        // Standard: Öffentlich-rechtliche SD-Sender werden herausgefiltert
         let catalog = ChannelCatalog(channels: try fixtureChannels())
         XCTAssertEqual(catalog.groups.count, 81)
-        XCTAssertEqual(catalog.groups.filter { $0.hd != nil && $0.sd != nil }.count, 11)
+        // Nur private Sender behalten beide Varianten (z. B. HSE, QVC, Shop LC, Sonnenklar, Channel21)
+        XCTAssertEqual(catalog.groups.filter { $0.hd != nil && $0.sd != nil }.count, 6)
 
+        // ÖRR-Sender wie ZDF haben nur noch die HD-Variante (kein SD-Fallback mit schwarzem Bild)
         let zdf = try XCTUnwrap(catalog.groups.first { $0.displayName == "ZDF" })
         XCTAssertEqual(zdf.preferredChannel(preferHD: true).name, "ZDF HD")
-        XCTAssertEqual(zdf.preferredChannel(preferHD: false).name, "ZDF")
+        XCTAssertEqual(zdf.preferredChannel(preferHD: false).name, "ZDF HD")
+        XCTAssertNil(zdf.sd)
 
-        // Unterschiedliche Schreibweise wird zusammengeführt.
+        // Unterschiedliche Schreibweise bei Privaten wird zusammengeführt.
         let hseExtra = try XCTUnwrap(catalog.groups.first { $0.key == "tv:hse extra" })
         XCTAssertEqual(hseExtra.variants.count, 2)
+        XCTAssertNotNil(hseExtra.hd)
+        XCTAssertNotNil(hseExtra.sd)
 
         // Nur-SD-Sender fallen auf SD zurück.
         let rtl = try XCTUnwrap(catalog.groups.first { $0.displayName == "RTL" })
         XCTAssertEqual(rtl.preferredChannel(preferHD: true).name, "RTL")
+
+        // Ohne Filterung: alle 11 Gruppen behalten HD und SD (historische Rohdaten)
+        let unfiltered = ChannelCatalog(channels: try fixtureChannels(), filterPublicSD: false)
+        XCTAssertEqual(unfiltered.groups.filter { $0.hd != nil && $0.sd != nil }.count, 11)
+        let unfilteredZDF = try XCTUnwrap(unfiltered.groups.first { $0.displayName == "ZDF" })
+        XCTAssertEqual(unfilteredZDF.preferredChannel(preferHD: false).name, "ZDF")
     }
 
     func testGroupsByMultiplex() throws {
@@ -91,10 +103,23 @@ final class M3UParserTests: XCTestCase {
         let br = try XCTUnwrap(catalog.groups.first { $0.displayName == "BR Süd" })
         XCTAssertEqual(br.candidates(preferHD: true).compactMap { $0.tuning?.frequencyMHz }, [402, 338])
 
-        // SD-Varianten kommen nach allen HD-Varianten.
+        // Öffentlich-rechtliche Sender wie ZDF haben nur noch funktionierende HD-Varianten.
         let zdf = try XCTUnwrap(catalog.groups.first { $0.displayName == "ZDF" })
         let zdfCandidates = zdf.candidates(preferHD: true)
-        XCTAssertTrue(zdfCandidates.first?.isHD == true)
-        XCTAssertFalse(zdfCandidates.last?.isHD == true)
+        XCTAssertTrue(zdfCandidates.allSatisfy(\.isHD))
+
+        // Bei Privatsendern mit HD und SD kommen SD-Varianten nach allen HD-Varianten.
+        let qvc = try XCTUnwrap(catalog.groups.first { $0.displayName == "QVC" })
+        let qvcCandidates = qvc.candidates(preferHD: true)
+        XCTAssertTrue(qvcCandidates.first?.isHD == true)
+        XCTAssertFalse(qvcCandidates.last?.isHD == true)
+
+        // ZDFneo HD wird trotz unterschiedlicher Schreibweise ("ZDFneo HD" vs DefaultLineup "zdf_neo")
+        // richtig zugeordnet und belegt Platz 7 in der Standardbelegung ohne tote SD-Variante.
+        let lineup = ChannelLineup(catalog: catalog)
+        let slot7 = try XCTUnwrap(lineup.entry(number: 7))
+        XCTAssertEqual(slot7.group.displayName, "ZDFneo")
+        XCTAssertTrue(slot7.group.variants.allSatisfy(\.isHD))
+        XCTAssertFalse(slot7.isNew)
     }
 }

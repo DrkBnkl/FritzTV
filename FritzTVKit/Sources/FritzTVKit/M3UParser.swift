@@ -89,18 +89,22 @@ enum ChannelName {
     static func split(_ name: String) -> (base: String, isHD: Bool, language: String?) {
         var working = name
         var language: String?
+        var foundHDInParentheses = false
 
         if working.hasSuffix(")"), let open = working.lastIndex(of: "(") {
             let inner = working[working.index(after: open)..<working.index(before: working.endIndex)]
-            if (2...3).contains(inner.count), inner.allSatisfy(\.isLetter) {
+            if inner.caseInsensitiveCompare("hd") == .orderedSame {
+                foundHDInParentheses = true
+                working = String(working[..<open]).trimmingCharacters(in: .whitespaces)
+            } else if (2...3).contains(inner.count), inner.allSatisfy(\.isLetter) {
                 language = inner.lowercased()
                 working = String(working[..<open]).trimmingCharacters(in: .whitespaces)
             }
         }
 
         let tokens = working.split(separator: " ")
-        let isHD = tokens.contains("HD")
-        let base = tokens.filter { $0 != "HD" }.joined(separator: " ")
+        let isHD = foundHDInParentheses || tokens.contains { $0.caseInsensitiveCompare("HD") == .orderedSame }
+        let base = tokens.filter { $0.caseInsensitiveCompare("HD") != .orderedSame }.joined(separator: " ")
         return (base.isEmpty ? working : base, isHD, language)
     }
 }

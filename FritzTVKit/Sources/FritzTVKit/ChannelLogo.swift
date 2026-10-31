@@ -34,6 +34,10 @@ public enum ChannelLogo {
         if lower.hasSuffix(" hd") {
             names.append(String(channelName.dropLast(3)))
         }
+        let canonical = Channel.canonicalGroupKey(for: channelName)
+        if !names.contains(canonical) {
+            names.append(canonical)
+        }
         var seen = Set<String>()
         return names.map(slug(for:)).filter { !$0.isEmpty && seen.insert($0).inserted }
             .compactMap { URL(string: "\($0).png", relativeTo: baseURL)?.absoluteURL }

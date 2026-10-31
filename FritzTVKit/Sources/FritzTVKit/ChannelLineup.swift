@@ -38,14 +38,15 @@ public struct ChannelLineup: Sendable {
     public init(catalog: ChannelCatalog, preferences: LineupPreferences = .standard) {
         let tv = catalog.tvGroups
         let byKey = Dictionary(tv.map { (Self.shortKey($0), $0) }, uniquingKeysWith: { first, _ in first })
-        let known = Set(preferences.order)
+        let known = Set(preferences.order.map { Channel.canonicalGroupKey(for: $0) })
 
         var visible: [(ChannelGroup, Bool)] = []
         var hidden: [ChannelGroup] = []
 
         for key in preferences.order {
-            guard let group = byKey[key] else { continue }   // Sender nicht mehr empfangbar
-            if preferences.hidden.contains(key) {
+            let canonical = Channel.canonicalGroupKey(for: key)
+            guard let group = byKey[canonical] ?? byKey[key] else { continue }   // Sender nicht mehr empfangbar
+            if preferences.hidden.contains(key) || preferences.hidden.contains(canonical) {
                 hidden.append(group)
             } else {
                 visible.append((group, false))
