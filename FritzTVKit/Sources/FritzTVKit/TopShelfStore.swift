@@ -35,9 +35,13 @@ public struct TopShelfStore: Sendable {
         TopShelfChannel(number: 3, name: "rbb Berlin HD", groupKey: "rbb berlin", isHD: true),
         TopShelfChannel(number: 4, name: "arte HD", groupKey: "arte", isHD: true),
         TopShelfChannel(number: 5, name: "3sat HD", groupKey: "3sat", isHD: true),
-        TopShelfChannel(number: 6, name: "KiKA HD", groupKey: "kika", isHD: true),
-        TopShelfChannel(number: 7, name: "phoenix HD", groupKey: "phoenix", isHD: true),
-        TopShelfChannel(number: 8, name: "ZDFneo HD", groupKey: "zdf_neo", isHD: true)
+        TopShelfChannel(number: 6, name: "phoenix HD", groupKey: "phoenix", isHD: true),
+        TopShelfChannel(number: 7, name: "ZDFneo HD", groupKey: "zdf_neo", isHD: true),
+        TopShelfChannel(number: 8, name: "ZDFinfo HD", groupKey: "zdfinfo", isHD: true),
+        TopShelfChannel(number: 9, name: "ONE HD", groupKey: "one", isHD: true),
+        TopShelfChannel(number: 10, name: "tagesschau24 HD", groupKey: "tagesschau24", isHD: true),
+        TopShelfChannel(number: 11, name: "KiKA HD", groupKey: "kika", isHD: true),
+        TopShelfChannel(number: 12, name: "ARD-alpha HD", groupKey: "ard alpha", isHD: true)
     ]
 
     /// Speichert die Sender. Gibt `true` zurück, wenn sich etwas geändert hat
