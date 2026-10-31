@@ -140,7 +140,7 @@ final class AppModel: ObservableObject {
         self.player = resolvedPlayer
         if let data = resolvedSettings.lineupData,
            let saved = try? JSONDecoder().decode(LineupPreferences.self, from: data) {
-            preferences = saved
+            preferences = saved.normalized
         } else {
             preferences = .standard
         }

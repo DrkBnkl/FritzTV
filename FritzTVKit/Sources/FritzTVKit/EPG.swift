@@ -59,7 +59,29 @@ public struct EPGChannelSchedule: Sendable, Hashable {
 
     public init(serviceID: Int, programs: [EPGProgram]) {
         self.serviceID = serviceID
-        self.programs = programs.sorted { $0.startDate < $1.startDate }
+        self.programs = programs.sorted(by: Self.startsEarlier)
+    }
+
+    /// Eindeutige Reihenfolge, auch bei gleicher Startzeit.
+    static func startsEarlier(_ a: EPGProgram, _ b: EPGProgram) -> Bool {
+        a.startDate != b.startDate ? a.startDate < b.startDate : a.eventID < b.eventID
+    }
+
+    /// Die aktuell laufende Sendung, unabhängig von der Reihenfolge der Eingabe. Überlappen sich
+    /// Sendungen (z. B. eine verschobene neben ihrem alten Eintrag), gilt die zuletzt beginnende.
+    static func current<S: Sequence>(in programs: S, at date: Date) -> EPGProgram? where S.Element == EPGProgram {
+        var running: EPGProgram?
+        var scheduled: EPGProgram?
+        for program in programs where program.startDate <= date {
+            if program.isRunningStatus, date < program.endDate.addingTimeInterval(overrunGrace),
+               running.map({ startsEarlier($0, program) }) ?? true {
+                running = program
+            }
+            if date < program.endDate, scheduled.map({ startsEarlier($0, program) }) ?? true {
+                scheduled = program
+            }
+        }
+        return running ?? scheduled
     }
 
     /// Wie lange eine als „läuft“ gemeldete Sendung über ihr geplantes Ende hinaus noch als
@@ -70,12 +92,7 @@ public struct EPGChannelSchedule: Sendable, Hashable {
     /// solange die Sendung nicht schon lange vorbei ist – sonst bliebe eine veraltete Meldung
     /// hängen, wenn keine neuen Daten mehr kommen.
     public func currentProgram(at date: Date = Date()) -> EPGProgram? {
-        if let explicit = programs.last(where: {
-            $0.isRunningStatus && $0.startDate <= date && date < $0.endDate.addingTimeInterval(Self.overrunGrace)
-        }) {
-            return explicit
-        }
-        return programs.first { date >= $0.startDate && date < $0.endDate }
+        Self.current(in: programs, at: date)
     }
 
     /// Die danach folgende Sendung.
