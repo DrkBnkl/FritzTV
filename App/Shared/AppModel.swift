@@ -1216,11 +1216,15 @@ final class AppModel: ObservableObject {
         // wenn sich die Platznummern seit dem letzten Speichern verschoben haben.
         let keyParameter = URLComponents(url: url, resolvingAgainstBaseURL: false)?
             .queryItems?.first { $0.name == "key" }?.value
-        if let keyParameter, let entry = lineup.entries.first(where: { Self.key($0) == keyParameter }) {
+        if let keyParameter, let entry = lineup.entries.first(where: {
+            Self.key($0) == keyParameter || Channel.canonicalGroupKey(for: Self.key($0)) == Channel.canonicalGroupKey(for: keyParameter)
+        }) {
             tune(to: entry.number)
             return true
         }
-        if let entry = lineup.entries.first(where: { Self.key($0) == target }) {
+        if let entry = lineup.entries.first(where: {
+            Self.key($0) == target || Channel.canonicalGroupKey(for: Self.key($0)) == Channel.canonicalGroupKey(for: target)
+        }) {
             tune(to: entry.number)
             return true
         } else if let number = Int(target) {
