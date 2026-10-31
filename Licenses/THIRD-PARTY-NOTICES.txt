@@ -1,0 +1,25 @@
+FritzTV – Hinweise zu Drittsoftware
+===================================
+
+FritzTV selbst steht unter der MIT-Lizenz (LICENSE-FritzTV.txt).
+Quellcode: https://github.com/DrkBnkl/FritzTV
+Der Quellcode einer bestimmten Version liegt unter dem gleichnamigen Tag, z. B. v1.2.1.
+
+VLCKit / libVLC (VideoLAN)
+--------------------------
+Die Videowiedergabe nutzt VLCKit 3.6.0, auf dem Mac dynamisch eingebunden als
+Contents/Frameworks/VLCKit.framework.
+
+VLCKit steht unter der GNU Lesser General Public License v2.1 (LGPL-2.1.txt). Das
+mitgelieferte Binary fasst libVLC und zahlreiche Module und Bibliotheken zusammen,
+darunter FFmpeg (LGPL 2.1 oder neuer). Einzelne enthaltene Module sind als
+GNU General Public License v2 oder neuer gekennzeichnet (GPL-2.0.txt). Deshalb liegen
+beide Lizenztexte bei; für die Teile unter GPL gelten deren Bedingungen.
+
+Quellcode:
+- VLCKit: https://code.videolan.org/videolan/VLCKit
+- VLC und libVLC: https://code.videolan.org/videolan/vlc
+- Verwendetes Binärpaket: https://github.com/koombea/vlckit-spm (Tag v3.6.0)
+
+FRITZ! und FRITZ!Box sind eingetragene Marken der AVM GmbH. Dieses Projekt ist
+unabhängig und steht in keiner Verbindung zu AVM oder den genannten Rundfunkanstalten.

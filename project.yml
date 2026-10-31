@@ -11,7 +11,9 @@ packages:
     path: FritzTVKit
   VLCKitSPM:
     url: https://github.com/koombea/vlckit-spm
-    from: 3.6.0
+    # Fest auf den Commit von v3.6.0: XcodeGen erzeugt das Projekt samt Package.resolved jedes
+    # Mal neu, und das Binärpaket eines Drittanbieters soll sich nie unbemerkt ändern.
+    revision: a581a7aa7b336208ebf54171a496a4f64cdbebfd
 
 settings:
   base:
@@ -27,6 +29,8 @@ targets:
     sources:
       - path: App/Shared
       - path: App/tvOS
+      - path: Licenses
+        type: folder
     dependencies:
       - package: FritzTVKit
       - package: VLCKitSPM
@@ -77,6 +81,8 @@ targets:
     sources:
       - path: App/Shared
       - path: App/macOS
+      - path: Licenses
+        type: folder
     dependencies:
       - package: FritzTVKit
       - package: VLCKitSPM
