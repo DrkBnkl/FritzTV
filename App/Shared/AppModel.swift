@@ -160,16 +160,29 @@ final class AppModel: ObservableObject {
             Task { @MainActor in
                 guard let self else { return }
                 let failedKey = self.playingKey
-                if let tunerStatus = await FritzBoxTunerClient().fetchStatus(host: self.boxHost) {
-                    // Die Abfrage dauert: Inzwischen umgeschaltet oder Bild da? Dann nichts überschreiben.
-                    guard self.playingKey == failedKey, case .failed = self.player.status else { return }
-                    if tunerStatus.allTunersBusy {
-                        self.player.setFailed(
-                            title: "Alle \(tunerStatus.totalTuners) Tuner belegt",
-                            message: "Die FRITZ!Box kann derzeit keinen freien Tuner bereitstellen.",
-                            hint: "Ein anderes Gerät im Heimnetz nutzt bereits Live-TV."
-                        )
-                    }
+                let tunerStatus = await FritzBoxTunerClient().fetchStatus(host: self.boxHost)
+                // Die Abfrage dauert: Inzwischen umgeschaltet oder Bild da? Dann nichts überschreiben.
+                guard self.playingKey == failedKey, case .failed = self.player.status else { return }
+                guard let tunerStatus else {
+                    self.player.setFailed(
+                        title: "Kein Bild für \(channelName)",
+                        message: "Die FRITZ!Box antwortet nicht auf die Tuner-Abfrage.",
+                        hint: "Netzwerk bzw. VPN prüfen. Ein neuer Versuch läuft automatisch."
+                    )
+                    return
+                }
+                if tunerStatus.allTunersBusy {
+                    self.player.setFailed(
+                        title: "Alle \(tunerStatus.totalTuners) Tuner belegt",
+                        message: "Die FRITZ!Box kann derzeit keinen freien Tuner bereitstellen.",
+                        hint: "Ein anderes Gerät im Heimnetz nutzt bereits Live-TV."
+                    )
+                } else {
+                    self.player.setFailed(
+                        title: "Kein Bild für \(channelName)",
+                        message: "Die Senderliste ist womöglich veraltet.",
+                        hint: "Sendersuchlauf starten: Einstellungen › Sendersuchlauf (mit Box-Kennwort) oder in der FRITZ!Box-Oberfläche unter DVB-C."
+                    )
                 }
             }
         }
@@ -227,13 +240,13 @@ final class AppModel: ObservableObject {
             rebuildLineup()
             loadState = .ready
             DebugLog.log("Senderliste von \(result.host): \(result.catalog.groups.count) Gruppen, \(lineup?.entries.count ?? 0) sichtbare Plätze")
+            refreshInternetEPG()
             if let link = pendingDeepLink {
                 pendingDeepLink = nil
                 if handleDeepLink(url: link) { return }
             }
             let start = lineup?.entries.first { Self.key($0) == settings.lastChannelKey }?.number ?? 1
             tune(to: start)
-            refreshInternetEPG()
         } catch let error as FritzBoxClient.ClientError {
             DebugLog.log("Senderliste fehlgeschlagen: \(error)")
             switch error {
@@ -1166,9 +1179,7 @@ final class AppModel: ObservableObject {
         Task { [weak self] in
             guard let self else { return }
             if let status = await FritzBoxTunerClient().fetchStatus(host: host) {
-                let activeTuner = status.tuners.first(where: {
-                    $0.isUsed && $0.hasLock && ($0.signalPower != nil || $0.signalNoiseRatio != nil)
-                }) ?? status.tuners.first(where: \.isUsed)
+                let activeTuner = status.activeTuner(forChannelNames: self.currentEntry?.group.epgNames ?? [])
 
                 self.player.updateTunerStats(
                     signalPower: activeTuner?.signalPower,
@@ -1204,6 +1215,30 @@ final class AppModel: ObservableObject {
             return true
         }
 
+        // Top Shelf schickt zusätzlich den Senderschlüssel (`?key=…`): Er stimmt auch dann noch,
+        // wenn sich die Platznummern seit dem letzten Speichern verschoben haben. Gibt es den Sender
+        // im eigenen Kabelnetz nicht, darf die Nummer nicht einspringen: Sie träfe einen anderen Sender.
+        let keyParameter = URLComponents(url: url, resolvingAgainstBaseURL: false)?
+            .queryItems?.first { $0.name == "key" }?.value
+        let entry: LineupEntry?
+        if let keyParameter {
+            entry = lineup.entry(groupKey: keyParameter)
+        } else if let match = lineup.entry(groupKey: target) {
+            entry = match
+        } else if let number = Int(target) {
+            entry = lineup.entry(number: number)
+        } else {
+            entry = lineup.entries.first {
+                $0.group.key.localizedCaseInsensitiveContains(target) ||
+                $0.group.displayName.localizedCaseInsensitiveContains(target)
+            }
+        }
+        guard let entry else {
+            DebugLog.log("Link ohne passenden Sender: \(url.absoluteString)")
+            player.showFeedback("Sender nicht in der Senderliste")
+            return false
+        }
+
         // Aktive Overlays oder Unterseiten schließen
         overlay = .none
         showSettings = false
@@ -1212,31 +1247,7 @@ final class AppModel: ObservableObject {
         activeMediathekURL = nil
         searchResultDialog = nil
 
-        // Top Shelf schickt zusätzlich den Senderschlüssel (`?key=…`): Er stimmt auch dann noch,
-        // wenn sich die Platznummern seit dem letzten Speichern verschoben haben.
-        let keyParameter = URLComponents(url: url, resolvingAgainstBaseURL: false)?
-            .queryItems?.first { $0.name == "key" }?.value
-        if let keyParameter, let entry = lineup.entries.first(where: {
-            Self.key($0) == keyParameter || Channel.canonicalGroupKey(for: Self.key($0)) == Channel.canonicalGroupKey(for: keyParameter)
-        }) {
-            tune(to: entry.number)
-            return true
-        }
-        if let entry = lineup.entries.first(where: {
-            Self.key($0) == target || Channel.canonicalGroupKey(for: Self.key($0)) == Channel.canonicalGroupKey(for: target)
-        }) {
-            tune(to: entry.number)
-            return true
-        } else if let number = Int(target) {
-            tune(to: number)
-            return true
-        } else if let entry = lineup.entries.first(where: {
-            $0.group.key.localizedCaseInsensitiveContains(target) ||
-            $0.group.displayName.localizedCaseInsensitiveContains(target)
-        }) {
-            tune(to: entry.number)
-            return true
-        }
-        return false
+        tune(to: entry.number)
+        return true
     }
 }

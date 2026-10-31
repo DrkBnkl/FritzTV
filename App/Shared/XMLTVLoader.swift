@@ -40,13 +40,20 @@ final class XMLTVLoader {
         task = Task { [weak self] in
             defer { self?.task = nil }
             guard let self else { return }
-            if needsCache, let cached = await Self.loadCache() {
-                self.store.setExternal(cached)
-                self.loadedCache = true
-                DebugLog.log("Programmdaten (Internet) aus Zwischenspeicher: \(cached.count) Sender")
-                self.onUpdate()
+            var shouldDownload = due
+            if needsCache {
+                if let cached = await Self.loadCache() {
+                    self.store.setExternal(cached)
+                    self.loadedCache = true
+                    DebugLog.log("Programmdaten (Internet) aus Zwischenspeicher: \(cached.count) Sender")
+                    self.onUpdate()
+                } else {
+                    // Das System darf den Cache-Ordner jederzeit leeren, der Zeitstempel des letzten
+                    // Downloads bleibt aber erhalten: Ohne Zwischenspeicher sofort neu laden.
+                    shouldDownload = true
+                }
             }
-            guard due, let url = URL(string: urlString) else { return }
+            guard shouldDownload, let url = URL(string: urlString) else { return }
             DebugLog.log("Lade Programmdaten aus dem Internet: \(url.absoluteString)")
             let began = Date()
             guard let result = await Self.download(url: url, wanted: wanted) else {

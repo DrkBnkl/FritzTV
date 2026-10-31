@@ -129,9 +129,13 @@ final class PlayerController: ObservableObject {
     private var reconnectTask: Task<Void, Never>?
     private var openedAt = Date()
     private var wasPlaying = false
-    /// Kommt per UDP kein Bild an (z. B. über VPN oder eine Firewall), wird für den Rest der Sitzung
-    /// RTP über TCP verwendet.
+    /// Kommt per UDP kein Bild an (z. B. über VPN oder eine Firewall), wird auf RTP über TCP gewechselt.
     private var forceTCP = false
+    /// Wann TCP erstmals Daten geliefert hat. Ohne diesen Beleg lag der Ausfall nicht an UDP
+    /// (z. B. Tuner belegt): Dann gilt der Wechsel nur bis zum nächsten Sender oder zur Fehlermeldung.
+    private var tcpConfirmedAt: Date?
+    /// Auch ein bestätigter Wechsel gilt nur so lange: Das Netz kann sich inzwischen geändert haben.
+    private static let tcpFallbackDuration: TimeInterval = 30 * 60
     /// Varianten des aktuellen Senders (z. B. alte und neue Frequenz nach einem Sendersuchlauf).
     private var candidates: [Channel] = []
     private var candidateIndex = 0
@@ -181,6 +185,10 @@ final class PlayerController: ObservableObject {
     /// Spielt die erste Variante. Kommt darüber nichts an, werden die übrigen der Reihe nach probiert.
     func play(candidates list: [Channel], options: PlaybackOptions, preferredVariantID: String? = nil) {
         guard !list.isEmpty else { return }
+        if let confirmed = tcpConfirmedAt, Date().timeIntervalSince(confirmed) > Self.tcpFallbackDuration {
+            tcpConfirmedAt = nil
+        }
+        resetUnconfirmedTCP()
         var ordered = list
         currentVariantKey = list.variantKey
         let savedVariant = preferredVariantID ?? workingVariant[currentVariantKey]
@@ -321,6 +329,7 @@ final class PlayerController: ObservableObject {
             if !wasPlaying {
                 wasPlaying = true
                 failedCandidates = 0
+                if forceTCP, tcpConfirmedAt == nil { tcpConfirmedAt = Date() }
                 if let channel {
                     let preferredQuality = channel.isHD == candidates.first?.isHD
                     if preferredQuality { workingVariant[currentVariantKey] = channel.id }
@@ -544,15 +553,28 @@ final class PlayerController: ObservableObject {
             scheduleReconnect(after: 1)
             return
         }
-        
+
+        resetUnconfirmedTCP()
+        // Schaut man zeitversetzt, bleibt der Puffer sehenswert, auch wenn live nichts mehr ankommt:
+        // Wiedergabe und Puffer behalten und den Live-Empfang im Hintergrund weiter versuchen.
+        if isReplaying, !candidates.isEmpty {
+            DebugLog.log("Live-Empfang gestört, Timeshift-Wiedergabe läuft weiter")
+            failedCandidates = 0
+            failedInThisSessionForCurrent = []
+            candidateIndex = 0
+            channel = candidates[0]
+            scheduleReconnect(after: 5)
+            return
+        }
+
         let channelName = channel?.displayName ?? "Sender"
         DebugLog.log("Keine Variante von \(channelName) liefert Bild.")
         setFailed(
             title: "Kein Bild für \(channelName)",
-            message: "Senderliste veraltet – Suchlauf starten",
-            hint: "Sendersuchlauf starten: Einstellungen › Sendersuchlauf (mit Box-Kennwort) oder in der FRITZ!Box-Oberfläche unter DVB-C."
+            message: "Der Sender liefert keine Daten.",
+            hint: "Die Ursache wird geprüft. Ein neuer Versuch läuft automatisch."
         )
-        // Kann die Meldung präzisieren (z. B. „Alle Tuner belegt“).
+        // Präzisiert die Meldung nach Abfrage der Box (Tuner belegt, Box nicht erreichbar, Suchlauf nötig).
         onAllCandidatesFailed?(channelName)
         scheduleRetryAfterFailure()
     }
@@ -574,14 +596,21 @@ final class PlayerController: ObservableObject {
         }
     }
 
-    /// Kommen per UDP keine Daten an (VPN, Firewall), für den Rest der Sitzung RTP über TCP nutzen.
+    /// Kommen per UDP keine Daten an (VPN, Firewall), RTP über TCP probieren.
     /// Gibt `true` zurück, wenn gerade umgeschaltet wurde.
     @discardableResult
     private func fallBackToTCP() -> Bool {
         guard options?.rtspTCP == false, !forceTCP else { return false }
         forceTCP = true
-        DebugLog.log("Keine Daten per UDP – Wechsel auf RTP über TCP für diese Sitzung")
+        DebugLog.log("Keine Daten per UDP – Wechsel auf RTP über TCP")
         return true
+    }
+
+    /// Nimmt einen TCP-Wechsel zurück, der keine Daten gebracht hat.
+    private func resetUnconfirmedTCP() {
+        guard forceTCP, tcpConfirmedAt == nil else { return }
+        forceTCP = false
+        DebugLog.log("Zurück zu UDP")
     }
 
     /// Verbindet denselben Sender neu. Der Timeshift-Puffer bleibt erhalten; schaut man gerade
@@ -843,11 +872,13 @@ final class PlayerController: ObservableObject {
             lastDirectionForward: &lastJumpForward,
             pressCount: &jumpPressCount
         )
-        let wasActive = isReplaying || canTimeshift
+        // Im Live-Bild gibt es nichts vorzuspulen: dann auch keine Sprungweite anzeigen.
+        let jumps = isReplaying || (!forward && canTimeshift)
         jump(seconds: Int(step.stepDelta))
-        if wasActive || !forward {
-            showFeedback(wasActive ? step.displayText
-                         : (options?.timeshift == true ? "Timeshift startet gleich …" : "Timeshift ist ausgeschaltet"))
+        if jumps {
+            showFeedback(step.displayText)
+        } else if !forward {
+            showFeedback(options?.timeshift == true ? "Timeshift startet gleich …" : "Timeshift ist ausgeschaltet")
         }
     }
 
