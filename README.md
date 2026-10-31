@@ -31,7 +31,7 @@ Voraussetzung ist eine FRITZ!Box mit integriertem **DVB-C-Tuner** und aktivierte
 > **Hinweise zur Kompatibilität & Kabelanbietern:**
 > - **Alle deutschen Kabelnetze unterstützt:** Kompatibel mit **Vodafone**, **PŸUR**, **NetCologne**, **wilhelm.tel**, **M-net** sowie allen Stadtwerken und lokalen Gemeinschaftsantennenanlagen mit DVB-C.
 > - **Dynamische Sendersortierung:** Sender werden über ihren Namen (`groupKey`) erkannt – unabhängig davon, auf welchen Frequenzen der jeweilige Betreiber sie einspeist.
-> - **Öffentlich-rechtliche Sender nur in HD:** Da ARD und ZDF ihre SD-Verbreitung eingestellt haben, liefert FritzTV ÖRR-Programme ausschließlich in unverschlüsseltem HD (tote SD-Reste werden automatisch gefiltert).
+> - **Öffentlich-rechtliche Sender nur in HD:** Da ARD und ZDF ihre SD-Verbreitung eingestellt haben, liefert FritzTV ÖRR-Programme in unverschlüsseltem HD (tote SD-Reste werden automatisch gefiltert). Nur wenn das eigene Kabelnetz einen Sender ausschließlich in SD führt, bleibt diese Variante in der Liste.
 > - **Private Sender in SD:** Private Sender (RTL, ProSieben, Sat.1 etc.) sind im Kabel frei in SD empfangbar. Private HD-Sender sind anbieterseitig grundverschlüsselt (CI+-Pflicht) und können von DVB-C-Routern prinzipbedingt nicht entschlüsselt werden.
 > - **Nicht unterstützte Router:** Das Einsteigermodell *FRITZ!Box 6430 Cable* sowie reine DSL- oder Glasfaser-Modelle (z. B. 7590, 7690, 5590) besitzen keinen DVB-C-Tuner.
 > - **Provider-Mietgeräte:** Bei einzelnen Kabelnetzbetreibern kann der Menüpunkt *„DVB-C / Live-TV“* auf älteren, gebrandeten Miet-Routern durch die Firmware des Anbieters ausgeblendet sein.

@@ -53,12 +53,15 @@ public struct ChannelCatalog: Sendable {
     /// Fasst Einträge mit gleichem `groupKey` zusammen. Die Reihenfolge folgt dem
     /// ersten Auftreten in der Liste der Box, die wiederum HD vor SD sortiert.
     ///
-    /// Öffentlich-rechtliche SD-Sender werden standardmäßig herausgefiltert (`filterPublicSD = true`),
-    /// da ARD und ZDF ihre SD-Ausstrahlungen eingestellt haben und solche Einträge nur ein
-    /// schwarzes Bild oder Hinweistafeln liefern.
+    /// SD-Varianten öffentlich-rechtlicher Sender werden standardmäßig herausgefiltert
+    /// (`filterPublicSD = true`), wenn es den Sender auch in HD gibt: ARD und ZDF haben ihre
+    /// SD-Ausstrahlungen eingestellt, solche Einträge liefern nur ein schwarzes Bild oder
+    /// Hinweistafeln. Sender ohne HD-Variante bleiben erhalten, sonst fehlten sie in Netzen,
+    /// die sie weiter nur in SD einspeisen, ganz.
     public init(channels: [Channel], filterPublicSD: Bool = true) {
+        let keysWithHD = Set(channels.filter { $0.kind == .tv && $0.isHD }.map(\.groupKey))
         let effectiveChannels = filterPublicSD
-            ? channels.filter { !( $0.kind == .tv && $0.isPublicBroadcaster && !$0.isHD ) }
+            ? channels.filter { !($0.kind == .tv && $0.isPublicBroadcaster && !$0.isHD && keysWithHD.contains($0.groupKey)) }
             : channels
 
         var order: [String] = []

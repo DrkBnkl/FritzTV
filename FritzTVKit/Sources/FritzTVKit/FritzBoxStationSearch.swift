@@ -142,7 +142,12 @@ public struct FritzBoxStationSearch: Sendable {
 }
 
 /// Beantwortet die Digest-Anmeldung der Box genau einmal; ein zweiter Versuch heißt: falsche Daten.
-private final class DigestDelegate: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
+/// Nur Digest: TR-064 läuft über unverschlüsseltes HTTP, Basic gäbe das Kennwort im Klartext preis.
+final class DigestDelegate: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
+    static func acceptsCredentials(forAuthenticationMethod method: String) -> Bool {
+        method == NSURLAuthenticationMethodHTTPDigest
+    }
+
     private let username: String
     private let password: String
     private(set) var rejected = false
@@ -156,7 +161,12 @@ private final class DigestDelegate: NSObject, URLSessionTaskDelegate, @unchecked
                     didReceive challenge: URLAuthenticationChallenge,
                     completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {
         let method = challenge.protectionSpace.authenticationMethod
-        guard method == NSURLAuthenticationMethodHTTPDigest || method == NSURLAuthenticationMethodHTTPBasic else {
+        if method == NSURLAuthenticationMethodHTTPBasic {
+            rejected = true
+            completionHandler(.cancelAuthenticationChallenge, nil)
+            return
+        }
+        guard Self.acceptsCredentials(forAuthenticationMethod: method) else {
             completionHandler(.performDefaultHandling, nil)
             return
         }
@@ -165,6 +175,6 @@ private final class DigestDelegate: NSObject, URLSessionTaskDelegate, @unchecked
             completionHandler(.cancelAuthenticationChallenge, nil)
             return
         }
-        completionHandler(.useCredential, URLCredential(user: username, password: password, persistence: .forSession))
+        completionHandler(.useCredential, URLCredential(user: username, password: password, persistence: .none))
     }
 }

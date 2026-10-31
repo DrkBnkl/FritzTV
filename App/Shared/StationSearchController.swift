@@ -19,11 +19,6 @@ enum BoxPasswordStore {
         guard SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess,
               let data = item as? Data,
               let password = String(data: data, encoding: .utf8) else { return nil }
-        #if os(macOS)
-        // Migration: Falls das Kennwort zuvor ohne uneingeschränkte SecAccess-ACL gespeichert war,
-        // einmalig neu speichern, damit bei künftigen Zugriffen keine Abfrage mehr erfolgt.
-        _ = save(password)
-        #endif
         return password
     }
 
@@ -31,17 +26,9 @@ enum BoxPasswordStore {
     static func save(_ password: String) -> Bool {
         delete()
         guard !password.isEmpty else { return true }
-        #if os(macOS)
-        var attributes: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: account,
-            kSecValueData as String: Data(password.utf8)
-        ]
-        if let access = CreateUnrestrictedKeychainAccess("FRITZ!Box") {
-            attributes[kSecAttrAccess as String] = access
-        }
-        #else
+        // Bewusst ohne eigene ACL: Nur diese App darf ohne Rückfrage lesen. Ad-hoc-signierte Mac-Builds
+        // fragen nach einem Update beim nächsten Suchlauf einmal nach; das ist bei einem Kennwort
+        // mit Admin-Rechten für die Box gewollt.
         let attributes: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
@@ -49,9 +36,22 @@ enum BoxPasswordStore {
             kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly,
             kSecValueData as String: Data(password.utf8)
         ]
-        #endif
         return SecItemAdd(attributes as CFDictionary, nil) == errSecSuccess
     }
+
+    #if os(macOS)
+    /// Einmalig: Version 1.1.1 bis 1.2.0 speicherten das Kennwort mit einer ACL, die jedem Programm
+    /// den Zugriff erlaubte. Neu speichern ersetzt sie durch die Standard-ACL.
+    static func removeUnrestrictedAccessIfNeeded() {
+        let defaults = UserDefaults.standard
+        guard !defaults.bool(forKey: aclMigratedKey) else { return }
+        // Lässt sich nichts lesen (abgelehnte Abfrage), war die ACL nicht uneingeschränkt: nichts zu tun.
+        if hasPassword, let password = load(), !save(password) { return }
+        defaults.set(true, forKey: aclMigratedKey)
+    }
+
+    private static let aclMigratedKey = "boxPasswordACLMigrated"
+    #endif
 
     static func delete() {
         let query: [String: Any] = [

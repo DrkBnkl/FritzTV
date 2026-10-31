@@ -23,6 +23,12 @@ struct FritzTVApp: App {
         let diskCapacity = 100 * 1024 * 1024
         URLCache.shared = URLCache(memoryCapacity: memoryCapacity, diskCapacity: diskCapacity)
         MainThreadWatchdog.start()
+        #if os(macOS)
+        // Nicht auf dem Hauptthread: Ein älterer Eintrag kann eine Schlüsselbund-Abfrage auslösen.
+        DispatchQueue.global(qos: .utility).async {
+            BoxPasswordStore.removeUnrestrictedAccessIfNeeded()
+        }
+        #endif
     }
 
     var body: some Scene {

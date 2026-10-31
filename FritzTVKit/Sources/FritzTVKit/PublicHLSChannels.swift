@@ -38,6 +38,7 @@ public enum PublicHLSChannels {
         "mdr": URL(string: "https://mdrtvsnhls.akamaized.net/hls/live/2016928/mdrtvsn/master.m3u8")!,
         "mdr sachsen": URL(string: "https://mdrtvsnhls.akamaized.net/hls/live/2016928/mdrtvsn/master.m3u8")!,
         "mdr sachsen-anhalt": URL(string: "https://mdrtvsahls.akamaized.net/hls/live/2016879/mdrtvsa/master.m3u8")!,
+        "mdr s-anhalt": URL(string: "https://mdrtvsahls.akamaized.net/hls/live/2016879/mdrtvsa/master.m3u8")!,
         "mdr thuringen": URL(string: "https://mdrtvthhls.akamaized.net/hls/live/2016880/mdrtvth/master.m3u8")!,
         "sr fernsehen": URL(string: "https://srfs.akamaized.net/hls/live/689649/srfsgeo/index.m3u8")!
     ]
@@ -59,12 +60,19 @@ public enum PublicHLSChannels {
     public static func hlsURL(for groupKey: String) -> URL? {
         let name = normalize(groupKey)
         guard !name.isEmpty else { return nil }
-        if let exact = streams[name] { return exact }
+        if let exact = normalizedStreams[name] { return exact }
         let compact = name.replacingOccurrences(of: " ", with: "")
-        if let exact = streams.first(where: { $0.key.replacingOccurrences(of: " ", with: "") == compact })?.value {
+        if let exact = normalizedStreams.first(where: { $0.key.replacingOccurrences(of: " ", with: "") == compact })?.value {
             return exact
         }
-        let prefixMatches = streams.filter { name.hasPrefix($0.key + " ") }
+        let prefixMatches = normalizedStreams.filter { name.hasPrefix($0.key + " ") }
         return prefixMatches.max { $0.key.count < $1.key.count }?.value
     }
+
+    /// `streams` mit normalisierten Schlüsseln: Gesuchte Namen sind normalisiert (`-` wird zum
+    /// Leerzeichen), sonst fände „mdr sachsen anhalt“ nur den Präfix „mdr sachsen“.
+    private static let normalizedStreams = Dictionary(
+        streams.map { (normalize($0.key), $0.value) },
+        uniquingKeysWith: { first, _ in first }
+    )
 }

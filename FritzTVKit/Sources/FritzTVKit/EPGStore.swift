@@ -230,15 +230,9 @@ public final class EPGStore: @unchecked Sendable {
         // 1. Zuerst im DVB-Speicher nachsehen (kein Array-Kopieren, kein Sortieren, O(1)-Lookup)
         for name in names {
             if let sid = serviceIDByName[Self.normalize(name)],
-               let map = programsByService[sid], !map.isEmpty {
-                if let explicit = map.values.first(where: {
-                    $0.isRunningStatus && $0.startDate <= date && date < $0.endDate.addingTimeInterval(EPGChannelSchedule.overrunGrace)
-                }) {
-                    return explicit
-                }
-                if let prog = map.values.first(where: { date >= $0.startDate && date < $0.endDate }) {
-                    return prog
-                }
+               let map = programsByService[sid], !map.isEmpty,
+               let program = EPGChannelSchedule.current(in: map.values, at: date) {
+                return program
             }
         }
 

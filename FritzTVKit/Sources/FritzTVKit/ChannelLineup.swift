@@ -16,6 +16,14 @@ public struct LineupPreferences: Codable, Equatable, Sendable {
         order: DefaultLineup.main + DefaultLineup.niche + DefaultLineup.hidden,
         hidden: Set(DefaultLineup.hidden)
     )
+
+    /// Auf kanonische Schlüssel gebracht und ohne Dubletten. Ältere Versionen konnten denselben
+    /// Sender unter zwei Schreibweisen speichern (z. B. „zdfneo“ und „zdf_neo“).
+    public var normalized: LineupPreferences {
+        var seen = Set<String>()
+        let canonicalOrder = order.map(Channel.canonicalGroupKey(for:)).filter { seen.insert($0).inserted }
+        return LineupPreferences(order: canonicalOrder, hidden: Set(hidden.map(Channel.canonicalGroupKey(for:))))
+    }
 }
 
 /// Ein belegter Senderplatz.
@@ -38,23 +46,28 @@ public struct ChannelLineup: Sendable {
     public init(catalog: ChannelCatalog, preferences: LineupPreferences = .standard) {
         let tv = catalog.tvGroups
         let byKey = Dictionary(tv.map { (Self.shortKey($0), $0) }, uniquingKeysWith: { first, _ in first })
-        let known = Set(preferences.order.map { Channel.canonicalGroupKey(for: $0) })
+        let preferences = preferences.normalized
+        let known = Set(preferences.order)
 
         var visible: [(ChannelGroup, Bool)] = []
         var hidden: [ChannelGroup] = []
 
         for key in preferences.order {
-            let canonical = Channel.canonicalGroupKey(for: key)
-            guard let group = byKey[canonical] ?? byKey[key] else { continue }   // Sender nicht mehr empfangbar
-            if preferences.hidden.contains(key) || preferences.hidden.contains(canonical) {
+            guard let group = byKey[key] else { continue }   // Sender nicht mehr empfangbar
+            if preferences.hidden.contains(key) {
                 hidden.append(group)
             } else {
                 visible.append((group, false))
             }
         }
-        // Neue Sender (z. B. nach einem Suchlauf) kommen ans Ende der sichtbaren Liste.
+        // Neue Sender (z. B. nach einem Suchlauf) kommen ans Ende der sichtbaren Liste,
+        // außer sie wurden schon ausgeblendet.
         for group in tv where !known.contains(Self.shortKey(group)) {
-            visible.append((group, true))
+            if preferences.hidden.contains(Self.shortKey(group)) {
+                hidden.append(group)
+            } else {
+                visible.append((group, true))
+            }
         }
 
         entries = visible.enumerated().map { index, item in
