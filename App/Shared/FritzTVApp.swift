@@ -26,7 +26,7 @@ struct FritzTVApp: App {
         #if os(macOS)
         // Nicht auf dem Hauptthread: Ein älterer Eintrag kann eine Schlüsselbund-Abfrage auslösen.
         DispatchQueue.global(qos: .utility).async {
-            BoxPasswordStore.removeUnrestrictedAccessIfNeeded()
+            BoxPasswordStore.migrateEntryIfNeeded()
         }
         #endif
     }

@@ -40,12 +40,11 @@ enum BoxPasswordStore {
     }
 
     #if os(macOS)
-    /// Einmalig: Version 1.1.1 bis 1.2.0 speicherten das Kennwort mit einer ACL, die jedem Programm
-    /// den Zugriff erlaubte. Neu speichern ersetzt sie durch die Standard-ACL.
-    static func removeUnrestrictedAccessIfNeeded() {
+    /// Einmalig: Bringt einen älteren Eintrag durch Neuspeichern auf die Standard-ACL.
+    static func migrateEntryIfNeeded() {
         let defaults = UserDefaults.standard
         guard !defaults.bool(forKey: aclMigratedKey) else { return }
-        // Lässt sich nichts lesen (abgelehnte Abfrage), war die ACL nicht uneingeschränkt: nichts zu tun.
+        // Lässt sich nichts lesen (abgelehnte Abfrage), bleibt der Eintrag unverändert.
         if hasPassword, let password = load(), !save(password) { return }
         defaults.set(true, forKey: aclMigratedKey)
     }
