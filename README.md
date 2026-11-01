@@ -52,8 +52,9 @@ Voraussetzung ist eine FRITZ!Box mit integriertem **DVB-C-Tuner** und aktivierte
 2. Die entpackte `FritzTV.app` in den Ordner `/Applications` (Programme) ziehen.
 3. **Wichtiger Hinweis zum ersten Start (macOS Gatekeeper):**  
    Da es sich um ein privates Open-Source-Projekt ohne kostenpflichtiges Apple-Entwicklerzertifikat handelt, ist die App ad-hoc signiert. macOS blockiert Apps aus dem Internet beim einfachen Doppelklick zunächst mit dem Hinweis *„App kann nicht geöffnet werden, da der Entwickler nicht verifiziert werden kann“*.
-   - **Lösung:** Beim ersten Start **Rechtsklick** (oder `Control`-Taste + Klick) auf `FritzTV.app` machen und im Menü **Öffnen** wählen, danach im Dialogfeld auf **Öffnen** klicken.  
-   - *Alternativ im Terminal:*  
+   - **macOS 15 und neuer:** App einmal starten, dann unter **Systemeinstellungen › Datenschutz & Sicherheit** auf **Trotzdem öffnen** klicken.
+   - **macOS 14:** Beim ersten Start **Rechtsklick** (oder `Control`-Taste + Klick) auf `FritzTV.app` machen und im Menü **Öffnen** wählen, danach im Dialogfeld auf **Öffnen** klicken.
+   - *Alternativ im Terminal (alle Versionen):*  
      ```bash
      xattr -cr /Applications/FritzTV.app
      ```
@@ -99,11 +100,11 @@ Unterwegs (z. B. über Mobilfunk oder im Hotel): vorher das WireGuard-VPN der FR
 - **Von Anfang an (HLS-Replay):** Laufende Sendungen öffentlich-rechtlicher Sender per Klick über deren offizielle HLS-Streams mit `EXT-X-PROGRAM-DATE-TIME` nahtlos vom Sendungsbeginn abspielen.
 - **Sendung verpasst (MediathekViewWeb):** Aus der Sendungsinfo oder direkt über die Detailtafel im EPG-Zeitstrahl (auch beim Zurückblättern) vergangene und aktuelle Sendungen in den öffentlich-rechtlichen Mediatheken suchen und abspielen (inkl. EBU-TT-D-/WebVTT-Untertiteln).
 - **Senderverwaltung & Sendersuchlauf:** Sender in den Einstellungen frei sortieren oder ausblenden; DVB-C-Sendersuchlauf der FRITZ!Box direkt aus der App über TR-064 starten; Live-Diagnose der 4 Kabel-Tuner (Signalstärke, SNR, Auslastung) über UPnP.
-- **Apple TV Top Shelf:** Zeigt die ersten 12 Lieblingssender auf dem Apple-TV-Startbildschirm zum direkten Einschalten per Deep Link (`fritztv://channel/<nummer>`).
+- **Apple TV Top Shelf:** Zeigt 12 Sender auf dem Apple-TV-Startbildschirm zum direkten Einschalten per Deep Link (`fritztv://channel/<nummer>`). Mit kostenloser Apple-ID ist das eine feste Standardliste; die eigenen Senderplätze erscheinen dort nur mit App Group, also mit bezahltem Entwickler-Account (siehe `project.yml`).
 
 ## Aufbau
 
-- `FritzTVKit/` – Swift-Paket mit 48 Unit Tests: M3U-Parser, Senderkatalog & Sortierung, EIT-Log-Parser, XMLTV-Parser, EPGStore, Timeshift-Pufferverwaltung, MediathekViewWeb-Client, Untertitel-Parser (TTML/WebVTT), UPnP-Tunerstatus und TR-064-Sendersuchlauf
+- `FritzTVKit/` – Swift-Paket mit Unit Tests: M3U-Parser, Senderkatalog & Sortierung, EIT-Log-Parser, XMLTV-Parser, EPGStore, Timeshift-Pufferverwaltung, MediathekViewWeb-Client, Untertitel-Parser (TTML/WebVTT), UPnP-Tunerstatus und TR-064-Sendersuchlauf
 - `App/Shared/` – gemeinsamer App-Code: `AppModel`, `PlayerController` (VLCKit), `EPGOverviewView`, `Overlays`, `HLSReplayPlayerView`, `MediathekSearchResultsView`, `MediathekPlayer`, `SettingsView`, `XMLTVLoader`
 - `App/tvOS/` – Siri-Remote-Steuerung (`RemoteInput`), 50-Hz-Bildwiederholrate (`DisplayCriteria`), UIKit-Videofensterausschnitt
 - `App/macOS/` – Tastatursteuerung (`KeyboardInput`), AppKit-Videofläche
@@ -113,6 +114,6 @@ Unterwegs (z. B. über Mobilfunk oder im Hotel): vorher das WireGuard-VPN der FR
 ## Lizenz & Rechtliche Hinweise
 
 - **Quellcode:** Veröffentlicht unter der [MIT-Lizenz](LICENSE).
-- **VLCKit / libVLC:** Die Videowiedergabe nutzt [VLCKit](https://code.videolan.org/videolan/VLCKit) von VideoLAN (dynamisch eingebunden unter der [GNU Lesser General Public License v2.1](https://www.gnu.org/licenses/old-licenses/lgpl-2.1.html)).
+- **VLCKit / libVLC:** Die Videowiedergabe nutzt [VLCKit](https://code.videolan.org/videolan/VLCKit) von VideoLAN (auf dem Mac dynamisch eingebunden, [GNU Lesser General Public License v2.1](https://www.gnu.org/licenses/old-licenses/lgpl-2.1.html); einzelne enthaltene Module sind als GPLv2 oder neuer gekennzeichnet). Lizenztexte und Quellenangaben liegen im Ordner [`Licenses/`](Licenses/) und in der App unter `Contents/Resources/Licenses`.
 - **Mediathek-Suche:** Die Suche nach vergangenen Sendungen nutzt die öffentlich zugängliche Programmierschnittstelle von [MediathekViewWeb](https://mediathekviewweb.de).
 - **Markenhinweis:** *FRITZ!* und *FRITZ!Box* sind eingetragene Marken der AVM Computersysteme Vertriebs GmbH. Dieses Projekt ist ein unabhängiges Open-Source-Projekt und steht in keiner Verbindung zu AVM oder den genannten Rundfunkanstalten.

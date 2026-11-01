@@ -44,6 +44,13 @@ cp "$PROJECT_DIR"/App/macOS/Assets.xcassets/AppIcon.appiconset/icon_*.png "$ICON
 iconutil -c icns "$ICONSET_TMP" -o "$APP_PATH/Contents/Resources/AppIcon.icns"
 rm -rf "$ICONSET_TMP"
 
+# SKIP_INSTALL=1 (make-release.sh): nur fertig signieren, nichts installieren
+if [[ -n "$SKIP_INSTALL" ]]; then
+    codesign --force --deep --sign - "$APP_PATH"
+    echo "✔ Gebaut: $APP_PATH"
+    exit 0
+fi
+
 # Nach /Applications kopieren und neu signieren
 TARGET_APP="/Applications/FritzTV.app"
 echo "→ Installiere nach $TARGET_APP..."

@@ -24,10 +24,14 @@ struct HLSReplayPlayerView: View {
     /// erscheinen bei jeder Bedienung kurz wieder.
     @State private var headerVisible = true
     @State private var headerTask: Task<Void, Never>?
+    @State private var playbackFailed = false
 
     var body: some View {
         playerView
             .ignoresSafeArea()
+            .overlay {
+                if playbackFailed { PlaybackFailedCard() }
+            }
             .task { await start() }
             .onAppear { showHeader() }
             .onDisappear {
@@ -239,6 +243,8 @@ struct HLSReplayPlayerView: View {
         }
         guard item.status == .readyToPlay else {
             player.play()
+            await player.waitForPlaybackFailure()
+            playbackFailed = !Task.isCancelled
             return
         }
 
@@ -248,6 +254,7 @@ struct HLSReplayPlayerView: View {
         }
 
         var seekSucceeded = false
+        var reachedStart = false
 
         // 3. Wenn ein Sendungsbeginn bekannt ist, versuche per Datum an den Beginn zu springen
         if let startDate {
@@ -256,7 +263,11 @@ struct HLSReplayPlayerView: View {
                 let started = item.seek(to: startDate) { finished in once.resume(finished) }
                 if !started { once.resume(false) }
             }
-            if seekSucceeded {
+            // Liegt der Beginn vor dem Rückspulfenster, landet ein „erfolgreicher“ Sprung womöglich später.
+            if seekSucceeded, let position = item.currentDate() {
+                reachedStart = abs(position.timeIntervalSince(startDate)) < 60
+            }
+            if reachedStart {
                 DebugLog.log("Von Anfang an: Erfolgreich an Sendungsbeginn (\(startDate.formatted(date: .omitted, time: .standard))) gesprungen")
             }
         }
@@ -269,6 +280,46 @@ struct HLSReplayPlayerView: View {
         }
 
         player.play()
+        if !reachedStart {
+            showNotice("Sendungsbeginn nicht verfügbar – ab frühestem Punkt")
+        }
+        await player.waitForPlaybackFailure()
+        playbackFailed = !Task.isCancelled
+    }
+
+    /// Hinweis in der Bildmitte, länger sichtbar als die Sprungweite.
+    private func showNotice(_ text: String) {
+        withAnimation(.spring(response: 0.25, dampingFraction: 0.7)) {
+            jumpFeedback = text
+        }
+        jumpFeedbackTask?.cancel()
+        jumpFeedbackTask = Task {
+            try? await Task.sleep(for: .seconds(6))
+            if !Task.isCancelled {
+                withAnimation(.easeOut(duration: 0.25)) {
+                    jumpFeedback = nil
+                }
+            }
+        }
+    }
+}
+
+/// Meldung, wenn sich ein HLS- oder Mediathek-Video nicht abspielen lässt.
+struct PlaybackFailedCard: View {
+    var body: some View {
+        StatusCard(title: "Video nicht verfügbar", message: "Der Stream ließ sich nicht laden.",
+                   hint: "\(UI.back): zurück zum Live-TV", busy: false)
+    }
+}
+
+extension AVPlayer {
+    /// Wartet, bis die Wiedergabe endgültig fehlschlägt (z. B. toter Link). Endet auch beim Abbruch
+    /// der aufrufenden Aufgabe, also wenn die Ansicht verschwindet: danach `Task.isCancelled` prüfen.
+    @MainActor
+    func waitForPlaybackFailure() async {
+        while !Task.isCancelled, currentItem?.status != .failed {
+            try? await Task.sleep(for: .seconds(1))
+        }
     }
 }
 

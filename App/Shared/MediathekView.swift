@@ -20,12 +20,20 @@ struct MediathekPlayer: View {
     @State private var jumpPressCount = 0
     @State private var headerVisible = true
     @State private var headerTask: Task<Void, Never>?
+    @State private var playbackFailed = false
     @AppStorage("mediathekSubtitles") private var showSubtitles = false
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         playerView
             .ignoresSafeArea()
+            .overlay {
+                if playbackFailed { PlaybackFailedCard() }
+            }
+            .task {
+                await player.waitForPlaybackFailure()
+                playbackFailed = !Task.isCancelled
+            }
             .overlay(alignment: .bottom) {
                 if showSubtitles, let caption {
                     Text(caption)

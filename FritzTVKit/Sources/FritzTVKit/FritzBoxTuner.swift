@@ -53,6 +53,17 @@ public struct TunerStatus: Sendable, Hashable {
     public var allTunersBusy: Bool {
         totalTuners > 0 && usedCount >= totalTuners
     }
+
+    /// Tuner, der den angegebenen Sender empfängt: nach Sendername, sonst der einzige belegte.
+    /// Sind mehrere belegt und keiner passt, `nil`: Die Werte stammten sonst von einem fremden Tuner.
+    public func activeTuner(forChannelNames names: [String]) -> TunerInfo? {
+        let used = tuners.filter(\.isUsed)
+        let wanted = Set(names.map(XMLTV.key))
+        if let match = used.first(where: { $0.channelName.map { wanted.contains(XMLTV.key($0)) } ?? false }) {
+            return match
+        }
+        return used.count == 1 ? used[0] : nil
+    }
 }
 
 /// Fragt den Tuner-Status der FRITZ!Box per UPnP-SOAP ohne Passwort ab

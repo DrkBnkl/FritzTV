@@ -117,6 +117,7 @@ final class StationSearchController: ObservableObject {
                 try await client.verifyCredentials()
                 phase = .credentialsOK
             } catch {
+                if Task.isCancelled { return }
                 phase = .failed(error.localizedDescription)
             }
         }
@@ -130,9 +131,11 @@ final class StationSearchController: ObservableObject {
         task?.cancel()
         phase = .checking
         task = Task {
+            var playerStopped = false
             do {
                 try await client.verifyCredentials()
                 model.player.stop()
+                playerStopped = true
                 DebugLog.log("Sendersuchlauf: Start")
                 var status = try await client.start()
                 phase = .running(progress: status.progress)
@@ -165,9 +168,12 @@ final class StationSearchController: ObservableObject {
             } catch is CancellationError {
                 return
             } catch {
+                // Abbrechen trennt laufende Anfragen; `cancel` kümmert sich um alles Weitere.
+                if Task.isCancelled { return }
                 DebugLog.log("Sendersuchlauf fehlgeschlagen: \(error.localizedDescription)")
                 phase = .failed(error.localizedDescription)
-                model.resume()
+                // Scheitert schon die Anmeldung, läuft das Bild noch: nicht neu starten.
+                if playerStopped { model.resume() }
             }
         }
     }

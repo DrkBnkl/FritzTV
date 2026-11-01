@@ -80,6 +80,12 @@ public struct ChannelLineup: Sendable {
         entries.indices.contains(number - 1) ? entries[number - 1] : nil
     }
 
+    /// Sichtbarer Sender zu einem Senderschlüssel, auch in alternativer Schreibweise („zdfneo“).
+    public func entry(groupKey: String) -> LineupEntry? {
+        let canonical = Channel.canonicalGroupKey(for: groupKey)
+        return entries.first { Self.shortKey($0.group) == canonical }
+    }
+
     /// Nächster bzw. vorheriger Platz, mit Umlauf am Listenende (wie beim Fernseher).
     public func entry(after number: Int, step: Int) -> LineupEntry? {
         guard !entries.isEmpty else { return nil }

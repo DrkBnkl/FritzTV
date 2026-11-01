@@ -162,12 +162,12 @@ struct SettingsView: View {
 
                 Section {
                     LabeledContent("Version", value: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0")
-                    LabeledContent("Videowiedergabe", value: "VLCKit / libVLC (LGPLv2.1)")
+                    LabeledContent("Videowiedergabe", value: "VLCKit / libVLC (LGPLv2.1, teils GPLv2+)")
                     LabeledContent("Mediathek-Suche", value: "MediathekViewWeb")
                 } header: {
                     Text("Über & Lizenzen")
                 } footer: {
-                    Text("Unabhängiges Open-Source-Projekt (MIT-Lizenz). FRITZ! und FRITZ!Box sind eingetragene Marken der AVM GmbH; dieses Projekt steht in keiner Verbindung zu AVM.")
+                    Text("Unabhängiges Open-Source-Projekt (MIT-Lizenz). Die Lizenztexte liegen im App-Paket im Ordner „Licenses“. FRITZ! und FRITZ!Box sind eingetragene Marken der AVM GmbH; dieses Projekt steht in keiner Verbindung zu AVM.")
                 }
             }
             #if os(macOS)

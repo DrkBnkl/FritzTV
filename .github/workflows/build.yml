@@ -1,11 +1,13 @@
 # Baut FritzTVKit (mit Tests) sowie die Mac- und die Apple-TV-App, ohne zu signieren.
-# Läuft bei Pull Requests auf main und von Hand. macOS-Runner zählen bei privaten Repos
-# zehnfach gegen das Actions-Kontingent, daher nicht bei jedem Push.
+# Läuft bei jedem Push und Pull Request auf main und develop sowie von Hand: Releases entstehen
+# durch direkte Merges nach main, ein Lauf nur bei Pull Requests würde sie nie prüfen.
 name: Build
 
 on:
+  push:
+    branches: [main, develop]
   pull_request:
-    branches: [main]
+    branches: [main, develop]
   workflow_dispatch:
 
 concurrency:
