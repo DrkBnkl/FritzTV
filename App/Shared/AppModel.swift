@@ -30,6 +30,8 @@ enum Overlay: Equatable {
     case directEntry(digits: String, key: Int)
     /// Senderleiste am unteren Rand (Wischen nach oben); `index` in der Senderliste.
     case footer(index: Int)
+    /// Radioliste; `selectedID` identifiziert die ausgewählte Zeile.
+    case radioList(selectedID: String)
 }
 
 struct ManagedChannel: Identifiable, Equatable {
@@ -45,6 +47,8 @@ struct ManagedChannel: Identifiable, Equatable {
 /// Element in der Senderliste für Tastennavigation und Fokus.
 enum ChannelListItem: Hashable, Identifiable {
     case epgOverview
+    /// Nur sichtbar, wenn Radio eingeschaltet ist und die Box Radiosender meldet.
+    case radio
     case recent(LineupEntry)
     case channel(LineupEntry)
     case settings
@@ -52,9 +56,26 @@ enum ChannelListItem: Hashable, Identifiable {
     var id: String {
         switch self {
         case .epgOverview: return "epgOverview"
+        case .radio: return "radio"
         case .recent(let entry): return "recent-\(entry.number)"
         case .channel(let entry): return "channel-\(entry.number)"
         case .settings: return "settings"
+        }
+    }
+}
+
+/// Element in der Radioliste.
+enum RadioListItem: Hashable, Identifiable {
+    /// Nur sichtbar, solange ein Radiosender läuft.
+    case backToTV
+    case recent(ChannelGroup)
+    case station(ChannelGroup)
+
+    var id: String {
+        switch self {
+        case .backToTV: return "radioBackToTV"
+        case .recent(let group): return "radioRecent-\(group.key)"
+        case .station(let group): return "radioStation-\(group.key)"
         }
     }
 }
@@ -117,6 +138,12 @@ final class AppModel: ObservableObject {
     /// Untertitel zum laufenden Mediathek-Video aus der Suche, falls vorhanden.
     private(set) var activeMediathekSubtitle: URL?
     @Published var searchResultDialog: (title: String, results: [MediathekSearchResult])?
+    /// Gesetzt, solange Radio statt Fernsehen läuft. Der Fernsehsender (`currentNumber`,
+    /// `lastChannelKey`, „Zuletzt gesehen“) bleibt davon unberührt, die App startet immer mit Fernsehen.
+    @Published private(set) var currentRadio: ChannelGroup?
+    /// Radio wurde mit Play/Pause angehalten (der Tuner ist dann frei).
+    @Published private(set) var radioPaused = false
+    private(set) var radioStations = RadioStations()
 
     let settings: AppSettings
     let player: PlayerController
@@ -160,12 +187,15 @@ final class AppModel: ObservableObject {
             Task { @MainActor in
                 guard let self else { return }
                 let failedKey = self.playingKey
+                let failedRadio = self.currentRadio
+                let noSignalTitle = (failedRadio == nil ? "Kein Bild für " : "Kein Ton für ") + channelName
                 let tunerStatus = await FritzBoxTunerClient().fetchStatus(host: self.boxHost)
                 // Die Abfrage dauert: Inzwischen umgeschaltet oder Bild da? Dann nichts überschreiben.
-                guard self.playingKey == failedKey, case .failed = self.player.status else { return }
+                guard self.playingKey == failedKey, self.currentRadio == failedRadio,
+                      case .failed = self.player.status else { return }
                 guard let tunerStatus else {
                     self.player.setFailed(
-                        title: "Kein Bild für \(channelName)",
+                        title: noSignalTitle,
                         message: "Die FRITZ!Box antwortet nicht auf die Tuner-Abfrage.",
                         hint: "Netzwerk bzw. VPN prüfen. Ein neuer Versuch läuft automatisch."
                     )
@@ -179,7 +209,7 @@ final class AppModel: ObservableObject {
                     )
                 } else {
                     self.player.setFailed(
-                        title: "Kein Bild für \(channelName)",
+                        title: noSignalTitle,
                         message: "Die Senderliste ist womöglich veraltet.",
                         hint: "Sendersuchlauf starten: Einstellungen › Sendersuchlauf (mit Box-Kennwort) oder in der FRITZ!Box-Oberfläche unter DVB-C."
                     )
@@ -213,6 +243,7 @@ final class AppModel: ObservableObject {
     /// Alle ansteuerbaren Einträge in der Senderliste in Darstellungsreihenfolge.
     var channelListItems: [ChannelListItem] {
         var items: [ChannelListItem] = [.epgOverview]
+        if showsRadio { items.append(.radio) }
         for entry in recentEntries {
             items.append(.recent(entry))
         }
@@ -236,6 +267,7 @@ final class AppModel: ObservableObject {
         do {
             let result = try await FritzBoxClient(customHost: settings.host).loadCatalog()
             catalog = result.catalog
+            radioStations = RadioStations(catalog: result.catalog)
             connectedHost = result.host
             rebuildLineup()
             loadState = .ready
@@ -314,7 +346,11 @@ final class AppModel: ObservableObject {
         guard zapDebounceTask != nil else { return }
         zapDebounceTask?.cancel()
         zapDebounceTask = nil
-        if let playingKey,
+        if currentRadio != nil {
+            currentRadio = radioStations.all.first { group in
+                group.variants.contains { $0.id == player.channel?.id }
+            } ?? currentRadio
+        } else if let playingKey,
            let playingEntry = lineup?.entries.first(where: { Self.key($0) == playingKey }) {
             currentNumber = playingEntry.number
         }
@@ -338,6 +374,8 @@ final class AppModel: ObservableObject {
     private func performTune(to number: Int) {
         guard let entry = lineup?.entry(number: number) else { return }
         let key = Self.key(entry)
+        currentRadio = nil
+        radioPaused = false
         #if os(macOS)
         let hasActiveDrawableWindow = (player.mediaPlayer.drawable as? NSView)?.window != nil
         #else
@@ -391,6 +429,11 @@ final class AppModel: ObservableObject {
 
     /// Nach dem Schließen der Einstellungen: Stream nur neu starten, wenn sich etwas geändert hat.
     func applySettings() {
+        if !showsRadio, case .radioList = overlay { overlay = .none }
+        if currentRadio != nil {
+            if !showsRadio { leaveRadio() }
+            return
+        }
         guard let entry = currentEntry else { return }
         let candidates = currentCandidates(for: entry)
         let sameChannel = player.channel.map { current in candidates.contains { $0.id == current.id } } ?? false
@@ -400,8 +443,100 @@ final class AppModel: ObservableObject {
     }
 
     func resume() {
+        if let radio = currentRadio {
+            if !radioPaused { startRadio(radio) }
+            return
+        }
         guard let entry = currentEntry else { return }
         play(entry)
+    }
+
+    // MARK: Radio
+
+    /// Radio ist eingeschaltet und die Box meldet Radiosender.
+    var showsRadio: Bool { settings.radioEnabled && !radioStations.all.isEmpty }
+
+    var radioListItems: [RadioListItem] {
+        var items: [RadioListItem] = currentRadio == nil ? [] : [.backToTV]
+        items += radioStations.recent(keys: settings.recentRadioKeys).map(RadioListItem.recent)
+        items += radioStations.all.map(RadioListItem.station)
+        return items
+    }
+
+    func openRadioList() {
+        guard showsRadio || currentRadio != nil else { return }
+        cancelPendingZap()
+        bannerVisible = false
+        let target = currentRadio.map { RadioListItem.station($0).id } ?? radioListItems.first?.id
+        overlay = .radioList(selectedID: target ?? RadioListItem.backToTV.id)
+    }
+
+    func activateRadioListItem(_ item: RadioListItem) {
+        overlay = .none
+        switch item {
+        case .backToTV:
+            leaveRadio()
+        case .recent(let group), .station(let group):
+            playRadio(group)
+        }
+    }
+
+    func playRadio(_ group: ChannelGroup) {
+        zapDebounceTask?.cancel()
+        zapDebounceTask = nil
+        // Der Fernsehsender gilt nicht als „zuletzt gesehen“: Er läuft nach dem Radio einfach weiter.
+        playingKey = nil
+        currentRadio = group
+        settings.recentRadioKeys = RadioStations.recording(key: group.key, in: settings.recentRadioKeys)
+        let isRunning: Bool
+        switch player.status {
+        case .failed, .idle: isRunning = false
+        default: isRunning = group.variants.contains { $0.id == player.channel?.id }
+        }
+        radioPaused = false
+        if !isRunning { startRadio(group) }
+    }
+
+    private func startRadio(_ group: ChannelGroup) {
+        let candidates = group.candidates(preferHD: false, deadIDs: settings.deadChannelIDs)
+        var options = playbackOptions()
+        options.timeshift = false
+        DebugLog.log("Radio: \(group.displayName), \(candidates.first?.streamURL.absoluteString ?? "-")")
+        player.play(candidates: candidates, options: options,
+                    preferredVariantID: settings.workingVariantIDs[candidates.variantKey])
+    }
+
+    /// Zurück zum zuletzt gesehenen Fernsehsender.
+    func leaveRadio() {
+        guard currentRadio != nil else { return }
+        zapDebounceTask?.cancel()
+        zapDebounceTask = nil
+        currentRadio = nil
+        radioPaused = false
+        tune(to: currentNumber)
+    }
+
+    /// Hält Radio an und gibt den Tuner frei (ohne Timeshift gibt es nichts zu puffern).
+    func toggleRadioPause() {
+        guard let radio = currentRadio else { return }
+        if radioPaused || player.status == .idle {
+            radioPaused = false
+            startRadio(radio)
+        } else {
+            radioPaused = true
+            player.stop()
+        }
+    }
+
+    private func zapRadio(_ step: Int) {
+        guard let radio = currentRadio, let next = radioStations.station(after: radio, step: step) else { return }
+        currentRadio = next
+        zapDebounceTask?.cancel()
+        zapDebounceTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(350))
+            guard let self, !Task.isCancelled else { return }
+            self.playRadio(next)
+        }
     }
 
     /// App kommt in den Vordergrund. Nur fortsetzen, wenn der Stream wirklich angehalten wurde
@@ -462,7 +597,13 @@ final class AppModel: ObservableObject {
 
         switch overlay {
         case .none:
-            handleLive(command)
+            if currentRadio != nil {
+                handleRadio(command)
+            } else {
+                handleLive(command)
+            }
+        case .radioList(let selectedID):
+            handleRadioList(command, selectedID: selectedID)
         case .footer(let index):
             handleFooter(command, index: index)
         case .info(let selection):
@@ -526,6 +667,59 @@ final class AppModel: ObservableObject {
             bannerVisible = false
             overlay = .info(selection: 0)
             refreshTunerStats()
+        }
+    }
+
+    /// Während Radio läuft: Umschalten nur innerhalb der Radiosender, Fernseh-Funktionen ruhen.
+    private func handleRadio(_ command: RemoteCommand) {
+        switch command {
+        case .up, .pageUp: zapRadio(+1)
+        case .down, .pageDown: zapRadio(-1)
+        case .select:
+            if let radio = currentRadio, zapDebounceTask != nil {
+                playRadio(radio)
+            } else if case .failed = player.status {
+                resume()
+            } else if player.status == .idle {
+                toggleRadioPause()
+            } else {
+                openRadioList()
+            }
+        case .back: openRadioList()
+        case .playPause: toggleRadioPause()
+        case .left, .right, .digit, .swipeUp, .swipeDown: break
+        }
+    }
+
+    private func handleRadioList(_ command: RemoteCommand, selectedID: String) {
+        let items = radioListItems
+        guard let currentIndex = items.firstIndex(where: { $0.id == selectedID }) else {
+            if let first = items.first {
+                overlay = .radioList(selectedID: first.id)
+            } else {
+                overlay = .none
+            }
+            return
+        }
+        switch command {
+        case .up, .down:
+            let step = command == .up ? -1 : 1
+            overlay = .radioList(selectedID: items[(currentIndex + step + items.count) % items.count].id)
+        case .pageUp, .pageDown:
+            let step = command == .pageUp ? -8 : 8
+            overlay = .radioList(selectedID: items[min(max(currentIndex + step, 0), items.count - 1)].id)
+        case .select:
+            activateRadioListItem(items[currentIndex])
+        case .playPause:
+            if currentRadio != nil {
+                toggleRadioPause()
+            } else {
+                player.togglePause()
+            }
+        case .back:
+            overlay = currentRadio != nil ? .none : .channelList(selectedID: ChannelListItem.radio.id)
+        case .left, .right, .swipeUp, .swipeDown, .digit:
+            break
         }
     }
 
@@ -607,6 +801,7 @@ final class AppModel: ObservableObject {
     }
 
     func openInfoPanel() {
+        guard currentRadio == nil else { return }
         cancelPendingZap()
         bannerVisible = false
         showEPGOverview = false
@@ -651,6 +846,10 @@ final class AppModel: ObservableObject {
 
     /// Zurück-Taste im Live-Bild: Ziel laut Einstellung.
     func openChannelList() {
+        if currentRadio != nil {
+            openRadioList()
+            return
+        }
         cancelPendingZap()
         bannerVisible = false
         let targetID: String
@@ -667,6 +866,7 @@ final class AppModel: ObservableObject {
     }
 
     func openEPGOverview() {
+        guard currentRadio == nil else { return }
         DebugLog.log("Programmübersicht geöffnet")
         cancelPendingZap()
         overlay = .none
@@ -950,6 +1150,8 @@ final class AppModel: ObservableObject {
             switch currentItem {
             case .epgOverview:
                 openEPGOverview()
+            case .radio:
+                openRadioList()
             case .recent(let entry), .channel(let entry):
                 overlay = .none
                 tune(to: entry.number)

@@ -523,6 +523,13 @@ struct ChannelListOverlay: View {
         }
         y += specialRowHeight + itemSpacing
 
+        if model.showsRadio {
+            if targetID == "radio" {
+                return y + specialRowHeight / 2
+            }
+            y += specialRowHeight + itemSpacing
+        }
+
         if !model.recentEntries.isEmpty {
             y += sectionHeaderRecentHeight + itemSpacing
             for entry in model.recentEntries {
@@ -553,6 +560,9 @@ struct ChannelListOverlay: View {
     private var totalEstimatedContentHeight: CGFloat {
         var h: CGFloat = UI.s(16)
         h += specialRowHeight + itemSpacing
+        if model.showsRadio {
+            h += specialRowHeight + itemSpacing
+        }
         if !model.recentEntries.isEmpty {
             h += sectionHeaderRecentHeight + itemSpacing + CGFloat(model.recentEntries.count) * (channelRowHeight + itemSpacing)
         }
@@ -586,6 +596,14 @@ struct ChannelListOverlay: View {
                             }
                             .frame(height: specialRowHeight)
                             .id("epgOverview")
+
+                            if model.showsRadio {
+                                specialRow("Radio", icon: "radio", selected: selectedID == "radio") {
+                                    model.openRadioList()
+                                }
+                                .frame(height: specialRowHeight)
+                                .id("radio")
+                            }
 
                             if !model.recentEntries.isEmpty {
                                 Text("ZULETZT GESEHEN")
