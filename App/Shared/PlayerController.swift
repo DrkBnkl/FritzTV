@@ -570,7 +570,7 @@ final class PlayerController: ObservableObject {
         let channelName = channel?.displayName ?? "Sender"
         DebugLog.log("Keine Variante von \(channelName) liefert Bild.")
         setFailed(
-            title: "Kein Bild für \(channelName)",
+            title: (channel?.kind == .radio ? "Kein Ton für " : "Kein Bild für ") + channelName,
             message: "Der Sender liefert keine Daten.",
             hint: "Die Ursache wird geprüft. Ein neuer Versuch läuft automatisch."
         )

@@ -70,9 +70,10 @@ struct FritzTVApp: App {
                 .keyboardShortcut("i", modifiers: .command)
 
                 Button("Senderliste") {
-                    if case .channelList = model.overlay {
+                    switch model.overlay {
+                    case .channelList, .radioList:
                         model.overlay = .none
-                    } else {
+                    default:
                         model.openChannelList()
                     }
                 }
@@ -81,8 +82,12 @@ struct FritzTVApp: App {
                 Divider()
 
                 Button("Anhalten / Weiter (Timeshift)") {
-                    model.player.togglePause()
-                    model.showBanner()
+                    if model.currentRadio != nil {
+                        model.toggleRadioPause()
+                    } else {
+                        model.player.togglePause()
+                        model.showBanner()
+                    }
                 }
                 .keyboardShortcut("p", modifiers: .command)
 

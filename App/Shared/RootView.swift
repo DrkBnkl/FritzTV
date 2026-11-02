@@ -45,6 +45,10 @@ struct RootView: View {
                     && !player.isReplaying && !model.showEPGOverview {
                     Color.black.ignoresSafeArea()
                 }
+                // Radio hat kein Bild: Das letzte Fernsehbild darf nicht stehen bleiben.
+                if model.currentRadio != nil {
+                    Color.black.ignoresSafeArea()
+                }
                 // Timeshift: Mitschnitt-Wiedergabe liegt über dem stumm weiterlaufenden Live-Bild.
                 PlayerSurface(player: player.replayPlayer, previewFrame: previewFrame, dockLivePreview: model.settings.dockLivePreview)
                     .opacity(player.isReplaying ? 1 : 0)
@@ -95,7 +99,11 @@ struct RootView: View {
                             }
                         }
                         .contextMenu {
-                            macContextMenu
+                            if model.currentRadio != nil {
+                                macRadioContextMenu
+                            } else {
+                                macContextMenu
+                            }
                         }
                     #endif
                     OverlayLayer(model: model, player: player)
@@ -141,8 +149,11 @@ struct RootView: View {
         .task { await model.load() }
         .onChange(of: player.nowPlaying) { _, _ in model.programChanged() }
         .onChange(of: player.currentProgram) { _, _ in model.programChanged() }
+        .onChange(of: model.currentRadio) { _, radio in
+            KeepAwake.update(for: player.status, isRadio: radio != nil)
+        }
         .onChange(of: player.status) { oldStatus, newStatus in
-            KeepAwake.update(for: newStatus)
+            KeepAwake.update(for: newStatus, isRadio: model.currentRadio != nil)
             if oldStatus != .playing && newStatus == .playing {
                 model.showBanner()
             }
@@ -185,6 +196,56 @@ struct RootView: View {
             try? await Task.sleep(for: .seconds(3))
             guard !Task.isCancelled, model.isPlainLiveView else { return }
             NSCursor.setHiddenUntilMouseMoves(true)
+        }
+    }
+
+    @ViewBuilder
+    private var macRadioContextMenu: some View {
+        Button {
+            model.openRadioList()
+        } label: {
+            Label("Radioliste", systemImage: "list.bullet")
+        }
+
+        Button {
+            model.toggleRadioPause()
+        } label: {
+            Label(model.radioPaused ? "Weiter" : "Anhalten",
+                  systemImage: model.radioPaused ? "play.fill" : "pause.fill")
+        }
+
+        Button {
+            model.leaveRadio()
+        } label: {
+            Label("Zurück zum Fernsehen", systemImage: "tv")
+        }
+
+        Divider()
+
+        Button {
+            model.handle(.up)
+        } label: {
+            Label("Nächster Radiosender", systemImage: "chevron.up")
+        }
+
+        Button {
+            model.handle(.down)
+        } label: {
+            Label("Vorheriger Radiosender", systemImage: "chevron.down")
+        }
+
+        Divider()
+
+        Button {
+            NSApp.keyWindow?.toggleFullScreen(nil)
+        } label: {
+            Label("Vollbild umschalten", systemImage: "arrow.up.left.and.arrow.down.right")
+        }
+
+        Button {
+            model.showSettings = true
+        } label: {
+            Label("Einstellungen…", systemImage: "gearshape")
         }
     }
 
@@ -322,7 +383,14 @@ struct OverlayLayer: View {
                        hint: "Bleibt das Bild weg: Sind alle 4 Tuner der FRITZ!Box belegt?", busy: true)
         }
 
-        if model.overlay == .none {
+        if let radio = model.currentRadio {
+            switch player.status {
+            case .failed, .reconnecting:
+                EmptyView()
+            default:
+                RadioCard(model: model, player: player, group: radio)
+            }
+        } else if model.overlay == .none {
             if player.isTimeshifted {
                 if player.pausedSince != nil || model.bannerVisible {
                     TimeshiftBar(model: model, player: player)
@@ -344,6 +412,8 @@ struct OverlayLayer: View {
             ChannelFooter(model: model, player: player, index: index)
         case .channelList(let selectedID):
             ChannelListOverlay(model: model, player: player, selectedID: selectedID)
+        case .radioList(let selectedID):
+            RadioListOverlay(model: model, player: player, selectedID: selectedID)
         case .directEntry(let digits, let key):
             DirectEntryOverlay(model: model, digits: digits, key: key)
         }
@@ -446,13 +516,16 @@ struct EPGPreviewPlacement: ViewModifier {
 /// eigene Player – keine laufende Wiedergabe, sonst springt nach einigen Minuten der
 /// Bildschirmschoner (Apple TV) bzw. der Ruhezustand des Displays (Mac) an.
 /// Angehalten (Timeshift) darf der Bildschirmschoner wie üblich kommen.
+/// Radio hat kein Bild: Der Bildschirmschoner darf kommen, auf dem Mac darf das Display ausgehen,
+/// nur der Rechner selbst bleibt wach, damit der Ton weiterläuft.
 @MainActor
 enum KeepAwake {
     #if os(macOS)
     private static var activity: NSObjectProtocol?
+    private static var activityIsRadio = false
     #endif
 
-    static func update(for status: PlayerStatus) {
+    static func update(for status: PlayerStatus, isRadio: Bool = false) {
         let awake: Bool
         switch status {
         case .playing, .connecting, .reconnecting:
@@ -461,16 +534,20 @@ enum KeepAwake {
             awake = false
         }
         #if os(tvOS)
-        if UIApplication.shared.isIdleTimerDisabled != awake {
-            UIApplication.shared.isIdleTimerDisabled = awake
+        let keepScreenOn = awake && !isRadio
+        if UIApplication.shared.isIdleTimerDisabled != keepScreenOn {
+            UIApplication.shared.isIdleTimerDisabled = keepScreenOn
         }
         #elseif os(macOS)
-        if awake, activity == nil {
-            activity = ProcessInfo.processInfo.beginActivity(
-                options: [.idleDisplaySleepDisabled, .userInitiated], reason: "Live-TV läuft")
-        } else if !awake, let current = activity {
+        if let current = activity, !awake || activityIsRadio != isRadio {
             ProcessInfo.processInfo.endActivity(current)
             activity = nil
+        }
+        if awake, activity == nil {
+            activityIsRadio = isRadio
+            activity = ProcessInfo.processInfo.beginActivity(
+                options: isRadio ? [.idleSystemSleepDisabled, .userInitiated] : [.idleDisplaySleepDisabled, .userInitiated],
+                reason: isRadio ? "Radio läuft" : "Live-TV läuft")
         }
         #endif
     }
