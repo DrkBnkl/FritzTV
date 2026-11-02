@@ -43,6 +43,38 @@ final class RadioStationsTests: XCTestCase {
         XCTAssertEqual(stations.recent(keys: keys).map(\.displayName), ["COSMO", "1LIVE"])
     }
 
+    func testRadioLogosMatchTheSpellingsOfTheBox() {
+        let spellings = [("BAYERN 3", "Bayern 3"), ("Antenne Brbg.", "Antenne Brandenburg"),
+                         ("SWR1 BW", "SWR1 RP"), ("SWR4 BW", "SWR4 - Rheinhessen"),
+                         ("Bremen Next", "Bremen NEXT"), ("ROCK ANTENNE", "Rock Antenne"),
+                         ("SR 3 Saarlandwelle", "SR3")]
+        for (one, other) in spellings {
+            let urls = ChannelLogo.radioCandidateURLs(for: one)
+            XCTAssertEqual(urls.first, ChannelLogo.radioCandidateURLs(for: other).first, one)
+            XCTAssertEqual(urls.first?.scheme, "https", one)
+        }
+    }
+
+    func testAllRadioLogoAddressesAreValidHTTPS() {
+        for (key, address) in ChannelLogo.radioLogoAddresses {
+            XCTAssertEqual(URL(string: address)?.scheme, "https", key)
+        }
+    }
+
+    func testRadioStationWithoutOwnLogoFallsBackToAVM() {
+        let urls = ChannelLogo.radioCandidateURLs(for: "WDR 2")
+        XCTAssertEqual(urls.first?.absoluteString, "http://tv.avm.de/tvapp/logos/wdr_2.png")
+    }
+
+    func testTVLogosStayUnchanged() {
+        XCTAssertEqual(ChannelLogo.candidateURLs(for: "1LIVE").first?.host, "tv.avm.de")
+    }
+
+    func testPlaceholderProgramIsRecognised() {
+        XCTAssertTrue(EPGProgram.isPlaceholderTitle("Leider keine Programminformationen vorhanden"))
+        XCTAssertFalse(EPGProgram.isPlaceholderTitle("WDR 2 Der Vormittag"))
+    }
+
     func testRecordingMovesKeyToFrontWithoutDuplicates() {
         XCTAssertEqual(RadioStations.recording(key: "b", in: ["a", "b", "c"]), ["b", "a", "c"])
         XCTAssertEqual(RadioStations.recording(key: "d", in: ["a", "b", "c"]), ["d", "a", "b"])

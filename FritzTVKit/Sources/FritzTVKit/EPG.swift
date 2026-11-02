@@ -16,6 +16,12 @@ public struct EPGProgram: Identifiable, Hashable, Sendable, Codable {
         startDate.addingTimeInterval(duration)
     }
 
+    /// Manche Sender füllen die Programmdaten nur mit einem Hinweistext statt einer Sendung
+    /// (z. B. bigFM: „Leider keine Programminformationen vorhanden“).
+    public static func isPlaceholderTitle(_ title: String) -> Bool {
+        title.lowercased().contains("keine programminformation")
+    }
+
     public init(
         eventID: Int,
         serviceID: Int,
