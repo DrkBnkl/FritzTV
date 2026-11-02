@@ -71,12 +71,6 @@ final class M3UParserTests: XCTestCase {
         XCTAssertEqual(unfilteredZDF.preferredChannel(preferHD: false).name, "ZDF")
     }
 
-    func testGroupsByMultiplex() throws {
-        let catalog = ChannelCatalog(channels: try fixtureChannels())
-        XCTAssertEqual(catalog.channelsByFrequency.count, 18)
-        XCTAssertEqual(catalog.channelsByFrequency[370]?.count, 12)
-    }
-
     func testStripsDVBEmphasisMarkers() {
         let text = """
         #EXTM3U

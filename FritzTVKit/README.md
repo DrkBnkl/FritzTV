@@ -34,7 +34,6 @@ Info.plist der App:
 - Sprachkennungen wie „(eng)“ landen in `languageTag`.
 - HD- und SD-Variante eines Senders werden zu einer `ChannelGroup` zusammengefasst,
   auch bei abweichender Schreibweise („HSE Extra HD“ / „HSE EXTRA“).
-- `channelsByFrequency` gruppiert nach Multiplex, als Grundlage für den EPG-Abruf.
 
 ## Senderplätze
 

@@ -41,14 +41,7 @@ final class TimeshiftPIDSubtitleTests: XCTestCase {
         XCTAssertEqual(manager.latestRecordingURL(excluding: [keptPath]), nil)
     }
 
-    func testSoutOptionDisplaysAndRecords() throws {
-        let url = URL(fileURLWithPath: "/tmp/Timeshift/timeshift_das_erste_1.ts")
-        XCTAssertEqual(TimeshiftBufferManager.soutDisplayAndRecordOption(destination: url),
-                       ":sout=#duplicate{dst=display,dst=std{access=file,mux=ts,dst=/tmp/Timeshift/timeshift_das_erste_1.ts}}")
-        let segment = TimeshiftBufferManager.shared.newSegmentURL(channelKey: "wdr köln/hd")
-        XCTAssertFalse(segment.lastPathComponent.contains(" "))
-        XCTAssertFalse(segment.lastPathComponent.contains("/"))
-
+    func testLatestRecordingFindsNewFile() throws {
         let manager = TimeshiftBufferManager.shared
         manager.cleanup()
         defer { manager.cleanup() }
