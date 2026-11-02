@@ -20,16 +20,17 @@ struct RadioCard: View {
     }
 
     /// Während des Umschaltens gehört der gemeldete Titel noch zum vorigen Sender.
-    private var title: String? {
-        guard !model.radioPaused, group.variants.contains(where: { $0.id == player.channel?.id }) else { return nil }
-        return player.currentProgram?.title ?? player.nowPlaying
+    private var reportedTitle: String? {
+        guard group.variants.contains(where: { $0.id == player.channel?.id }),
+              let title = player.nowPlaying, !title.isEmpty,
+              !EPGProgram.isPlaceholderTitle(title) else { return nil }
+        return title
     }
 
     private var card: some View {
         VStack(spacing: UI.s(20)) {
-            Image(systemName: model.radioPaused ? "pause.circle" : "radio")
-                .font(UI.font(96))
-                .foregroundStyle(UI.accent)
+            ChannelLogoView(channelName: group.displayName, height: UI.s(150), maxWidth: UI.s(340),
+                            urls: ChannelLogo.radioCandidateURLs(for: group.displayName), fallbackIcon: "radio")
             Text(group.displayName)
                 .font(UI.font(60, .heavy))
                 .lineLimit(1)
@@ -37,12 +38,8 @@ struct RadioCard: View {
                 Text("Angehalten")
                     .font(UI.font(32))
                     .foregroundStyle(UI.secondary)
-            } else if let title, !title.isEmpty {
-                Text(title)
-                    .font(UI.font(32))
-                    .foregroundStyle(UI.secondary)
-                    .multilineTextAlignment(.center)
-                    .lineLimit(2)
+            } else {
+                RadioProgramInfo(store: player.epgStore, station: group, fallbackTitle: reportedTitle)
             }
             Text("\(UI.upDown): anderer Radiosender · \(UI.back): Radioliste")
                 .font(UI.font(22))
@@ -51,6 +48,51 @@ struct RadioCard: View {
         }
         .foregroundStyle(UI.text)
         .padding(UI.s(48))
+    }
+}
+
+/// Laufende und folgende Sendung aus den Programmdaten des Signals. Sender ohne echte Programmdaten
+/// zeigen nur `fallbackTitle` bzw. nichts.
+private struct RadioProgramInfo: View {
+    let store: EPGStore
+    let station: ChannelGroup
+    var fallbackTitle: String? = nil
+
+    private func real(_ program: EPGProgram?) -> EPGProgram? {
+        guard let program, !EPGProgram.isPlaceholderTitle(program.title) else { return nil }
+        return program
+    }
+
+    var body: some View {
+        let current = real(store.currentProgram(forChannelNames: station.epgNames))
+        let next = real(store.nextProgram(forChannelNames: station.epgNames))
+        VStack(spacing: UI.s(8)) {
+            if let current {
+                Text(current.title)
+                    .font(UI.font(34, .bold))
+                    .foregroundStyle(UI.text)
+                Text("\(UI.timeFormatter.string(from: current.startDate)) – \(UI.timeFormatter.string(from: current.endDate))")
+                    .font(UI.font(24))
+                    .foregroundStyle(UI.secondary)
+                if let subtitle = current.subtitle, !subtitle.isEmpty {
+                    Text(subtitle)
+                        .font(UI.font(26))
+                        .foregroundStyle(UI.secondary)
+                }
+            } else if let fallbackTitle {
+                Text(fallbackTitle)
+                    .font(UI.font(32))
+                    .foregroundStyle(UI.secondary)
+            }
+            if let next {
+                Text("Ab \(UI.timeFormatter.string(from: next.startDate)): \(next.title)")
+                    .font(UI.font(24))
+                    .foregroundStyle(UI.secondary)
+                    .padding(.top, UI.s(8))
+            }
+        }
+        .multilineTextAlignment(.center)
+        .lineLimit(2)
     }
 }
 
@@ -255,23 +297,16 @@ struct RadioListOverlay: View {
     private func stationPane(_ station: ChannelGroup) -> some View {
         let isCurrent = station == model.currentRadio
         return VStack(spacing: UI.s(20)) {
-            Image(systemName: "radio")
-                .font(UI.font(96))
-                .foregroundStyle(UI.accent)
+            ChannelLogoView(channelName: station.displayName, height: UI.s(150), maxWidth: UI.s(340),
+                            urls: ChannelLogo.radioCandidateURLs(for: station.displayName), fallbackIcon: "radio")
             Text(station.displayName)
                 .font(UI.font(48, .heavy))
                 .foregroundStyle(UI.text)
                 .multilineTextAlignment(.center)
             if isCurrent {
                 Badge(text: "LÄUFT")
-                if let title = player.currentProgram?.title ?? player.nowPlaying, !title.isEmpty {
-                    Text(title)
-                        .font(UI.font(28))
-                        .foregroundStyle(UI.secondary)
-                        .multilineTextAlignment(.center)
-                        .lineLimit(3)
-                }
             }
+            RadioProgramInfo(store: player.epgStore, station: station)
         }
         .padding(UI.s(48))
     }
