@@ -94,7 +94,8 @@ struct RootView: View {
                                 try? await Task.sleep(for: .milliseconds(200))
                                 guard !Task.isCancelled else { return }
                                 if model.overlay == .none {
-                                    model.handle(.back)
+                                    // Bei Radio führt Zurück zum Fernsehen, ein Klick öffnet die Liste.
+                                    model.handle(model.currentRadio != nil ? .select : .back)
                                 }
                             }
                         }

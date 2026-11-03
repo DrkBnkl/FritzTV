@@ -57,7 +57,7 @@ public enum ChannelLogo {
     /// („BAYERN 3“, „Bayern 3“, „Antenne Brbg.“), Sender mit Regionalzusatz teilen sich ein Logo.
     static func radioKey(_ name: String) -> String {
         let plain = name.lowercased().filter { $0.isLetter || $0.isNumber }
-        for prefix in ["swr1", "swr4", "sr3"] where plain.hasPrefix(prefix) { return prefix }
+        for prefix in ["swr1", "swr4", "sr1", "sr3"] where plain.hasPrefix(prefix) { return prefix }
         return plain
     }
 
@@ -79,8 +79,24 @@ public enum ChannelLogo {
             "sr3": ard + "9e823fcba01bcdbf?w=512",
             "bremenzwei": "https://www.bremenzwei.de/static/img/favicons/apple-touch-icon-180.png?v=4",
             "bremennext": "https://www.bremennext.de/static/img/favicons/apple-touch-icon-180.png?v=5",
-            "radioeins": "https://www.radioeins.de/content/dam/rbb/rbb/logos/touch/rad-152.png",
-            "rbb888": "https://www.rbb888.de/content/dam/rbb/rbb/logos/touch/ach-128.png",
+            "bayern1": ard + "d4f96c080ae2cb07?w=512",
+            "bayern2": ard + "2b23315c8a165b41?w=512",
+            "puls": ard + "42476bae0ad2f133?w=512",
+            "brschlager": ard + "59fe8803e5e6eace?w=512",
+            "brheimat": ard + "f878fd56428bd997?w=512",
+            "mdrsanhaltmd": ard + "2e0fbaf706a75f0e?w=512",
+            "mdrthuermittew": ard + "3df9da1086dacb2a?w=512",
+            "rbb24inforadio": ard + "7c8fdfffb2439269?w=512",
+            "radio3": ard + "a347658c3679f1d6?w=512",
+            "fritz": ard + "253d788c0da6b297?w=512",
+            "sr1": ard + "5af6cbac85049032?w=512",
+            "srkultur": ard + "70d2ec0f73eaf61d?w=512",
+            "swrkultur": ard + "829ddf7728ddb7f2?w=512",
+            "antennesaar": ard + "026de77bde3b36f5?w=512",
+            "radiohoreb": "https://www.horeb.org/apple-touch-icon.png",
+            "radioella": "https://www.radio-ella.de/apple-touch-icon.png",
+            "radioeins": ard + "d9f4cd23ac2d9fe5?w=512",
+            "rbb888": ard + "ae012cae99cc023b?w=512",
             "antennebrandenburg": "https://www.antennebrandenburg.de/content/dam/rbb/rbb/logos/touch/ant-128.png",
             "antennebrbg": "https://www.antennebrandenburg.de/content/dam/rbb/rbb/logos/touch/ant-128.png",
             "dlf": "https://www.deutschlandfunk.de/static/img/deutschlandfunk/icons/apple-touch-icon-128x128.png",

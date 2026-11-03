@@ -7,10 +7,6 @@ struct ChannelLogoView: View {
     let channelName: String
     var height: CGFloat = 36
     var maxWidth: CGFloat = 80
-    /// Eigene Logo-Adressen statt der aus dem Sendernamen abgeleiteten.
-    var urls: [URL]? = nil
-    /// Symbol, falls keine Adresse ein Logo liefert; sonst blendet sich die Ansicht aus.
-    var fallbackIcon: String? = nil
 
     @State private var attempt = 0
 
@@ -23,14 +19,8 @@ struct ChannelLogoView: View {
     }
 
     @ViewBuilder private var logo: some View {
-        let urls = urls ?? ChannelLogo.candidateURLs(for: channelName)
-        if attempt >= urls.count, let fallbackIcon {
-            Image(systemName: fallbackIcon)
-                .resizable()
-                .aspectRatio(contentMode: .fit)
-                .foregroundStyle(UI.accent)
-                .frame(maxWidth: maxWidth, maxHeight: height)
-        } else if attempt < urls.count {
+        let urls = ChannelLogo.candidateURLs(for: channelName)
+        if attempt < urls.count {
             AsyncImage(url: urls[attempt]) { phase in
                 switch phase {
                 case .success(let image):

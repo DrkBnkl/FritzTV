@@ -51,6 +51,8 @@ final class AppSettings: ObservableObject {
     @Published var radioEnabled: Bool { didSet { defaults.set(radioEnabled, forKey: Keys.radioEnabled) } }
     /// Zuletzt gehörte Radiosender (Gruppenschlüssel).
     @Published var recentRadioKeys: [String] { didSet { defaults.set(recentRadioKeys, forKey: Keys.recentRadioKeys) } }
+    /// Radio-Favoriten (Gruppenschlüssel) in der Reihenfolge des Hinzufügens.
+    @Published var favoriteRadioKeys: [String] { didSet { defaults.set(favoriteRadioKeys, forKey: Keys.favoriteRadioKeys) } }
     /// Benutzername für die TR-064-Anmeldung (Sendersuchlauf). Das Kennwort liegt im Schlüsselbund.
     @Published var boxUsername: String { didSet { defaults.set(boxUsername, forKey: Keys.boxUsername) } }
     /// Zuletzt gesehene Sender (maximal 2 Schlüssel).
@@ -118,6 +120,7 @@ final class AppSettings: ObservableObject {
         dockLivePreview = defaults.object(forKey: Keys.dockLivePreview) != nil ? defaults.bool(forKey: Keys.dockLivePreview) : true
         radioEnabled = defaults.bool(forKey: Keys.radioEnabled)
         recentRadioKeys = defaults.stringArray(forKey: Keys.recentRadioKeys) ?? []
+        favoriteRadioKeys = defaults.stringArray(forKey: Keys.favoriteRadioKeys) ?? []
         xmltvSource = defaults.string(forKey: Keys.xmltvSource) ?? ""
         boxUsername = defaults.string(forKey: Keys.boxUsername) ?? ""
         recentKeys = Array((defaults.stringArray(forKey: Keys.recentKeys) ?? []).prefix(2))
@@ -175,6 +178,7 @@ final class AppSettings: ObservableObject {
         static let dockLivePreview = "dockLivePreview"
         static let radioEnabled = "radioEnabled"
         static let recentRadioKeys = "recentRadioKeys"
+        static let favoriteRadioKeys = "favoriteRadioKeys"
         static let xmltvSource = "xmltvSource"
         static let boxUsername = "boxUsername"
         static let lastChannel = "lastChannelKey"

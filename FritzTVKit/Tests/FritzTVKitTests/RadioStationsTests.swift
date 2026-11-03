@@ -43,6 +43,50 @@ final class RadioStationsTests: XCTestCase {
         XCTAssertEqual(stations.recent(keys: keys).map(\.displayName), ["COSMO", "1LIVE"])
     }
 
+    private func stations(_ names: [String]) -> RadioStations {
+        let m3u = "#EXTM3U\n" + names.enumerated()
+            .map { "#EXTINF:0,\($1)\nrtsp://x/?freq=\($0)&pids=0\n" }.joined()
+        return RadioStations(catalog: ChannelCatalog(channels: M3UParser.parse(data: Data(m3u.utf8), kind: .radio)))
+    }
+
+    func testDuplicateSpellingsBecomeOneStationWithAllVariants() throws {
+        let list = stations(["BAYERN 3", "Bayern 3", "Antenne Brbg.", "Antenne Brandenburg",
+                             "Bremen Next", "Bremen NEXT", "WDR 2  Ostwestfalen/Lippe", "WDR 2 Ostwestfalen/Lippe"])
+        XCTAssertEqual(list.all.count, 4)
+        let antenne = try XCTUnwrap(list.all.first { $0.displayName == "Antenne Brandenburg" })
+        XCTAssertEqual(antenne.variants.count, 2)
+        XCTAssertTrue(list.all.contains { $0.displayName == "WDR 2 Ostwestfalen/Lippe" })
+    }
+
+    func testFamiliesAreSortedAndPrivateStationsComeLast() {
+        let list = stations(["bigFM", "hr3", "SR 3 Saarlandwelle", "WDR 2", "SWR3", "Fritz", "Dlf"])
+        let ids = list.sections(favoriteKeys: [], recentKeys: [], deadIDs: []).map(\.id)
+        XCTAssertEqual(ids, ["WDR", "SWR", "hr", "rbb", "SR", "Deutschlandradio", "Weitere Sender"])
+    }
+
+    func testFavoritesAndRecentComeFirstAndEmptySectionsAreDropped() {
+        let list = stations(["WDR 2", "bigFM"])
+        let bigFM = list.all[1].key
+        let sections = list.sections(favoriteKeys: [bigFM], recentKeys: [], deadIDs: [])
+        XCTAssertEqual(sections.map(\.id), ["favorites", "WDR", "Weitere Sender"])
+        XCTAssertEqual(sections[0].stations.map(\.displayName), ["bigFM"])
+    }
+
+    func testDeadStationsMoveToTheEndAndStayFavorites() {
+        let list = stations(["WDR 2", "bigFM"])
+        let dead = Set(list.all[1].variants.map(\.id))
+        let sections = list.sections(favoriteKeys: [list.all[1].key], recentKeys: [], deadIDs: dead)
+        XCTAssertEqual(sections.map(\.id), ["favorites", "WDR", "dead"])
+        XCTAssertEqual(sections.last?.stations.map(\.displayName), ["bigFM"])
+    }
+
+    func testOneWorkingVariantKeepsStationInItsFamily() throws {
+        let list = stations(["Bayern 3", "BAYERN 3"])
+        let variants = try XCTUnwrap(list.all.first).variants
+        let sections = list.sections(favoriteKeys: [], recentKeys: [], deadIDs: [variants[0].id])
+        XCTAssertEqual(sections.map(\.id), ["BR"])
+    }
+
     func testRadioLogosMatchTheSpellingsOfTheBox() {
         let spellings = [("BAYERN 3", "Bayern 3"), ("Antenne Brbg.", "Antenne Brandenburg"),
                          ("SWR1 BW", "SWR1 RP"), ("SWR4 BW", "SWR4 - Rheinhessen"),
