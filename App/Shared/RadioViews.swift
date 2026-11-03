@@ -53,8 +53,26 @@ struct RadioLogoView: View {
     @State private var image: Image?
 
     var body: some View {
+        Self.face(name: name, image: image, width: width, height: height)
+            .task(id: name) {
+                image = RadioLogoCache.shared.image(for: name)
+                guard image == nil else { return }
+                let loaded = await RadioLogoCache.shared.load(name)
+                if !Task.isCancelled { image = loaded }
+            }
+    }
+
+    /// Logo bzw. Namenskachel als Bild, sobald vorhanden mit dem geladenen Logo.
+    static func dockImage(for name: String) -> CGImage? {
+        let renderer = ImageRenderer(content: face(name: name, image: RadioLogoCache.shared.image(for: name),
+                                                   width: 256, height: 160))
+        renderer.scale = 2
+        return renderer.cgImage
+    }
+
+    private static func face(name: String, image: Image?, width: CGFloat, height: CGFloat) -> some View {
         let corner = max(height * 0.14, 4)
-        ZStack {
+        return ZStack {
             if let image {
                 RoundedRectangle(cornerRadius: corner).fill(Color.white)
                 image
@@ -62,7 +80,7 @@ struct RadioLogoView: View {
                     .aspectRatio(contentMode: .fit)
                     .clipShape(RoundedRectangle(cornerRadius: corner))
             } else {
-                RoundedRectangle(cornerRadius: corner).fill(tileColor)
+                RoundedRectangle(cornerRadius: corner).fill(tileColor(for: name))
                 Text(name)
                     .font(.system(size: height * 0.3, weight: .heavy))
                     .foregroundStyle(Color.white)
@@ -73,16 +91,10 @@ struct RadioLogoView: View {
             }
         }
         .frame(width: width, height: height)
-        .task(id: name) {
-            image = RadioLogoCache.shared.image(for: name)
-            guard image == nil else { return }
-            let loaded = await RadioLogoCache.shared.load(name)
-            if !Task.isCancelled { image = loaded }
-        }
     }
 
     /// Feste Farbe je Senderfamilie.
-    private var tileColor: Color {
+    private static func tileColor(for name: String) -> Color {
         let family = RadioStations.familyTitle(of: name)
         let hue = family.unicodeScalars.reduce(UInt32(7)) { ($0 &* 31 &+ $1.value) % 360 }
         return Color(hue: Double(hue) / 360, saturation: 0.55, brightness: 0.45)

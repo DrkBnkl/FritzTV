@@ -77,11 +77,14 @@ struct PlayerSurface: NSViewRepresentable {
     /// Nur Apple TV; auf dem Mac verkleinert `EPGPreviewPlacement`.
     var previewFrame: CGRect? = nil
     var dockLivePreview: Bool = true
+    /// Bild fürs Dock statt eines Standbilds, z. B. das Senderlogo, solange Radio läuft.
+    var dockImage: (() -> CGImage?)? = nil
 
     func makeNSView(context: Context) -> MacVideoHostView {
         let view = MacVideoHostView()
         view.player = player
         view.dockLivePreview = dockLivePreview
+        view.dockImageProvider = dockImage
         bindDrawable(view.videoView)
         return view
     }
@@ -89,6 +92,7 @@ struct PlayerSurface: NSViewRepresentable {
     func updateNSView(_ nsView: MacVideoHostView, context: Context) {
         nsView.player = player
         nsView.dockLivePreview = dockLivePreview
+        nsView.dockImageProvider = dockImage
         if (player.drawable as? NSView) != nsView.videoView {
             bindDrawable(nsView.videoView)
         }
@@ -114,6 +118,7 @@ struct PlayerSurface: NSViewRepresentable {
 final class MacVideoHostView: NSView {
     weak var player: VLCMediaPlayer?
     var dockLivePreview: Bool = true
+    var dockImageProvider: (() -> CGImage?)?
     let videoView = NSView()
     private var windowObservers: [NSObjectProtocol] = []
     private var snapshotTimer: Timer?
@@ -189,7 +194,13 @@ final class MacVideoHostView: NSView {
         // Regelmäßig im Hintergrund ein aktuelles Standbild für das Dock-Icon vorhalten.
         // Intervall: 12 Sekunden (angenehm ruhig, kein nerviges Stroboskop/Flimmern im Augenwinkel).
         snapshotTimer = Timer.scheduledTimer(withTimeInterval: 12.0, repeats: true) { [weak self] _ in
-            guard let self, let player = self.player, player.isPlaying, player.hasVideoOut else { return }
+            guard let self else { return }
+            if let image = self.providedDockImage() {
+                self.lastSnapshotImage = image
+                if self.window?.isMiniaturized == true { self.applyDockImage(image) }
+                return
+            }
+            guard let player = self.player, player.isPlaying, player.hasVideoOut else { return }
             // Wenn das Fenster minimiert ist und die Dock-Vorschau deaktiviert wurde,
             // bleibt das Standbild stehen und es werden keine neuen Snapshots angefordert.
             if let window = self.window, window.isMiniaturized, !self.dockLivePreview {
@@ -197,6 +208,12 @@ final class MacVideoHostView: NSView {
             }
             self.takeSnapshot()
         }
+    }
+
+    /// Vorgegebenes Dock-Bild (Radio). Ohne Bild läuft das gewohnte Standbild des Videos.
+    private func providedDockImage() -> NSImage? {
+        guard let cgImage = dockImageProvider?() else { return nil }
+        return NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height)).aspectFittedForDock()
     }
 
     private func stopSnapshotTimer() {
@@ -278,6 +295,11 @@ final class MacVideoHostView: NSView {
         guard let window else { return }
         crossfadeTimer?.invalidate()
         crossfadeTimer = nil
+        if let image = providedDockImage() {
+            lastSnapshotImage = image
+            applyDockImage(image)
+            return
+        }
         // Sobald das Fenster beginnt, ins Dock zu gleiten: sofort das aktuellste Standbild setzen
         if let image = lastSnapshotImage {
             applyDockImage(image)
@@ -293,6 +315,7 @@ final class MacVideoHostView: NSView {
         if let notifPlayer = notif.object as? VLCMediaPlayer, let player, notifPlayer !== player {
             return
         }
+        guard dockImageProvider?() == nil else { return }
         let rawImage: NSImage?
         if let last = player?.lastSnapshot {
             rawImage = last
@@ -374,6 +397,8 @@ struct PlayerSurface: UIViewRepresentable {
     /// Vorschaufenster der Programmübersicht (Bildschirmkoordinaten) oder `nil` für Vollbild.
     var previewFrame: CGRect? = nil
     var dockLivePreview: Bool = true
+    /// Nur Mac (Dock).
+    var dockImage: (() -> CGImage?)? = nil
 
     func makeUIView(context: Context) -> VideoHostView {
         let view = VideoHostView()

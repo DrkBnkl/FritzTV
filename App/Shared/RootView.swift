@@ -19,6 +19,11 @@ struct RootView: View {
 
     private var previewFrame: CGRect? { model.showEPGOverview ? epgPreviewFrame : nil }
 
+    /// Bei Radio zeigt das Dock das Senderlogo statt des letzten Fernsehbilds.
+    private func radioDockImage() -> CGImage? {
+        model.currentRadio.flatMap { RadioLogoView.dockImage(for: $0.displayName) }
+    }
+
     var body: some View {
         GeometryReader { windowGeo in
             ZStack {
@@ -31,7 +36,8 @@ struct RootView: View {
                 }
                 // In der Programmübersicht läuft das Bild verkleinert im Vorschaufenster weiter.
                 // Dieselbe Ansicht wird nur verschoben (kein zweiter Player, kein Neuaufbau).
-                PlayerSurface(player: player.mediaPlayer, previewFrame: previewFrame, dockLivePreview: model.settings.dockLivePreview)
+                PlayerSurface(player: player.mediaPlayer, previewFrame: previewFrame, dockLivePreview: model.settings.dockLivePreview,
+                              dockImage: radioDockImage)
                     .modifier(EPGPreviewPlacement(
                         frame: previewFrame,
                         channelText: model.currentEntry.map { "\($0.number) · \($0.group.displayName)" } ?? "Live-TV",
@@ -50,7 +56,8 @@ struct RootView: View {
                     Color.black.ignoresSafeArea()
                 }
                 // Timeshift: Mitschnitt-Wiedergabe liegt über dem stumm weiterlaufenden Live-Bild.
-                PlayerSurface(player: player.replayPlayer, previewFrame: previewFrame, dockLivePreview: model.settings.dockLivePreview)
+                PlayerSurface(player: player.replayPlayer, previewFrame: previewFrame, dockLivePreview: model.settings.dockLivePreview,
+                              dockImage: radioDockImage)
                     .opacity(player.isReplaying ? 1 : 0)
                     .allowsHitTesting(false)
                     .modifier(EPGPreviewPlacement(frame: previewFrame, showOverlay: false))
