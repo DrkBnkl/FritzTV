@@ -68,14 +68,13 @@ enum ChannelListItem: Hashable, Identifiable {
 enum RadioListItem: Hashable, Identifiable {
     /// Nur sichtbar, solange ein Radiosender läuft.
     case backToTV
-    case recent(ChannelGroup)
-    case station(ChannelGroup)
+    /// Derselbe Sender kann in mehreren Abschnitten stehen (Favoriten, Zuletzt gehört, Familie).
+    case station(section: String, group: ChannelGroup)
 
     var id: String {
         switch self {
         case .backToTV: return "radioBackToTV"
-        case .recent(let group): return "radioRecent-\(group.key)"
-        case .station(let group): return "radioStation-\(group.key)"
+        case .station(let section, let group): return "radio-\(section)-\(group.key)"
         }
     }
 }
@@ -208,6 +207,9 @@ final class AppModel: ObservableObject {
                         hint: "Ein anderes Gerät im Heimnetz nutzt bereits Live-TV."
                     )
                 } else {
+                    // Tuner frei und Box erreichbar: Der Sender kommt ans Ende der Radioliste,
+                    // bis er wieder Ton liefert oder ein Sendersuchlauf neue Einträge bringt.
+                    failedRadio?.variants.forEach { self.settings.markVariantDead(channelID: $0.id) }
                     self.player.setFailed(
                         title: noSignalTitle,
                         message: "Die Senderliste ist womöglich veraltet.",
@@ -456,10 +458,17 @@ final class AppModel: ObservableObject {
     /// Radio ist eingeschaltet und die Box meldet Radiosender.
     var showsRadio: Bool { settings.radioEnabled && !radioStations.all.isEmpty }
 
+    var radioSections: [RadioListSection] {
+        radioStations.sections(favoriteKeys: settings.favoriteRadioKeys,
+                               recentKeys: settings.recentRadioKeys,
+                               deadIDs: settings.deadChannelIDs)
+    }
+
     var radioListItems: [RadioListItem] {
         var items: [RadioListItem] = currentRadio == nil ? [] : [.backToTV]
-        items += radioStations.recent(keys: settings.recentRadioKeys).map(RadioListItem.recent)
-        items += radioStations.all.map(RadioListItem.station)
+        for section in radioSections {
+            items += section.stations.map { .station(section: section.id, group: $0) }
+        }
         return items
     }
 
@@ -467,8 +476,12 @@ final class AppModel: ObservableObject {
         guard showsRadio || currentRadio != nil else { return }
         cancelPendingZap()
         bannerVisible = false
-        let target = currentRadio.map { RadioListItem.station($0).id } ?? radioListItems.first?.id
-        overlay = .radioList(selectedID: target ?? RadioListItem.backToTV.id)
+        let items = radioListItems
+        let current = items.first { item in
+            if case .station(_, let group) = item { return group == currentRadio }
+            return false
+        }
+        overlay = .radioList(selectedID: (current ?? items.first)?.id ?? RadioListItem.backToTV.id)
     }
 
     func activateRadioListItem(_ item: RadioListItem) {
@@ -476,9 +489,42 @@ final class AppModel: ObservableObject {
         switch item {
         case .backToTV:
             leaveRadio()
-        case .recent(let group), .station(let group):
+        case .station(_, let group):
             playRadio(group)
         }
+    }
+
+    /// Links/Rechts in der Radioliste: zum Anfang des vorigen bzw. nächsten Abschnitts.
+    private func jumpRadioSection(from item: RadioListItem, forward: Bool) {
+        let sections = radioSections
+        guard !sections.isEmpty else { return }
+        var index = forward ? 0 : sections.count - 1
+        if case .station(let section, _) = item, let current = sections.firstIndex(where: { $0.id == section }) {
+            index = (current + (forward ? 1 : -1) + sections.count) % sections.count
+        }
+        guard let first = sections[index].stations.first else { return }
+        overlay = .radioList(selectedID: RadioListItem.station(section: sections[index].id, group: first).id)
+    }
+
+    /// Play/Pause in der Radioliste. Fällt die Zeile dabei weg (Favorit entfernt), bleibt die
+    /// Auswahl auf demselben Sender in seinem anderen Abschnitt.
+    private func toggleRadioFavorite(_ item: RadioListItem) {
+        guard case .station(_, let group) = item else { return }
+        if settings.favoriteRadioKeys.contains(group.key) {
+            settings.favoriteRadioKeys.removeAll { $0 == group.key }
+        } else {
+            settings.favoriteRadioKeys.append(group.key)
+        }
+        let items = radioListItems
+        guard !items.contains(item) else {
+            objectWillChange.send()
+            return
+        }
+        let sameStation = items.first { candidate in
+            if case .station(_, let other) = candidate { return other == group }
+            return false
+        }
+        overlay = .radioList(selectedID: sameStation?.id ?? items.first?.id ?? RadioListItem.backToTV.id)
     }
 
     func playRadio(_ group: ChannelGroup) {
@@ -685,7 +731,7 @@ final class AppModel: ObservableObject {
             } else {
                 openRadioList()
             }
-        case .back: openRadioList()
+        case .back: leaveRadio()
         case .playPause: toggleRadioPause()
         case .left, .right, .digit, .swipeUp, .swipeDown: break
         }
@@ -711,14 +757,12 @@ final class AppModel: ObservableObject {
         case .select:
             activateRadioListItem(items[currentIndex])
         case .playPause:
-            if currentRadio != nil {
-                toggleRadioPause()
-            } else {
-                player.togglePause()
-            }
+            toggleRadioFavorite(items[currentIndex])
+        case .left, .right:
+            jumpRadioSection(from: items[currentIndex], forward: command == .right)
         case .back:
             overlay = currentRadio != nil ? .none : .channelList(selectedID: ChannelListItem.radio.id)
-        case .left, .right, .swipeUp, .swipeDown, .digit:
+        case .swipeUp, .swipeDown, .digit:
             break
         }
     }
