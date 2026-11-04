@@ -19,20 +19,19 @@ struct SettingsView: View {
         case backTarget = 0
         case bannerSeconds = 1
         case dockLivePreview = 2
-        case radioEnabled = 3
-        case channelManager = 4
-        case reloadList = 5
-        case networkCaching = 6
-        case rtspTCP = 7
-        case preferHD = 8
-        case deinterlaceSD = 9
-        case blackScreenOnZap = 10
-        case timeshift = 11
-        case timeshiftMinutes = 12
-        case audioDelay = 13
-        case audioDelayAC3 = 14
-        case mediathekSubtitles = 15
-        case reloadXMLTV = 16
+        case channelManager = 3
+        case reloadList = 4
+        case networkCaching = 5
+        case rtspTCP = 6
+        case preferHD = 7
+        case deinterlaceSD = 8
+        case blackScreenOnZap = 9
+        case timeshift = 10
+        case timeshiftMinutes = 11
+        case audioDelay = 12
+        case audioDelayAC3 = 13
+        case mediathekSubtitles = 14
+        case reloadXMLTV = 15
     }
 
     private let cachingValues = [500, 1000, 2000, 3000, 5000]
@@ -59,14 +58,6 @@ struct SettingsView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     #endif
-
-                    Toggle("Radio anzeigen", isOn: $settings.radioEnabled)
-                        .cursorRow(.radioEnabled, focusedIndex: $focusedIndex)
-                    Text(model.radioStations.all.isEmpty
-                         ? "Die FRITZ!Box meldet keine Radiosender."
-                         : "Zeigt in der Senderliste die Zeile „Radio“ mit \(model.radioStations.all.count) Sendern.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
                 }
 
                 Section("Sendersortierung") {
@@ -305,8 +296,6 @@ struct SettingsView: View {
             settings.timeshiftMinutes = Self.step(timeshiftMinuteValues, from: settings.timeshiftMinutes, by: delta)
         case .dockLivePreview:
             settings.dockLivePreview = (delta > 0)
-        case .radioEnabled:
-            settings.radioEnabled = (delta > 0)
         case .audioDelay:
             let next = min(max(settings.audioDelayMs + delta * 25, -500), 500)
             settings.audioDelayMs = next
@@ -357,8 +346,6 @@ struct SettingsView: View {
             adjustSetting(delta: 1)
         case .dockLivePreview:
             settings.dockLivePreview.toggle()
-        case .radioEnabled:
-            settings.radioEnabled.toggle()
         case .audioDelay, .audioDelayAC3:
             break
         case .mediathekSubtitles:

@@ -9,10 +9,11 @@
 
 > **🇬🇧 English Summary:** Native **Apple TV (tvOS)** and **macOS** Live TV & IPTV player for **AVM FRITZ!Box Cable (DVB-C)** routers (`6690`, `6670`, `6660`, `6591`, `6590`, `6490 Cable`, and `FRITZ!WLAN Repeater DVB-C`). Streams unencrypted cable TV channels directly via RTSP/M3U using VLCKit, featuring a 30-hour **EPG timeline** (DVB-EIT + XMLTV), **live timeshift** (pause & rewind), **start-over replay** via public broadcaster HLS streams, integrated **MediathekViewWeb** catch-up search with subtitles, **TR-064 station scan**, and **UPnP tuner diagnostics**.
 
-Ein Projekt, zwei Ziele:
+Ein Projekt, drei Ziele:
 
 - **FritzTV-tvOS** – die Apple-TV-App für das Wohnzimmer (optimiert für die Siri Remote & 50-Hz-Wiedergabe)
 - **FritzTV-macOS** – dieselbe App nativ für den Mac (optimiert für Maus, Trackpad und Tastatur)
+- **FritzRadio** – eigenständige Menüleisten-App für den Mac: die Radiosender aus dem Kabel, unabhängig vom Fernsehen
 
 ## Unterstützte FRITZ!Box-Modelle (DVB-C-Tuner)
 
@@ -69,6 +70,8 @@ Voraussetzung ist eine FRITZ!Box mit integriertem **DVB-C-Tuner** und aktivierte
 3. **Mac:** Oben das Schema `FritzTV-macOS` und „My Mac“ wählen, ⌘R – oder direkt `./scripts/deploy-macos.sh` ausführen, um die fertige Universal-Version nach `/Applications/FritzTV.app` zu installieren.
 4. **Apple TV:** Zum Installieren auf dem eigenen Apple TV im Heimnetz `./scripts/deploy-tvos.sh` ausführen (baut die Release-Version und installiert sie per `xcrun devicectl` ohne Daten- oder Einstellungsverlust).
 
+**FritzRadio** gibt es im Release als `FritzRadio-macOS-Universal.zip` (Installation wie oben, Pfad `/Applications/FritzRadio.app`); selbst gebaut mit `./scripts/deploy-fritzradio.sh`.
+
 Unterwegs (z. B. über Mobilfunk oder im Hotel): vorher das WireGuard-VPN der FRITZ!Box verbinden. Klappt die Namensauflösung von `fritz.box` über das VPN nicht, nimmt die App automatisch `192.168.178.1`.
 
 ## Bedienung
@@ -100,7 +103,7 @@ Unterwegs (z. B. über Mobilfunk oder im Hotel): vorher das WireGuard-VPN der FR
 - **Von Anfang an (HLS-Replay):** Laufende Sendungen öffentlich-rechtlicher Sender per Klick über deren offizielle HLS-Streams mit `EXT-X-PROGRAM-DATE-TIME` nahtlos vom Sendungsbeginn abspielen.
 - **Sendung verpasst (MediathekViewWeb):** Aus der Sendungsinfo oder direkt über die Detailtafel im EPG-Zeitstrahl (auch beim Zurückblättern) vergangene und aktuelle Sendungen in den öffentlich-rechtlichen Mediatheken suchen und abspielen (inkl. EBU-TT-D-/WebVTT-Untertiteln).
 - **Senderverwaltung & Sendersuchlauf:** Sender in den Einstellungen frei sortieren oder ausblenden; DVB-C-Sendersuchlauf der FRITZ!Box direkt aus der App über TR-064 starten; Live-Diagnose der 4 Kabel-Tuner (Signalstärke, SNR, Auslastung) über UPnP.
-- **Radio (optional):** In den Einstellungen unter „Bedienung“ einschaltbar, standardmäßig aus. Die Senderliste bekommt dann die Zeile „Radio“ mit eigener Liste, nach Senderfamilien sortiert (Links/Rechts springt zur nächsten Gruppe, Play/Pause merkt einen Favoriten). Beim Hören wechselt Hoch/Runter nur zwischen Radiosendern, Zurück führt direkt zum Fernsehen, Play/Pause gibt den Tuner frei. Die Anzeige zeigt Senderlogo, laufende und folgende Sendung aus dem Signal, soweit der Sender sie liefert. Fernsehen bleibt unberührt: keine Senderplätze, kein EPG, und die App startet immer mit dem letzten Fernsehsender.
+- **FritzRadio (Mac-Menüleiste):** Radiosender der Box nach Senderfamilien sortiert (WDR, NDR, SWR, BR …), Favoriten, „Zuletzt gehört“ und Suche. Senderlogos in guter Auflösung, laufende und folgende Sendung aus dem Signal, soweit der Sender sie liefert. Medientasten und Kontrollzentrum (Play/Pause, nächster Sender), Lautstärke, Start beim Anmelden. Doppelte Einträge der Box sind zusammengefasst; Sender ohne Ton rutschen ans Ende, bis sie wieder Ton liefern. Während Radio läuft, schläft der Mac nicht ein; nach dem Ruhezustand verbindet sich FritzRadio neu.
 - **Apple TV Top Shelf:** Zeigt 12 Sender auf dem Apple-TV-Startbildschirm zum direkten Einschalten per Deep Link (`fritztv://channel/<nummer>`). Mit kostenloser Apple-ID ist das eine feste Standardliste; die eigenen Senderplätze erscheinen dort nur mit App Group, also mit bezahltem Entwickler-Account (siehe `project.yml`).
 
 ## Aufbau
@@ -110,6 +113,7 @@ Unterwegs (z. B. über Mobilfunk oder im Hotel): vorher das WireGuard-VPN der FR
 - `App/tvOS/` – Siri-Remote-Steuerung (`RemoteInput`), 50-Hz-Bildwiederholrate (`DisplayCriteria`), UIKit-Videofensterausschnitt
 - `App/macOS/` – Tastatursteuerung (`KeyboardInput`), AppKit-Videofläche
 - `App/TopShelf/` – tvOS-Top-Shelf-Erweiterung
+- `App/Radio/` – FritzRadio: Menüleisten-App (`RadioModel`, `RadioPlayer` mit VLCKit, `RadioPanel`); Senderliste und Logos kommen aus `FritzTVKit` (`RadioStations`, `ChannelLogo`)
 - `project.yml` – Projektbeschreibung für XcodeGen
 
 ## Lizenz & Rechtliche Hinweise

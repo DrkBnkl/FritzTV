@@ -297,7 +297,6 @@ final class RemoteHoldRepeater {
     private static func allowsRepeat(_ model: AppModel) -> Bool {
         if model.showEPGOverview { return model.epgNav.detail == nil }
         if case .channelList = model.overlay { return true }
-        if case .radioList = model.overlay { return true }
         return false
     }
 }

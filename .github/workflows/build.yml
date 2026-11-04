@@ -1,4 +1,4 @@
-# Baut FritzTVKit (mit Tests) sowie die Mac- und die Apple-TV-App, ohne zu signieren.
+# Baut FritzTVKit (mit Tests), die Mac- und die Apple-TV-App sowie FritzRadio, ohne zu signieren.
 # Läuft bei jedem Push und Pull Request auf main und develop sowie von Hand: Releases entstehen
 # durch direkte Merges nach main, ein Lauf nur bei Pull Requests würde sie nie prüfen.
 name: Build
@@ -33,6 +33,14 @@ jobs:
         run: |
           set -o pipefail
           xcodebuild -project FritzTV.xcodeproj -scheme FritzTV-macOS \
+            -destination 'generic/platform=macOS' \
+            -skipPackagePluginValidation \
+            CODE_SIGNING_ALLOWED=NO build | xcbeautify --renderer github-actions
+
+      - name: FritzRadio bauen
+        run: |
+          set -o pipefail
+          xcodebuild -project FritzTV.xcodeproj -scheme FritzRadio-macOS \
             -destination 'generic/platform=macOS' \
             -skipPackagePluginValidation \
             CODE_SIGNING_ALLOWED=NO build | xcbeautify --renderer github-actions

@@ -5,10 +5,16 @@ public struct RadioListSection: Identifiable, Equatable, Sendable {
     public let id: String
     public let title: String
     public let stations: [ChannelGroup]
+
+    public init(id: String, title: String, stations: [ChannelGroup]) {
+        self.id = id
+        self.title = title
+        self.stations = stations
+    }
 }
 
-/// Die Radiosender der Box. Sie stehen bewusst außerhalb von `ChannelLineup`: Radio bekommt keine
-/// Senderplätze und taucht beim Umschalten, in der Direktwahl und im EPG nicht auf.
+/// Die Radiosender der Box für FritzRadio. Sie stehen außerhalb von `ChannelLineup`:
+/// Radio bekommt keine Senderplätze, FritzTV zeigt nur Fernsehen.
 public struct RadioStations: Sendable {
     /// Maximale Länge der Liste „Zuletzt gehört“.
     public static let recentLimit = 3
