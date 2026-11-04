@@ -2,29 +2,29 @@ import AppKit
 import SwiftUI
 import FritzTVKit
 
-/// Fenster unter dem Menüleistensymbol: oben der laufende Sender, darunter die Senderliste.
+/// Panel unter dem Menüleistensymbol: oben der laufende Sender, darunter die Senderliste.
 struct RadioPanel: View {
     @ObservedObject var model: RadioModel
-    @State private var showsSettings = false
+    @FocusState private var searchFocused: Bool
 
     var body: some View {
         VStack(spacing: 0) {
             NowPlayingHeader(model: model)
                 .padding(12)
             Divider()
-            if showsSettings {
-                RadioSettingsView(model: model) { showsSettings = false }
+            if model.showsSettings {
+                RadioSettingsView(model: model) { model.showsSettings = false }
             } else {
                 content
             }
             Divider()
             HStack {
                 Button {
-                    showsSettings.toggle()
+                    model.showsSettings.toggle()
                 } label: {
-                    Image(systemName: showsSettings ? "list.bullet" : "gearshape")
+                    Image(systemName: model.showsSettings ? "list.bullet" : "gearshape")
                 }
-                .help(showsSettings ? "Senderliste" : "Einstellungen")
+                .help(model.showsSettings ? "Senderliste" : "Einstellungen (⌘,)")
                 Spacer()
                 Button("Beenden") { NSApp.terminate(nil) }
             }
@@ -33,6 +33,7 @@ struct RadioPanel: View {
             .padding(.vertical, 8)
         }
         .frame(width: 340)
+        .onChange(of: model.searchFocusRequest) { searchFocused = true }
     }
 
     @ViewBuilder
@@ -54,6 +55,10 @@ struct RadioPanel: View {
             VStack(spacing: 0) {
                 TextField("Sender suchen", text: $model.searchText)
                     .textFieldStyle(.roundedBorder)
+                    .focused($searchFocused)
+                    // Return spielt den ersten Treffer, Esc leert die Suche.
+                    .onSubmit(model.playFirstHit)
+                    .onExitCommand { model.searchText = "" }
                     .padding(.horizontal, 12)
                     .padding(.vertical, 8)
                 StationList(model: model)
@@ -167,32 +172,51 @@ private struct StationList: View {
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 0, pinnedViews: [.sectionHeaders]) {
-                    ForEach(sections) { section in
-                        Section {
-                            ForEach(section.stations, id: \.key) { station in
-                                StationRow(station: station,
-                                           isCurrent: station == model.current,
-                                           isPlaying: station == model.current && model.isPlaying,
-                                           isFavorite: model.isFavorite(station),
-                                           isDead: model.isDead(station),
-                                           play: { model.play(station) },
-                                           toggleFavorite: { model.toggleFavorite(station) })
+            ScrollViewReader { proxy in
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 0, pinnedViews: [.sectionHeaders]) {
+                        ForEach(sections) { section in
+                            Section {
+                                ForEach(section.stations, id: \.key) { station in
+                                    StationRow(station: station,
+                                               isCurrent: station == model.current,
+                                               isPlaying: station == model.current && model.isPlaying,
+                                               isFavorite: model.isFavorite(station),
+                                               isDead: model.isDead(station),
+                                               play: { model.play(station) },
+                                               toggleFavorite: { model.toggleFavorite(station) })
+                                        // Ein Sender steht ggf. mehrfach (Favoriten, Zuletzt gehört, Familie):
+                                        // Die Kennung muss trotzdem in der ganzen Liste eindeutig sein.
+                                        .id(Self.rowID(section: section, station: station))
+                                }
+                            } header: {
+                                Text(section.title)
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(.secondary)
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 4)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .background(.bar)
                             }
-                        } header: {
-                            Text(section.title)
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(.secondary)
-                                .padding(.horizontal, 12)
-                                .padding(.vertical, 4)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .background(.bar)
                         }
                     }
                 }
+                // Beim Öffnen steht der laufende Sender im Blick, wenn er nicht oben in Favoriten/Zuletzt steht.
+                .onAppear {
+                    guard let current = model.current, model.searchText.isEmpty,
+                          let first = sections.first(where: { $0.stations.contains(current) }),
+                          !["favorites", "recent"].contains(first.id)
+                    else { return }
+                    proxy.scrollTo(Self.rowID(section: first, station: current), anchor: .center)
+                }
             }
         }
+    }
+}
+
+extension StationList {
+    static func rowID(section: RadioListSection, station: ChannelGroup) -> String {
+        "\(section.id)/\(station.key)"
     }
 }
 
@@ -233,6 +257,11 @@ private struct StationRow: View {
         .contentShape(Rectangle())
         .onHover { hovering = $0 }
         .onTapGesture(perform: play)
+        .contextMenu {
+            Button("Abspielen", action: play)
+            Button(isFavorite ? "Aus den Favoriten entfernen" : "Zu den Favoriten", action: toggleFavorite)
+        }
+        .help(isDead ? "Lieferte zuletzt keinen Ton" : "")
     }
 }
 

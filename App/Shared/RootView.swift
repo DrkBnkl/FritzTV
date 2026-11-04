@@ -159,7 +159,9 @@ struct RootView: View {
         .onChange(of: scenePhase) { _, phase in
             switch phase {
             case .background: player.stop()
-            case .active: model.returnedToForeground()
+            case .active:
+                model.returnedToForeground()
+                KeepAwake.reassert(for: player.status)
             default: break
             }
         }
@@ -450,7 +452,19 @@ struct EPGPreviewPlacement: ViewModifier {
 enum KeepAwake {
     #if os(macOS)
     private static var activity: NSObjectProtocol?
+    #elseif os(tvOS)
+    /// tvOS verwirft `isIdleTimerDisabled` gelegentlich intern (der Wert bleibt `true`, der
+    /// Bildschirmschoner kommt trotzdem). Solange live gespielt wird, deshalb regelmäßig neu setzen.
+    private static var refreshTimer: Timer?
     #endif
+
+    /// Erneut anwenden, z. B. wenn die App wieder aktiv wird.
+    static func reassert(for status: PlayerStatus) {
+        #if os(tvOS)
+        UIApplication.shared.isIdleTimerDisabled = false
+        #endif
+        update(for: status)
+    }
 
     static func update(for status: PlayerStatus) {
         let awake: Bool
@@ -463,6 +477,18 @@ enum KeepAwake {
         #if os(tvOS)
         if UIApplication.shared.isIdleTimerDisabled != awake {
             UIApplication.shared.isIdleTimerDisabled = awake
+        }
+        if awake, refreshTimer == nil {
+            refreshTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { _ in
+                MainActor.assumeIsolated {
+                    // Umschalten zwingt das System, die Sperre neu zu übernehmen.
+                    UIApplication.shared.isIdleTimerDisabled = false
+                    UIApplication.shared.isIdleTimerDisabled = true
+                }
+            }
+        } else if !awake, let timer = refreshTimer {
+            timer.invalidate()
+            refreshTimer = nil
         }
         #elseif os(macOS)
         if awake, activity == nil {
