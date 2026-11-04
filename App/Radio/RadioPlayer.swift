@@ -56,9 +56,14 @@ final class RadioPlayer: ObservableObject {
     private var lastTimeChange = Date()
     private var monitorTask: Task<Void, Never>?
 
-    var volume: Int {
-        get { Int(mediaPlayer.audio?.volume ?? 100) }
-        set { mediaPlayer.audio?.volume = Int32(min(max(newValue, 0), 100)) }
+    /// Gewünschte Lautstärke (0–100). Sie wird bei jeder neuen Verbindung erneut gesetzt:
+    /// Solange libVLC noch keine Tonausgabe geöffnet hat, geht ein gesetzter Wert sonst verloren.
+    var volume = 100 {
+        didSet { applyVolume() }
+    }
+
+    private func applyVolume() {
+        mediaPlayer.audio?.volume = Int32(min(max(volume, 0), 100))
     }
 
     init(epgCacheURL: URL?) {
@@ -120,6 +125,7 @@ final class RadioPlayer: ObservableObject {
         media.addOption(":network-caching=\(variant.networkCachingMilliseconds ?? 1000)")
         mediaPlayer.media = media
         mediaPlayer.play()
+        applyVolume()
         openedAt = Date()
         lastTime = 0
         lastTimeChange = Date()
@@ -149,6 +155,7 @@ final class RadioPlayer: ObservableObject {
         case .connecting:
             if mediaPlayer.isPlaying, mediaPlayer.numberOfAudioTracks > 0, time > 0 {
                 status = .playing
+                applyVolume()
                 radioLog.notice("Ton da nach \(now.timeIntervalSince(self.openedAt), format: .fixed(precision: 1)) s")
                 reconnects = 0
                 onVariantSuccess?(channel, failed)

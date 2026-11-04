@@ -2,29 +2,31 @@ import AppKit
 import SwiftUI
 import FritzTVKit
 
-/// Fenster unter dem Menüleistensymbol: oben der laufende Sender, darunter die Senderliste.
+/// Fenster unter dem Menüleistensymbol bzw. eigenes Fenster: oben der laufende Sender,
+/// darunter die Senderliste. Im eigenen Fenster wächst die Liste mit der Fenstergröße.
 struct RadioPanel: View {
     @ObservedObject var model: RadioModel
-    @State private var showsSettings = false
+    var isWindow = false
+    @FocusState private var searchFocused: Bool
 
     var body: some View {
         VStack(spacing: 0) {
             NowPlayingHeader(model: model)
                 .padding(12)
             Divider()
-            if showsSettings {
-                RadioSettingsView(model: model) { showsSettings = false }
+            if model.showsSettings {
+                RadioSettingsView(model: model, isWindow: isWindow) { model.showsSettings = false }
             } else {
                 content
             }
             Divider()
             HStack {
                 Button {
-                    showsSettings.toggle()
+                    model.showsSettings.toggle()
                 } label: {
-                    Image(systemName: showsSettings ? "list.bullet" : "gearshape")
+                    Image(systemName: model.showsSettings ? "list.bullet" : "gearshape")
                 }
-                .help(showsSettings ? "Senderliste" : "Einstellungen")
+                .help(model.showsSettings ? "Senderliste" : "Einstellungen (⌘,)")
                 Spacer()
                 Button("Beenden") { NSApp.terminate(nil) }
             }
@@ -32,15 +34,19 @@ struct RadioPanel: View {
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
         }
-        .frame(width: 340)
+        .frame(minWidth: 340, idealWidth: 340, maxWidth: isWindow ? .infinity : 340,
+               minHeight: isWindow ? 520 : nil, maxHeight: isWindow ? .infinity : nil)
+        .onChange(of: model.searchFocusRequest) { searchFocused = true }
     }
+
+    private var listHeight: CGFloat? { isWindow ? nil : 360 }
 
     @ViewBuilder
     private var content: some View {
         switch model.loadState {
         case .loading:
             ProgressView("Lade Senderliste …")
-                .frame(maxWidth: .infinity, minHeight: 400)
+                .frame(maxWidth: .infinity, minHeight: 400, maxHeight: isWindow ? .infinity : nil)
         case .failed(let message):
             VStack(spacing: 12) {
                 Text(message)
@@ -49,15 +55,20 @@ struct RadioPanel: View {
                 Button("Erneut versuchen") { Task { await model.load() } }
             }
             .padding()
-            .frame(maxWidth: .infinity, minHeight: 400)
+            .frame(maxWidth: .infinity, minHeight: 400, maxHeight: isWindow ? .infinity : nil)
         case .ready:
             VStack(spacing: 0) {
                 TextField("Sender suchen", text: $model.searchText)
                     .textFieldStyle(.roundedBorder)
+                    .focused($searchFocused)
+                    // Return spielt den ersten Treffer, Esc leert die Suche.
+                    .onSubmit(model.playFirstHit)
+                    .onExitCommand { model.searchText = "" }
                     .padding(.horizontal, 12)
                     .padding(.vertical, 8)
                 StationList(model: model)
-                    .frame(height: 360)
+                    .frame(height: listHeight)
+                    .frame(maxHeight: isWindow ? .infinity : nil)
             }
         }
     }
@@ -167,29 +178,39 @@ private struct StationList: View {
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 0, pinnedViews: [.sectionHeaders]) {
-                    ForEach(sections) { section in
-                        Section {
-                            ForEach(section.stations, id: \.key) { station in
-                                StationRow(station: station,
-                                           isCurrent: station == model.current,
-                                           isPlaying: station == model.current && model.isPlaying,
-                                           isFavorite: model.isFavorite(station),
-                                           isDead: model.isDead(station),
-                                           play: { model.play(station) },
-                                           toggleFavorite: { model.toggleFavorite(station) })
+            ScrollViewReader { proxy in
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 0, pinnedViews: [.sectionHeaders]) {
+                        ForEach(sections) { section in
+                            Section {
+                                ForEach(section.stations, id: \.key) { station in
+                                    StationRow(station: station,
+                                               isCurrent: station == model.current,
+                                               isPlaying: station == model.current && model.isPlaying,
+                                               isFavorite: model.isFavorite(station),
+                                               isDead: model.isDead(station),
+                                               play: { model.play(station) },
+                                               toggleFavorite: { model.toggleFavorite(station) })
+                                        .id(station.key)
+                                }
+                            } header: {
+                                Text(section.title)
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(.secondary)
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 4)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .background(.bar)
                             }
-                        } header: {
-                            Text(section.title)
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(.secondary)
-                                .padding(.horizontal, 12)
-                                .padding(.vertical, 4)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .background(.bar)
                         }
                     }
+                }
+                // Beim Öffnen steht der laufende Sender im Blick, wenn er nicht oben in Favoriten/Zuletzt steht.
+                .onAppear {
+                    guard let current = model.current, model.searchText.isEmpty,
+                          !sections.contains(where: { ["favorites", "recent"].contains($0.id) && $0.stations.contains(current) })
+                    else { return }
+                    proxy.scrollTo(current.key, anchor: .center)
                 }
             }
         }
@@ -233,6 +254,11 @@ private struct StationRow: View {
         .contentShape(Rectangle())
         .onHover { hovering = $0 }
         .onTapGesture(perform: play)
+        .contextMenu {
+            Button("Abspielen", action: play)
+            Button(isFavorite ? "Aus den Favoriten entfernen" : "Zu den Favoriten", action: toggleFavorite)
+        }
+        .help(isDead ? "Lieferte zuletzt keinen Ton" : "")
     }
 }
 
@@ -240,6 +266,7 @@ private struct StationRow: View {
 
 private struct RadioSettingsView: View {
     @ObservedObject var model: RadioModel
+    let isWindow: Bool
     let done: () -> Void
     @State private var host = ""
 
@@ -278,7 +305,7 @@ private struct RadioSettingsView: View {
             }
         }
         .padding(12)
-        .frame(height: 408, alignment: .top)
+        .frame(minHeight: 408, maxHeight: isWindow ? .infinity : 408, alignment: .top)
         .onAppear { host = model.host }
     }
 

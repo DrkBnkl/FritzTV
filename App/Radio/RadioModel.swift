@@ -20,6 +20,10 @@ final class RadioModel: ObservableObject {
     /// Hinweis, wenn ein Sender keinen Ton liefert.
     @Published private(set) var problem: String?
     @Published var searchText = ""
+    /// Einstellungen statt Senderliste zeigen (Menüleiste und Fenster gemeinsam).
+    @Published var showsSettings = false
+    /// Zählt hoch, wenn das Suchfeld den Fokus bekommen soll (⌘F).
+    @Published private(set) var searchFocusRequest = 0
 
     @Published var host: String { didSet { defaults.set(host, forKey: Keys.host) } }
     @Published var volume: Int {
@@ -164,6 +168,33 @@ final class RadioModel: ObservableObject {
         } else if let first = sections.first?.stations.first {
             play(first)
         }
+    }
+
+    /// Ändert die Lautstärke in Schritten, z. B. per Tastatur.
+    func changeVolume(by delta: Int) {
+        volume = min(max(volume + delta, 0), 100)
+    }
+
+    /// Favoriten in der Reihenfolge der Liste, für ⌘1 bis ⌘9.
+    var favorites: [ChannelGroup] {
+        favoriteKeys.compactMap { key in stations.all.first { $0.key == key } }
+    }
+
+    func playFavorite(at index: Int) {
+        let list = favorites
+        guard list.indices.contains(index) else { return }
+        play(list[index])
+    }
+
+    /// Spielt den ersten Suchtreffer (Return im Suchfeld).
+    func playFirstHit() {
+        guard let first = sections.first?.stations.first else { return }
+        play(first)
+    }
+
+    func focusSearch() {
+        showsSettings = false
+        searchFocusRequest += 1
     }
 
     /// Nächster bzw. voriger Sender in der Reihenfolge der Senderfamilien.
