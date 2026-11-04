@@ -191,7 +191,9 @@ private struct StationList: View {
                                                isDead: model.isDead(station),
                                                play: { model.play(station) },
                                                toggleFavorite: { model.toggleFavorite(station) })
-                                        .id(station.key)
+                                        // Ein Sender steht ggf. mehrfach (Favoriten, Zuletzt gehört, Familie):
+                                        // Die Kennung muss trotzdem in der ganzen Liste eindeutig sein.
+                                        .id(Self.rowID(section: section, station: station))
                                 }
                             } header: {
                                 Text(section.title)
@@ -208,12 +210,19 @@ private struct StationList: View {
                 // Beim Öffnen steht der laufende Sender im Blick, wenn er nicht oben in Favoriten/Zuletzt steht.
                 .onAppear {
                     guard let current = model.current, model.searchText.isEmpty,
-                          !sections.contains(where: { ["favorites", "recent"].contains($0.id) && $0.stations.contains(current) })
+                          let first = sections.first(where: { $0.stations.contains(current) }),
+                          !["favorites", "recent"].contains(first.id)
                     else { return }
-                    proxy.scrollTo(current.key, anchor: .center)
+                    proxy.scrollTo(Self.rowID(section: first, station: current), anchor: .center)
                 }
             }
         }
+    }
+}
+
+extension StationList {
+    static func rowID(section: RadioListSection, station: ChannelGroup) -> String {
+        "\(section.id)/\(station.key)"
     }
 }
 
