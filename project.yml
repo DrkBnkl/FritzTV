@@ -137,6 +137,63 @@ targets:
         ENABLE_APP_SANDBOX: NO
         SWIFT_OBJC_BRIDGING_HEADER: App/macOS/FritzTV-Bridging-Header.h
 
+  FritzRadio-macOS:
+    type: application
+    platform: macOS
+    sources:
+      - path: App/Radio
+      - path: Licenses
+        type: folder
+    dependencies:
+      - package: FritzTVKit
+      - package: VLCKitSPM
+        product: VLCKitSPM
+    info:
+      path: App/Radio/Info.plist
+      properties:
+        CFBundleDisplayName: FritzRadio
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        CFBundleIconFile: AppIcon
+        CFBundleIconName: AppIcon
+        LSApplicationCategoryType: public.app-category.music
+        # Nur Menüleistensymbol, kein Dock-Symbol
+        LSUIElement: true
+        NSLocalNetworkUsageDescription: Zum Abrufen der Radiosender von deiner FRITZ!Box.
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
+          NSAllowsArbitraryLoadsForMedia: true
+          NSExceptionDomains:
+            fritz.box:
+              NSExceptionAllowsInsecureHTTPLoads: true
+              NSIncludesSubdomains: true
+            fritz.repeater:
+              NSExceptionAllowsInsecureHTTPLoads: true
+              NSIncludesSubdomains: true
+            # Senderlogos vom AVM-Server (nur per http erreichbar)
+            tv.avm.de:
+              NSExceptionAllowsInsecureHTTPLoads: true
+    postCompileScripts:
+      - name: Vollständiges AppIcon.icns erzeugen
+        basedOnDependencyAnalysis: false
+        script: |
+          ICONSET_TMP=$(mktemp -d -t fritzradio-icon).iconset
+          mkdir -p "$ICONSET_TMP"
+          cp "$SRCROOT"/App/Radio/Assets.xcassets/AppIcon.appiconset/icon_*.png "$ICONSET_TMP/"
+          mkdir -p "$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH"
+          iconutil -c icns "$ICONSET_TMP" -o "$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/AppIcon.icns"
+          rm -rf "$ICONSET_TMP"
+    settings:
+      base:
+        PRODUCT_NAME: FritzRadio
+        PRODUCT_BUNDLE_IDENTIFIER: de.home.fritzradio
+        ARCHS: [arm64, x86_64]
+        ONLY_ACTIVE_ARCH: NO
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        CODE_SIGN_IDENTITY: "-"
+        ENABLE_HARDENED_RUNTIME: NO
+        ENABLE_APP_SANDBOX: NO
+
   FritzTV-tvOS-TopShelf:
     type: app-extension
     platform: tvOS
@@ -174,5 +231,11 @@ schemes:
     build:
       targets:
         FritzTV-macOS: all
+    run:
+      config: Debug
+  FritzRadio-macOS:
+    build:
+      targets:
+        FritzRadio-macOS: all
     run:
       config: Debug
