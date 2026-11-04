@@ -87,20 +87,4 @@ final class TopShelfAndStatsTests: XCTestCase {
         XCTAssertNil(PublicHLSChannels.hlsURL(for: "tv:disney channel"))
         XCTAssertNil(PublicHLSChannels.hlsURL(for: "   "))
     }
-
-    func testTimeshiftBufferManagerSafetyAndUrls() {
-        let manager = TimeshiftBufferManager.shared
-        let safety = manager.checkStorageSafety()
-        XCTAssertTrue(safety.availableMB > 0)
-
-        let segment = manager.newSegmentURL(channelKey: "zdf-hd")
-        XCTAssertTrue(segment.path.hasSuffix(".ts"))
-        XCTAssertTrue(segment.path.contains("zdf-hd"))
-
-        let sout = TimeshiftBufferManager.soutOption(destination: segment)
-        XCTAssertTrue(sout.hasPrefix(":sout=#duplicate"))
-        XCTAssertTrue(sout.contains("access=file,mux=ts"))
-
-        manager.cleanup()
-    }
 }

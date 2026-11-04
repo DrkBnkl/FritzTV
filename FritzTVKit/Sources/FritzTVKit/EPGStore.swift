@@ -217,12 +217,6 @@ public final class EPGStore: @unchecked Sendable {
         lock.unlock()
     }
 
-    public var hasExternalData: Bool {
-        lock.lock()
-        defer { lock.unlock() }
-        return !externalByKey.isEmpty
-    }
-
     public func currentProgram(forChannelNames names: [String], at date: Date = Date()) -> EPGProgram? {
         lock.lock()
         defer { lock.unlock() }

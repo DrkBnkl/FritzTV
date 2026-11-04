@@ -84,12 +84,4 @@ public struct ChannelCatalog: Sendable {
 
     public var tvGroups: [ChannelGroup] { groups.filter { $0.variants[0].kind == .tv } }
     public var radioGroups: [ChannelGroup] { groups.filter { $0.variants[0].kind == .radio } }
-
-    /// Sender je Frequenz. Ein Multiplex kann für den EPG-Abruf mit einem
-    /// einzigen Tuner-Zugriff gelesen werden.
-    public var channelsByFrequency: [Int: [Channel]] {
-        Dictionary(grouping: groups.flatMap(\.variants).filter { $0.tuning != nil }) {
-            $0.tuning!.frequencyMHz
-        }
-    }
 }

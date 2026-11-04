@@ -1,6 +1,7 @@
 #!/usr/bin/env zsh
 # make-release.sh
-# Baut die macOS-Universal-Version als FritzTV-macOS-Universal.zip und prüft sie.
+# Baut die macOS-Universal-Versionen als FritzTV-macOS-Universal.zip und
+# FritzRadio-macOS-Universal.zip und prüft sie.
 # Die Version kommt aus project.yml.
 #
 #   ./scripts/make-release.sh                     Probelauf: bauen und prüfen, nichts veröffentlichen
@@ -81,6 +82,31 @@ SHA=$(shasum -a 256 "$ZIP" | cut -d ' ' -f 1)
 echo "✔ Archiv in Ordnung: $ZIP"
 echo "  SHA-256: $SHA"
 
+# FritzRadio (Menüleisten-App) aus demselben Projekt und mit derselben Version
+SKIP_INSTALL=1 ./scripts/deploy-fritzradio.sh
+RADIO_APP_PATH="$PROJECT_DIR/build/macos/DerivedData/Build/Products/Release/FritzRadio.app"
+RADIO_ZIP="$RELEASE_DIR/FritzRadio-macOS-Universal.zip"
+rm -f "$RADIO_ZIP"
+echo "→ Erzeuge $(basename "$RADIO_ZIP")..."
+ditto -c -k --sequesterRsrc --keepParent "$RADIO_APP_PATH" "$RADIO_ZIP"
+echo "→ Prüfe das Archiv..."
+ditto -x -k "$RADIO_ZIP" "$CHECK_DIR"
+RADIO_APP="$CHECK_DIR/FritzRadio.app"
+RADIO_PLIST="$RADIO_APP/Contents/Info.plist"
+[[ "$(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' "$RADIO_PLIST")" == "$VERSION" ]] || fail "Falsche Version im FritzRadio-Bundle."
+[[ "$(/usr/libexec/PlistBuddy -c 'Print CFBundleVersion' "$RADIO_PLIST")" == "$BUILD" ]] || fail "Falsche Build-Nummer im FritzRadio-Bundle."
+for BINARY in "$RADIO_APP/Contents/MacOS/FritzRadio" "$RADIO_APP/Contents/Frameworks/VLCKit.framework/Versions/A/VLCKit"; do
+    ARCHS=$(lipo -archs "$BINARY")
+    [[ "$ARCHS" == *arm64* && "$ARCHS" == *x86_64* ]] || fail "$(basename "$BINARY") ist nicht universal: $ARCHS"
+done
+codesign --verify --deep --strict "$RADIO_APP" || fail "Signatur von FritzRadio ungültig."
+for LICENSE_FILE in LICENSE-FritzTV.txt LGPL-2.1.txt GPL-2.0.txt THIRD-PARTY-NOTICES.txt; do
+    [[ -s "$RADIO_APP/Contents/Resources/Licenses/$LICENSE_FILE" ]] || fail "Lizenzdatei fehlt im FritzRadio-Bundle: $LICENSE_FILE"
+done
+RADIO_SHA=$(shasum -a 256 "$RADIO_ZIP" | cut -d ' ' -f 1)
+echo "✔ Archiv in Ordnung: $RADIO_ZIP"
+echo "  SHA-256: $RADIO_SHA"
+
 if [[ -z "$NOTES" ]]; then
     echo "Probelauf: nichts veröffentlicht."
     exit 0
@@ -90,8 +116,13 @@ TITLE=$(head -n 1 "$NOTES" | sed -E 's/^#+[[:space:]]*//')
 echo "→ Veröffentliche $TAG: $TITLE"
 git tag -a "$TAG" -m "Release $TAG"
 git push origin main "$TAG"
-gh release create "$TAG" "$ZIP" --title "$TITLE" --notes-file "$NOTES" --verify-tag --latest
+gh release create "$TAG" "$ZIP" "$RADIO_ZIP" --title "$TITLE" --notes-file "$NOTES" --verify-tag --latest
 
-REMOTE_SHA=$(gh release view "$TAG" --json assets --jq '.assets[0].digest' | sed 's/^sha256://')
-[[ "$REMOTE_SHA" == "$SHA" ]] || fail "Prüfsumme auf GitHub weicht ab: $REMOTE_SHA"
+remote_sha() {
+    gh release view "$TAG" --json assets --jq ".assets[] | select(.name == \"$1\") | .digest" | sed 's/^sha256://'
+}
+REMOTE_SHA=$(remote_sha "$(basename "$ZIP")")
+[[ "$REMOTE_SHA" == "$SHA" ]] || fail "Prüfsumme von $(basename "$ZIP") auf GitHub weicht ab: $REMOTE_SHA"
+REMOTE_SHA=$(remote_sha "$(basename "$RADIO_ZIP")")
+[[ "$REMOTE_SHA" == "$RADIO_SHA" ]] || fail "Prüfsumme von $(basename "$RADIO_ZIP") auf GitHub weicht ab: $REMOTE_SHA"
 echo "✔ Release $TAG veröffentlicht."

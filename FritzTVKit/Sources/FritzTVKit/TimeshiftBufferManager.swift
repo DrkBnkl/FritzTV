@@ -20,23 +20,6 @@ public final class TimeshiftBufferManager: @unchecked Sendable {
         try? FileManager.default.createDirectory(at: bufferDirectory, withIntermediateDirectories: true)
     }
 
-    /// Prüft, ob genügend freier Speicher vorhanden ist, um Timeshift sicher zu betreiben.
-    public func checkStorageSafety() -> (isSafe: Bool, availableMB: Int, reason: String?) {
-        guard let values = try? bufferDirectory.resourceValues(forKeys: [.volumeAvailableCapacityKey, .volumeTotalCapacityKey]),
-              let available = values.volumeAvailableCapacity else {
-            return (true, 1000, nil)
-        }
-
-        let availableBytes = Int64(available)
-        let availableMB = Int(availableBytes / (1024 * 1024))
-
-        if availableBytes < Self.minFreeSpaceReserveBytes {
-            return (false, availableMB, "Zu wenig Speicher frei (\(availableMB) MB verfügbar, mind. 200 MB Reserve erforderlich).")
-        }
-
-        return (true, availableMB, nil)
-    }
-
     /// Berechnet die aktuelle Größe aller Timeshift-Aufnahmedateien im Puffer.
     public func currentBufferSizeInBytes() -> Int64 {
         guard let files = try? FileManager.default.contentsOfDirectory(at: bufferDirectory, includingPropertiesForKeys: [.fileSizeKey]) else {
@@ -49,15 +32,6 @@ public final class TimeshiftBufferManager: @unchecked Sendable {
             }
         }
         return total
-    }
-
-    /// Neuer Pfad für eine Timeshift-Aufnahmedatei eines Senders.
-    public func newSegmentURL(channelKey: String) -> URL {
-        let timestamp = Int(Date().timeIntervalSince1970)
-        // Nur unkritische Zeichen im Dateinamen (er landet ungeschützt in der sout-Option).
-        let safeKey = String(channelKey.map { $0.isLetter || $0.isNumber || $0 == "-" ? $0 : "_" })
-        let filename = "timeshift_\(safeKey)_\(timestamp).ts"
-        return bufferDirectory.appendingPathComponent(filename)
     }
 
     /// Höchstgröße der Mitschnittdatei: 4 GB (FAT32-Grenze), höchstens die
@@ -107,17 +81,6 @@ public final class TimeshiftBufferManager: @unchecked Sendable {
                 let dateB = (try? b.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
                 return dateA < dateB
             }
-    }
-
-    /// libVLC-Option: Bild anzeigen und gleichzeitig den Rohstream in eine TS-Datei schreiben
-    /// (eine RTSP-Sitzung, ein Tuner).
-    public static func soutDisplayAndRecordOption(destination: URL) -> String {
-        ":sout=#duplicate{dst=display,dst=std{access=file,mux=ts,dst=\(destination.path)}}"
-    }
-
-    /// Erzeugt die libVLC-Option für das Speichern des Rohstreams in eine TS-Datei.
-    public static func soutOption(destination: URL) -> String {
-        ":sout=#duplicate{dst=std{access=file,mux=ts,dst=\(destination.path)}}"
     }
 
     /// Alle Mitschnittdateien (.ts) im Pufferverzeichnis.

@@ -41,7 +41,7 @@ enum PlayerStatus: Equatable {
     }
 }
 
-/// Kapselt VLCKit: Abspielen eines RTSP-Streams der FRITZ!Box, Timeshift-Prototyp,
+/// Kapselt VLCKit: Abspielen eines RTSP-Streams der FRITZ!Box, Timeshift,
 /// automatisches Neuverbinden, Ton- und Untertitelspuren, „Läuft jetzt“ aus der EIT.
 ///
 /// Statt der VLC-Delegate-Methoden wird der Zustand zweimal pro Sekunde abgefragt.
