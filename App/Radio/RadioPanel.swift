@@ -2,11 +2,9 @@ import AppKit
 import SwiftUI
 import FritzTVKit
 
-/// Fenster unter dem Menüleistensymbol bzw. eigenes Fenster: oben der laufende Sender,
-/// darunter die Senderliste. Im eigenen Fenster wächst die Liste mit der Fenstergröße.
+/// Panel unter dem Menüleistensymbol: oben der laufende Sender, darunter die Senderliste.
 struct RadioPanel: View {
     @ObservedObject var model: RadioModel
-    var isWindow = false
     @FocusState private var searchFocused: Bool
 
     var body: some View {
@@ -15,7 +13,7 @@ struct RadioPanel: View {
                 .padding(12)
             Divider()
             if model.showsSettings {
-                RadioSettingsView(model: model, isWindow: isWindow) { model.showsSettings = false }
+                RadioSettingsView(model: model) { model.showsSettings = false }
             } else {
                 content
             }
@@ -34,19 +32,16 @@ struct RadioPanel: View {
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
         }
-        .frame(minWidth: 340, idealWidth: 340, maxWidth: isWindow ? .infinity : 340,
-               minHeight: isWindow ? 520 : nil, maxHeight: isWindow ? .infinity : nil)
+        .frame(width: 340)
         .onChange(of: model.searchFocusRequest) { searchFocused = true }
     }
-
-    private var listHeight: CGFloat? { isWindow ? nil : 360 }
 
     @ViewBuilder
     private var content: some View {
         switch model.loadState {
         case .loading:
             ProgressView("Lade Senderliste …")
-                .frame(maxWidth: .infinity, minHeight: 400, maxHeight: isWindow ? .infinity : nil)
+                .frame(maxWidth: .infinity, minHeight: 400)
         case .failed(let message):
             VStack(spacing: 12) {
                 Text(message)
@@ -55,7 +50,7 @@ struct RadioPanel: View {
                 Button("Erneut versuchen") { Task { await model.load() } }
             }
             .padding()
-            .frame(maxWidth: .infinity, minHeight: 400, maxHeight: isWindow ? .infinity : nil)
+            .frame(maxWidth: .infinity, minHeight: 400)
         case .ready:
             VStack(spacing: 0) {
                 TextField("Sender suchen", text: $model.searchText)
@@ -67,8 +62,7 @@ struct RadioPanel: View {
                     .padding(.horizontal, 12)
                     .padding(.vertical, 8)
                 StationList(model: model)
-                    .frame(height: listHeight)
-                    .frame(maxHeight: isWindow ? .infinity : nil)
+                    .frame(height: 360)
             }
         }
     }
@@ -275,7 +269,6 @@ private struct StationRow: View {
 
 private struct RadioSettingsView: View {
     @ObservedObject var model: RadioModel
-    let isWindow: Bool
     let done: () -> Void
     @State private var host = ""
 
@@ -314,7 +307,7 @@ private struct RadioSettingsView: View {
             }
         }
         .padding(12)
-        .frame(minHeight: 408, maxHeight: isWindow ? .infinity : 408, alignment: .top)
+        .frame(height: 408, alignment: .top)
         .onAppear { host = model.host }
     }
 
