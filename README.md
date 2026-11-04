@@ -1,13 +1,13 @@
-# FritzTV – Kabelfernsehen (DVB-C) von der FRITZ!Box auf Apple TV & Mac
+# FritzTV – Kabelfernsehen und -radio (DVB-C) von der FRITZ!Box auf Apple TV & Mac
 
 [![Plattformen](https://img.shields.io/badge/Plattform-tvOS%2017%2B%20%7C%20macOS%2014%2B-blue)](#starten)
 [![Swift](https://img.shields.io/badge/Swift-5.9%2B-F05138?logo=swift&logoColor=white)](#aufbau)
 [![FRITZ!Box](https://img.shields.io/badge/FRITZ!Box%20Cable-DVB--C%20%2F%20RTSP-red)](#funktionen-im-überblick)
 [![Lizenz: MIT](https://img.shields.io/badge/Lizenz-MIT-green.svg)](LICENSE)
 
-**FritzTV** ist eine native **Apple-TV- (tvOS)** und **Mac-App (macOS)** in SwiftUI zum Fernsehen über den integrierten **DVB-C-Kabeltuner einer AVM FRITZ!Box Cable** – direkt aus dem Heimnetz oder per WireGuard-VPN, ohne zusätzlichen Zwischenserver.
+**FritzTV** ist eine native **Apple-TV- (tvOS)** und **Mac-App (macOS)** in SwiftUI zum Fernsehen über den integrierten **DVB-C-Kabeltuner einer AVM FRITZ!Box Cable** – direkt aus dem Heimnetz oder per WireGuard-VPN, ohne zusätzlichen Zwischenserver. Dazu gehört **FritzRadio**, eine schlanke Menüleisten-App für den Mac, die die Radiosender aus dem Kabel spielt.
 
-> **🇬🇧 English Summary:** Native **Apple TV (tvOS)** and **macOS** Live TV & IPTV player for **AVM FRITZ!Box Cable (DVB-C)** routers (`6690`, `6670`, `6660`, `6591`, `6590`, `6490 Cable`, and `FRITZ!WLAN Repeater DVB-C`). Streams unencrypted cable TV channels directly via RTSP/M3U using VLCKit, featuring a 30-hour **EPG timeline** (DVB-EIT + XMLTV), **live timeshift** (pause & rewind), **start-over replay** via public broadcaster HLS streams, integrated **MediathekViewWeb** catch-up search with subtitles, **TR-064 station scan**, and **UPnP tuner diagnostics**.
+> **🇬🇧 English Summary:** Native **Apple TV (tvOS)** and **macOS** Live TV & IPTV player for **AVM FRITZ!Box Cable (DVB-C)** routers (`6690`, `6670`, `6660`, `6591`, `6590`, `6490 Cable`, and `FRITZ!WLAN Repeater DVB-C`). Streams unencrypted cable TV channels directly via RTSP/M3U using VLCKit, featuring a 30-hour **EPG timeline** (DVB-EIT + XMLTV), **live timeshift** (pause & rewind), **start-over replay** via public broadcaster HLS streams, integrated **MediathekViewWeb** catch-up search with subtitles, **TR-064 station scan**, and **UPnP tuner diagnostics**. The companion **FritzRadio** menu bar app for macOS plays the cable radio stations with logos, now-playing info from DVB-EIT, favorites and media key support.
 
 Ein Projekt, drei Ziele:
 
@@ -49,7 +49,7 @@ Voraussetzung ist eine FRITZ!Box mit integriertem **DVB-C-Tuner** und aktivierte
 
 ### Option A: Fertige Mac-App herunterladen (schnellster Weg)
 
-1. Unter **[Releases](https://github.com/DrkBnkl/FritzTV/releases)** die Datei `FritzTV-macOS-Universal.zip` herunterladen und entpacken.
+1. Unter **[Releases](https://github.com/DrkBnkl/FritzTV/releases)** die Datei `FritzTV-macOS-Universal.zip` (bzw. `FritzRadio-macOS-Universal.zip` für das Radio) herunterladen und entpacken.
 2. Die entpackte `FritzTV.app` in den Ordner `/Applications` (Programme) ziehen.
 3. **Wichtiger Hinweis zum ersten Start (macOS Gatekeeper):**  
    Da es sich um ein privates Open-Source-Projekt ohne kostenpflichtiges Apple-Entwicklerzertifikat handelt, ist die App ad-hoc signiert. macOS blockiert Apps aus dem Internet beim einfachen Doppelklick zunächst mit dem Hinweis *„App kann nicht geöffnet werden, da der Entwickler nicht verifiziert werden kann“*.
@@ -70,7 +70,7 @@ Voraussetzung ist eine FRITZ!Box mit integriertem **DVB-C-Tuner** und aktivierte
 3. **Mac:** Oben das Schema `FritzTV-macOS` und „My Mac“ wählen, ⌘R – oder direkt `./scripts/deploy-macos.sh` ausführen, um die fertige Universal-Version nach `/Applications/FritzTV.app` zu installieren.
 4. **Apple TV:** Zum Installieren auf dem eigenen Apple TV im Heimnetz `./scripts/deploy-tvos.sh` ausführen (baut die Release-Version und installiert sie per `xcrun devicectl` ohne Daten- oder Einstellungsverlust).
 
-**FritzRadio** gibt es im Release als `FritzRadio-macOS-Universal.zip` (Installation wie oben, Pfad `/Applications/FritzRadio.app`); selbst gebaut mit `./scripts/deploy-fritzradio.sh`.
+**FritzRadio** wird genauso installiert (`/Applications/FritzRadio.app`, beim ersten Start ggf. `xattr -cr /Applications/FritzRadio.app`) oder selbst gebaut mit `./scripts/deploy-fritzradio.sh`. Die App sitzt in der Menüleiste; beim Öffnen aus Finder oder Launchpad erscheint zusätzlich ein Fenster mit der Senderliste.
 
 Unterwegs (z. B. über Mobilfunk oder im Hotel): vorher das WireGuard-VPN der FRITZ!Box verbinden. Klappt die Namensauflösung von `fritz.box` über das VPN nicht, nimmt die App automatisch `192.168.178.1`.
 
