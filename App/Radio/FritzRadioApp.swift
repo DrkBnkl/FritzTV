@@ -3,56 +3,37 @@ import Combine
 import SwiftUI
 import FritzTVKit
 
-/// FritzRadio: Radio vom Kabelanschluss der FRITZ!Box, als Symbol in der Menüleiste.
-/// Kein Dock-Symbol (`LSUIElement`). Beim Öffnen aus dem Finder oder Launchpad erscheint zusätzlich
-/// ein Fenster: Ist das Menüleistensymbol ausgeblendet (volle Menüleiste, Kamera-Aussparung,
-/// Systemeinstellungen › Menüleiste), wäre die App sonst nicht zu bedienen. Solange das Fenster
-/// offen ist, verhält sich FritzRadio wie eine normale App: Dock-Symbol, ⌘-Tab und Menüleiste.
+/// FritzRadio: Radio vom Kabelanschluss der FRITZ!Box, nur als Symbol in der Menüleiste.
+/// Kein Dock-Symbol (`LSUIElement`), kein eigenes Fenster. Beim Öffnen aus dem Finder oder Launchpad
+/// klappt das Panel unter dem Symbol auf, damit man sieht, dass die App läuft.
+///
+/// Eigenes `NSStatusItem` statt `MenuBarExtra`: Nur so lässt sich das Panel auch per Programm öffnen.
 @main
 struct FritzRadioApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
     var body: some Scene {
-        MenuBarExtra {
-            RadioPanel(model: appDelegate.model)
-        } label: {
-            MenuBarLabel(model: appDelegate.model)
-        }
-        .menuBarExtraStyle(.window)
-        .commands {
-            RadioCommands(model: appDelegate.model, showWindow: appDelegate.showWindow)
-        }
+        // Szene nur als Träger der Tastaturbefehle; ⌘, ist ersetzt, ein Einstellungsfenster gibt es nicht.
+        Settings { EmptyView() }
+            .commands {
+                RadioCommands(model: appDelegate.model)
+            }
     }
 }
 
-private struct MenuBarLabel: View {
-    @ObservedObject var model: RadioModel
-
-    var body: some View {
-        Image(systemName: model.isPlaying ? "radio.fill" : "radio")
-    }
-}
-
-/// Menüs, solange das Fenster offen ist; die Kurzbefehle gelten auch im Menüleistenfenster.
+/// Tastaturbefehle im Panel. Die Menüleiste der App ist ausgeblendet, die Kurzbefehle gelten trotzdem.
 private struct RadioCommands: Commands {
     @ObservedObject var model: RadioModel
-    let showWindow: () -> Void
 
     var body: some Commands {
         CommandGroup(replacing: .appSettings) {
-            Button("Einstellungen …") {
-                showWindow()
-                model.showsSettings = true
-            }
-            .keyboardShortcut(",", modifiers: .command)
+            Button("Einstellungen …") { model.showsSettings = true }
+                .keyboardShortcut(",", modifiers: .command)
         }
         CommandGroup(replacing: .newItem) {}
         CommandGroup(after: .textEditing) {
-            Button("Sender suchen") {
-                showWindow()
-                model.focusSearch()
-            }
-            .keyboardShortcut("f", modifiers: .command)
+            Button("Sender suchen") { model.focusSearch() }
+                .keyboardShortcut("f", modifiers: .command)
         }
         CommandMenu("Wiedergabe") {
             Button(model.isPlaying ? "Anhalten" : "Abspielen") { model.togglePlayback() }
@@ -89,68 +70,86 @@ private struct RadioCommands: Commands {
             Button("Senderliste neu laden") { Task { await model.load() } }
                 .keyboardShortcut("r", modifiers: .command)
         }
-        CommandGroup(before: .windowList) {
-            Button("FritzRadio-Fenster") { showWindow() }
-                .keyboardShortcut("0", modifiers: .command)
-            Divider()
-        }
     }
 }
 
 @MainActor
-final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate {
     let model = RadioModel()
-    private var window: NSWindow?
+    private var statusItem: NSStatusItem?
+    private var popover: NSPopover?
+    private var statusSymbol = ""
     private var keyMonitor: Any?
     private var cancellables: Set<AnyCancellable> = []
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        installStatusItem()
         installSpaceKey()
-        // Fenstertitel zeigt den laufenden Sender, z. B. für ⌘-Tab und Mission Control.
-        model.$current
-            .sink { [weak self] station in self?.window?.subtitle = station?.displayName ?? "" }
-            .store(in: &cancellables)
 
-        // Beim Start als Anmeldeobjekt bleibt es beim Menüleistensymbol.
+        // Beim Start als Anmeldeobjekt bleibt das Panel zu.
         let event = NSAppleEventManager.shared().currentAppleEvent
         let launchedAtLogin = event?.eventID == kAEOpenApplication
             && event?.paramDescriptor(forKeyword: keyAEPropData)?.enumCodeValue == keyAELaunchedAsLogInItem
-        if !launchedAtLogin { showWindow() }
+        if !launchedAtLogin {
+            // Das Symbol braucht einen Moment, bis es in der Menüleiste steht.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { self.showPanel() }
+        }
     }
 
-    /// Erneutes Öffnen, während FritzRadio schon läuft (Finder, Launchpad, Klick aufs Dock-Symbol).
+    /// Erneutes Öffnen, während FritzRadio schon läuft (Finder, Launchpad).
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
-        showWindow()
+        showPanel()
         return false
     }
 
-    /// Fenster zu heißt nicht Radio aus: Der Ton läuft über das Menüleistensymbol weiter.
-    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
+    // MARK: Menüleistensymbol
 
-    func showWindow() {
-        if window == nil {
-            let hosting = NSHostingController(rootView: RadioPanel(model: model, isWindow: true))
-            // Die Größe bestimmt der Benutzer; SwiftUI liefert nur die Mindestgröße.
-            hosting.sizingOptions = [.minSize]
-            let window = NSWindow(contentViewController: hosting)
-            window.title = "FritzRadio"
-            window.subtitle = model.current?.displayName ?? ""
-            window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
-            window.isReleasedWhenClosed = false
-            window.delegate = self
-            window.setContentSize(NSSize(width: 380, height: 640))
-            if !window.setFrameUsingName(Self.frameName) { window.center() }
-            window.setFrameAutosaveName(Self.frameName)
-            self.window = window
-        }
-        // Mit offenem Fenster als normale App: Dock-Symbol, ⌘-Tab und Menüleiste mit den Befehlen.
-        NSApp.setActivationPolicy(.regular)
-        NSApp.activate()
-        window?.makeKeyAndOrderFront(nil)
+    private func installStatusItem() {
+        let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+        item.button?.target = self
+        item.button?.action = #selector(togglePanel)
+        item.button?.toolTip = "FritzRadio"
+        statusItem = item
+        updateStatusIcon()
+        // Gefülltes Symbol, solange Radio läuft.
+        model.objectWillChange
+            .sink { [weak self] in DispatchQueue.main.async { self?.updateStatusIcon() } }
+            .store(in: &cancellables)
     }
 
-    func windowWillClose(_ notification: Notification) {
-        NSApp.setActivationPolicy(.accessory)
+    private func updateStatusIcon() {
+        let name = model.isPlaying ? "radio.fill" : "radio"
+        guard name != statusSymbol else { return }
+        statusSymbol = name
+        let image = NSImage(systemSymbolName: name, accessibilityDescription: "FritzRadio")
+        image?.isTemplate = true
+        statusItem?.button?.image = image
+    }
+
+    @objc private func togglePanel() {
+        if popover?.isShown == true {
+            popover?.performClose(nil)
+        } else {
+            showPanel()
+        }
+    }
+
+    private func showPanel() {
+        guard let button = statusItem?.button, button.window != nil else { return }
+        let popover = self.popover ?? makePopover()
+        self.popover = popover
+        guard !popover.isShown else { return }
+        // Aktiv, damit Suchfeld und Tastaturbefehle sofort ansprechen.
+        NSApp.activate()
+        popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+        popover.contentViewController?.view.window?.makeKey()
+    }
+
+    private func makePopover() -> NSPopover {
+        let popover = NSPopover()
+        popover.behavior = .transient
+        popover.contentViewController = NSHostingController(rootView: RadioPanel(model: model))
+        return popover
     }
 
     /// Leertaste startet bzw. stoppt das Radio, außer beim Tippen (Suchfeld, Adresse).
@@ -164,6 +163,4 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             return nil
         }
     }
-
-    private static let frameName = "FritzRadioWindow"
 }
