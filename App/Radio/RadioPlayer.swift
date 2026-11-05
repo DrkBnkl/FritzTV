@@ -39,6 +39,8 @@ final class RadioPlayer: ObservableObject {
     @Published private(set) var status: Status = .idle
     /// Zählt hoch, sobald neue Programmdaten eingetroffen sind.
     @Published private(set) var epgRevision = 0
+    /// Tonformat des laufenden Senders, sobald libVLC es kennt.
+    @Published private(set) var audioFormat: RadioAudioFormat?
 
     /// Erste Variante mit Ton: `variant` und die vorher gescheiterten Varianten.
     var onVariantSuccess: ((_ variant: Channel, _ failed: [Channel]) -> Void)?
@@ -55,6 +57,8 @@ final class RadioPlayer: ObservableObject {
     private var lastTime: Int32 = 0
     private var lastTimeChange = Date()
     private var monitorTask: Task<Void, Never>?
+    /// Gelesene Bytes über die letzten Sekunden, für die geschätzte Bitrate.
+    private var byteSamples: [(date: Date, bytes: Int)] = []
 
     /// Gewünschte Lautstärke (0–100). Sie wird bei jeder neuen Verbindung erneut gesetzt:
     /// Solange libVLC noch keine Tonausgabe geöffnet hat, geht ein gesetzter Wert sonst verloren.
@@ -101,6 +105,7 @@ final class RadioPlayer: ObservableObject {
         channel = nil
         candidates = []
         status = .idle
+        audioFormat = nil
         epgStore.saveToFile()
     }
 
@@ -130,6 +135,8 @@ final class RadioPlayer: ObservableObject {
         lastTime = 0
         lastTimeChange = Date()
         status = .connecting
+        audioFormat = nil
+        byteSamples = []
         monitorTask?.cancel()
         monitorTask = Task { [weak self] in
             while !Task.isCancelled {
@@ -167,6 +174,7 @@ final class RadioPlayer: ObservableObject {
                 startNext()
             }
         case .playing:
+            updateAudioFormat(now: now)
             guard broken || now.timeIntervalSince(lastTimeChange) > Self.stallTimeout else { return }
             // Abriss (Box neu gestartet, WLAN weg, Tuner entzogen): dieselbe Variante erneut, dann aufgeben.
             reconnects += 1
@@ -179,6 +187,92 @@ final class RadioPlayer: ObservableObject {
             }
         case .idle, .failed:
             break
+        }
+    }
+}
+
+extension RadioPlayer {
+    /// Codec, Abtastrate und Kanäle aus den Spurinformationen. Die Bitrate meldet libVLC bei
+    /// DVB meist nicht, dann wird sie aus den gelesenen Bytes geschätzt.
+    private func updateAudioFormat(now: Date) {
+        guard let media = mediaPlayer.media else { return }
+        let bytes = Int(media.statistics.demuxReadBytes)
+        if let last = byteSamples.last, bytes < last.bytes { byteSamples = [] }
+        byteSamples.append((now, bytes))
+        byteSamples.removeAll { now.timeIntervalSince($0.date) > Self.bitrateWindow }
+
+        let tracks = (media.tracksInformation as? [[String: Any]]) ?? []
+        guard let track = tracks.first(where: { $0[VLCMediaTracksInformationType] as? String == VLCMediaTracksInformationTypeAudio }),
+              let fourcc = (track[VLCMediaTracksInformationCodec] as? NSNumber)?.uint32Value
+        else { return }
+        let sampleRate = (track[VLCMediaTracksInformationAudioRate] as? NSNumber)?.intValue ?? 0
+        let channels = (track[VLCMediaTracksInformationAudioChannelsNumber] as? NSNumber)?.intValue ?? 0
+        var kbps = ((track[VLCMediaTracksInformationBitrate] as? NSNumber)?.intValue ?? 0) / 1000
+        var estimated = false
+        if kbps <= 0, let first = byteSamples.first, let last = byteSamples.last {
+            let seconds = last.date.timeIntervalSince(first.date)
+            if seconds >= 3 {
+                // Abzüglich Transportstrom-Hülle (TS- und PES-Köpfe, Tabellen).
+                kbps = Int(Double(last.bytes - first.bytes) * 8 / seconds / 1000 * Self.payloadShare)
+                estimated = true
+            }
+        }
+        let format = RadioAudioFormat(codec: RadioAudioFormat.codecName(fourcc: fourcc), sampleRate: sampleRate,
+                                      channels: channels, kilobitsPerSecond: kbps > 0 ? Self.rounded(kbps) : nil,
+                                      isEstimate: estimated)
+        if format != audioFormat {
+            audioFormat = format
+            radioLog.notice("Tonformat \(format.summary, privacy: .public) (roh \(kbps) kbit/s)")
+        }
+    }
+
+    private static let bitrateWindow: TimeInterval = 10
+    private static let payloadShare = 0.92
+
+    /// Auf 8 kbit/s runden, damit die Anzeige nicht ständig springt.
+    private static func rounded(_ kbps: Int) -> Int {
+        Int((Double(kbps) / 8).rounded()) * 8
+    }
+}
+
+/// Tonformat eines Senders, z. B. „AAC · 48 kHz · Stereo · ≈ 256 kbit/s“.
+struct RadioAudioFormat: Equatable {
+    var codec: String
+    var sampleRate: Int
+    var channels: Int
+    var kilobitsPerSecond: Int?
+    var isEstimate: Bool
+
+    var summary: String {
+        var parts = [codec]
+        if sampleRate > 0 {
+            let khz = Double(sampleRate) / 1000
+            parts.append(khz == khz.rounded() ? "\(Int(khz)) kHz" : String(format: "%.1f kHz", khz))
+        }
+        switch channels {
+        case 1: parts.append("Mono")
+        case 2: parts.append("Stereo")
+        case let n where n > 2: parts.append("\(n) Kanäle")
+        default: break
+        }
+        if let kbps = kilobitsPerSecond {
+            parts.append("\(isEstimate ? "≈ " : "")\(kbps) kbit/s")
+        }
+        return parts.joined(separator: " · ")
+    }
+
+    /// VLC-FourCC (z. B. `mp4a`, `mpga`) in einen gängigen Namen.
+    static func codecName(fourcc: UInt32) -> String {
+        let bytes = (0..<4).map { UInt8(truncatingIfNeeded: fourcc >> ($0 * 8)) }
+        let code = String(decoding: bytes, as: UTF8.self)
+        switch code {
+        case "mp4a", "mp4l": return "AAC"
+        case "mpga", "mp2a", "mp2 ": return "MP2"
+        case "mp3 ": return "MP3"
+        case "a52 ": return "AC-3"
+        case "eac3": return "E-AC-3"
+        case "opus": return "Opus"
+        default: return code.trimmingCharacters(in: .whitespaces).uppercased()
         }
     }
 }

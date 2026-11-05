@@ -98,6 +98,12 @@ private struct NowPlayingHeader: View {
                     .font(.caption)
                     .foregroundStyle(line.isProblem ? Color.orange : Color.secondary)
                     .fixedSize(horizontal: false, vertical: true)
+            } else if model.showsAudioFormat, model.player.status == .playing,
+                      let format = model.player.audioFormat {
+                Text(format.summary)
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                    .help(format.isEstimate ? "Bitrate aus der Datenmenge geschätzt" : "")
             }
             controls
         }
@@ -289,6 +295,12 @@ private struct RadioSettingsView: View {
             }
             Toggle("Beim Anmelden starten", isOn: Binding(get: { model.launchesAtLogin },
                                                          set: { model.launchesAtLogin = $0 }))
+            VStack(alignment: .leading, spacing: 6) {
+                Toggle("Tonformat und Bitrate anzeigen", isOn: $model.showsAudioFormat)
+                Text("Zeigt beim laufenden Sender z. B. „AAC · 48 kHz · Stereo · 256 kbit/s“.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
             VStack(alignment: .leading, spacing: 6) {
                 Button("Sender ohne Empfang wieder freigeben", action: model.resetDeadStations)
                     .disabled(model.deadIDs.isEmpty)

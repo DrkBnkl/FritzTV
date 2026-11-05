@@ -26,6 +26,8 @@ final class RadioModel: ObservableObject {
     @Published private(set) var searchFocusRequest = 0
 
     @Published var host: String { didSet { defaults.set(host, forKey: Keys.host) } }
+    /// Tonformat und Bitrate des laufenden Senders im Panel zeigen.
+    @Published var showsAudioFormat: Bool { didSet { defaults.set(showsAudioFormat, forKey: Keys.showsAudioFormat) } }
     @Published var volume: Int {
         didSet {
             defaults.set(volume, forKey: Keys.volume)
@@ -48,6 +50,7 @@ final class RadioModel: ObservableObject {
     init() {
         host = defaults.string(forKey: Keys.host) ?? ""
         volume = defaults.object(forKey: Keys.volume) as? Int ?? 80
+        showsAudioFormat = defaults.object(forKey: Keys.showsAudioFormat) as? Bool ?? true
         favoriteKeys = defaults.stringArray(forKey: Keys.favorites) ?? []
         recentKeys = defaults.stringArray(forKey: Keys.recent) ?? []
         deadIDs = Set(defaults.stringArray(forKey: Keys.dead) ?? [])
@@ -354,5 +357,6 @@ final class RadioModel: ObservableObject {
         static let dead = "deadChannelIDs"
         static let working = "workingVariantIDs"
         static let last = "lastStationKey"
+        static let showsAudioFormat = "showsAudioFormat"
     }
 }

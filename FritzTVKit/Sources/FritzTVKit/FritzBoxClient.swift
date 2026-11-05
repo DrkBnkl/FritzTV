@@ -47,11 +47,16 @@ public struct FritzBoxClient: Sendable {
                         guard let url = URL(string: "http://\(host)\(path)") else { return (index, false, nil) }
                         var request = URLRequest(url: url)
                         request.timeoutInterval = 5
+                        // Nie aus dem Zwischenspeicher: Eine dort hängende dauerhafte Umleitung (301, z. B. aus
+                        // einem fremden Netz, in dem `fritz.box` ein anderer Server ist) würde sonst für immer gelten.
+                        request.cachePolicy = .reloadIgnoringLocalAndRemoteCacheData
                         guard let (data, response) = try? await session.data(for: request) else {
                             return (index, false, nil)
                         }
-                        let ok = (response as? HTTPURLResponse)?.statusCode == 200
-                        return (index, true, ok ? data : nil)
+                        let status = (response as? HTTPURLResponse)?.statusCode
+                        if status == 200 { return (index, Self.isPlaylist(data), Self.isPlaylist(data) ? data : nil) }
+                        // 404: Die Box ist da, nur diese Liste fehlt (z. B. kein Radio).
+                        return (index, status == 404, nil)
                     }
                 }
                 var collected: [(index: Int, reached: Bool, data: Data?)] = []
@@ -71,5 +76,13 @@ public struct FritzBoxClient: Sendable {
             }
         }
         throw ClientError.unreachable
+    }
+
+    /// Antwortet unter der Adresse etwas anderes als die Box (Login-Seite nach einer Umleitung,
+    /// fremder Server), ist das keine M3U-Liste – dann kommt die nächste Adresse dran.
+    static func isPlaylist(_ data: Data) -> Bool {
+        let head = String(decoding: data.prefix(64), as: UTF8.self)
+            .trimmingCharacters(in: CharacterSet.whitespacesAndNewlines.union(CharacterSet(charactersIn: "\u{FEFF}")))
+        return head.hasPrefix("#EXTM3U")
     }
 }
