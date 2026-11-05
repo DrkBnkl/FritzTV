@@ -1,52 +1,69 @@
-# Architektur & Funktionsbeschreibung: FritzTV (tvOS & macOS)
+# Architektur und Funktionsbeschreibung: FritzTV
 
 ## Überblick
 
-- **Plattformen:** Native SwiftUI-Anwendung für **Apple TV (`FritzTV-tvOS`, ab tvOS 17)** und **Mac (`FritzTV-macOS`, ab macOS 14)**.
-- **Unterstützte TV-Tuner:**
-  - **FRITZ!Box Cable mit Quad-Tuner (4× DVB-C):** FRITZ!Box 6690 Cable, 6670 Cable, 6660 Cable, 6591 Cable, 6590 Cable, 6490 Cable (`fritz.box` / `192.168.178.1`)
-  - **Repeater mit Dual-Tuner (2× DVB-C):** FRITZ!WLAN Repeater DVB-C (`fritz.repeater`)
-  - Empfangen werden alle unverschlüsselten DVB-C-Kabelprogramme (Öffentlich-Rechtliche in HD, Private in SD sowie digitales Kabelradio).
-- **Technik-Stack:** SwiftUI, VLCKit (`VLCKitSPM`) für RTSP/MPEG-TS und DVB-Untertitel, `AVKit`/`AVPlayer` für HLS-Replay und Mediathek-Streams, modulares Swift-Paket `FritzTVKit` für Parser, EPG-Speicher, UPnP/TR-064 und Timeshift-Verwaltung.
+| | |
+| :--- | :--- |
+| **Targets** | `FritzTV-tvOS` (tvOS 17+), `FritzTV-macOS` (macOS 14+), `FritzRadio` (macOS 14+), tvOS-Top-Shelf-Erweiterung |
+| **Quelle** | DVB-C-Tuner der FRITZ!Box Cable 6690, 6670, 6660, 6591, 6590, 6490 (4 Tuner, `fritz.box` / `192.168.178.1`) und FRITZ!WLAN Repeater DVB-C (2 Tuner, `fritz.repeater`) |
+| **Empfang** | Alle unverschlüsselten DVB-C-Programme: Öffentlich-Rechtliche in HD, Private in SD, Radio |
+| **UI** | SwiftUI; plattformspezifische Eingabe in `App/tvOS` (UIKit) und `App/macOS` (AppKit) |
+| **Wiedergabe** | VLCKit (`VLCKitSPM` 3.6.0) für RTSP/MPEG-TS und DVB-Untertitel; `AVPlayer` für HLS-Replay und Mediathek |
+| **Logik** | Swift-Paket `FritzTVKit` (Parser, EPG, Timeshift, UPnP/TR-064), siehe [`FritzTVKit/README.md`](../FritzTVKit/README.md) |
+| **Projekt** | XcodeGen (`project.yml`) |
 
-## Bedienung (Siri Remote, Tastatur & Maus)
+## Senderliste
 
-- **Im Live-Bild:**
-  - **Hoch/Runter (Ring-Klick auf Siri Remote / `↑`/`↓` am Mac):** nächster/vorheriger Senderplatz mit Umlauf am Listenende und 350-ms-Entprellung beim schnellen Durchzappen.
-  - **Nach oben wischen (Siri Remote):** öffnet die horizontale Senderleiste am unteren Bildrand (`ChannelFooter`).
-  - **Klick oder nach unten wischen (`Return` / `⌘I` / Rechtsklick am Mac):** öffnet die Sendungsinfo (`InfoPanel`, links „LÄUFT“, rechts „DANACH“) mit Schaltern für Tonspur, Untertitel, „Von Anfang an“ (Öffentlich-Rechtliche), „In Mediathek suchen“ und „Einstellungen“.
-  - **Zurück (`Esc` / `⌘L` / Klick ins Bild am Mac):** öffnet die zweispaltige Senderliste (`ChannelListOverlay`). Wohin der Fokus beim Öffnen springt („Programmübersicht“, „letzter Sender“ oder „aktueller Sender“), ist in den Einstellungen wählbar.
-  - **Play/Pause (`Leertaste` / `⌘P`):** Live-Bild anhalten (Timeshift).
-  - **Links/Rechts (`←`/`→` oder Klick in die Zeitleiste am Mac):** im Timeshift progressiv spulen (1× 10 s, 2× 30 s, 3× 1 Min., 4× 3 Min., 5× 5 Min., ab 6× jeweils +5 Min.); im Live-Bild Ziffern-Direktwahl über Bildschirmtastatur.
-  - **Doppelklick ins Bild (Mac):** Vollbildmodus umschalten.
-- **In der Programmübersicht (`EPGOverviewView`):**
-  - **Hoch/Runter (`↑`/`↓`, gedrückt halten oder Mausrad/Trackpad):** Senderzeile wechseln. Das Live-Bild läuft rechts oben im Vorschaufenster weiter.
-  - **Links/Rechts (`←`/`→` oder horizontales Trackpad-Scrollen):** im Zeitstrahl von Sendung zu Sendung blättern – bis zu **6 Stunden zurück in die Vergangenheit** und bis zu **22 Stunden in die Zukunft**. Beim Erreichen der aktuell laufenden Sendung rastet die Ansicht automatisch wieder auf „Jetzt“ ein.
-  - **Klick (`Return` oder Mausklick):** auf der laufenden Sendung („Jetzt“) sofort umschalten; auf einer vergangenen oder zukünftigen Sendung öffnet sich die **Detailtafel (`EPGDetailPanel`)** mit Titel, Untertitel, vollständiger Beschreibung sowie den Aktionen **„In Mediathek suchen“**, **„Umschalten“** und **„Schließen“**.
-  - **Play/Pause (`Leertaste`):** öffnet auf „Jetzt“ die Detailtafel für die aktuell laufende Sendung (inkl. **„Von Anfang an“** und **„In Mediathek suchen“**); ist der Zeitstrahl in die Vergangenheit oder Zukunft verschoben, springt `Play/Pause` sofort zurück zu „Jetzt“.
-
-## Senderliste & Senderplätze
-
-- Abruf direkt per HTTP von der FRITZ!Box ohne Anmeldung: `http://fritz.box/dvb/m3u/tvhd.m3u`, `tvsd.m3u`, `radio.m3u` (automatischer Rückfall auf `192.168.178.1` und `fritz.repeater`).
-- **Sendersuchlauf aus der App:** Einstellungen › Sendersuchlauf über TR-064 (`X_AVM-DE_Media:1`, `StationSearch`, Port 49000, HTTP-Digest, Kennwort im Schlüsselbund).
-- **Varianten-Gedächtnis & PID-Nachforderung:** Probiert alle Frequenzvarianten eines Senders der Reihe nach, merkt sich die funktionierende (`workingVariantIDs`) und prüft bei fehlendem Bild nach 6 Sekunden die PMT-Spuren aus VLC (`missingPIDs`), um geänderte Audio-/Video-PIDs automatisch im RTSP-Link zu ergänzen.
-- **Sortierung & Sichtbarkeit:** Feste Platznummern nach `DefaultLineup` (Öffentlich-Rechtliche, Dritte, Private, Spartenkanäle). In Einstellungen › „Sender verwalten“ frei umsortierbar und ein-/ausblendbar.
+- **Abruf:** HTTP ohne Authentifizierung: `http://fritz.box/dvb/m3u/tvhd.m3u`, `tvsd.m3u`, `radio.m3u`. Fallback auf `192.168.178.1` und `fritz.repeater`.
+- **Gruppierung:** HD/SD- und Frequenzvarianten eines Senders werden über den normalisierten Namen (`groupKey`) zu einer `ChannelGroup` zusammengefasst. Die Zuordnung ist damit unabhängig von der Kanalbelegung des Kabelnetzes.
+- **Variantenwahl:** Die Varianten werden der Reihe nach probiert (HD bevorzugt); die funktionierende Variante wird gespeichert (`workingVariantIDs`).
+- **PID-Nachforderung:** Liefert ein Sender nach 6 s kein Bild, vergleicht `PlayerController` die in der PMT gemeldeten Spuren mit den im RTSP-Link angeforderten PIDs (`missingPIDs`) und öffnet den Sender einmalig mit ergänzten PIDs neu.
+- **Senderplätze:** Feste Nummern nach `DefaultLineup` (Öffentlich-Rechtliche, Dritte, Private, Spartensender). Reihenfolge und Sichtbarkeit in *Einstellungen › Sender verwalten* änderbar.
+- **Sendersuchlauf:** TR-064, Dienst `X_AVM-DE_Media:1`, Aktion `StationSearch`, Port 49000, HTTP-Digest. Das Kennwort wird im Schlüsselbund gespeichert.
+- **Tuner-Diagnose:** UPnP-Dienst `satip:1` (Port 49000): Signalpegel, SNR, Belegung je Tuner.
 
 ## Programmdaten (EPG)
 
-- **Duale Quelle ohne Tuner-Konflikt:**
-  1. **Aus dem laufenden Stream (DVB-EIT):** `EITLogParser` und `EPGLogReceiver` werten die DVB-SI-Tabellen (SDT und EIT inkl. Extended Event Descriptors) des aktuell empfangenen Multiplexes in Echtzeit aus.
-  2. **Aus dem Internet (XMLTV):** Da die FRITZ!Box pro Client-IP nur einen RTSP-Stream gleichzeitig ausliefert, lädt `XMLTVLoader` für alle übrigen Sender alle 12 Stunden eine komprimierte XMLTV-Datei (`epg.xml.gz`, Zeitfenster −6 h bis +4 Tage) im Hintergrund herunter und legt sie zusammen mit dem DVB-Cache (`epg_cache.json`) persistent ab.
+Die FRITZ!Box liefert pro Client-IP nur einen RTSP-Stream. Ein zweiter Stream zum Einlesen von EPG-Daten anderer Multiplexe ist daher nicht möglich. Die EPG-Daten stammen aus zwei Quellen:
 
-## Timeshift, „Von Anfang an“ & Mediathek-Suche
+1. **DVB-EIT (laufender Multiplex):** `EITLogParser` und `EPGLogReceiver` lesen SDT und EIT (inkl. Extended Event Descriptors) aus den Debug-Meldungen des libVLC-TS-Demuxers.
+2. **XMLTV (alle übrigen Sender):** `XMLTVLoader` lädt alle 12 h eine gzip-komprimierte XMLTV-Datei. Übernommen werden nur bekannte Sender im Zeitfenster −6 h bis +4 Tage.
 
-- **Timeshift (`TimeshiftBufferManager`):** Der Live-Player zeigt das Bild und schreibt den Strom gleichzeitig in segmentierte TS-Dateien. Anhalten oder Zurückspulen startet den Replay-Player nahtlos über dem stumm weiterlaufenden Live-Player; beim Erreichen der Segmentgrenze wird automatisch eine neue TS-Datei begonnen (Pufferlänge einstellbar: 30, 60, 90 oder 120 Minuten).
-- **Von Anfang an (`HLSReplayPlayerView`):** Wechselt für öffentlich-rechtliche Sender (`PublicHLSChannels`) auf den offiziellen HLS-Livestream und springt per `AVPlayerItem.seek(to: startDate)` über `EXT-X-PROGRAM-DATE-TIME` an den Sendungsanfang.
-- **In Mediathek suchen (`MediathekSearchClient` & `MediathekSearchResultsView`):** Durchsucht die MediathekViewWeb-API (`/api/query`) nach Titel/Thema und Sender und spielt gefundene Sendungen im `MediathekPlayer` inklusive TTML-/WebVTT-Untertiteln (`SubtitleParser`) ab.
+`EPGStore` ordnet beide Quellen den Sendern zu und speichert sie in `epg_cache.json`. Der Cache wird beim Start asynchron geladen und bereinigt.
 
-## Technische Details
+## Timeshift, „Von Anfang an“, Mediathek
 
-1. **Zeilen-Virtualisierung (Viewport Culling):** Sowohl `EPGOverviewView` als auch `ChannelListOverlay` rendern nur die tatsächlich im Sichtfenster liegenden Senderzeilen (plus Puffer), wodurch das Blättern auf Apple TV und Mac verzögerungsfrei bleibt.
-2. **Asynchroner EPG-Cache-Start:** `EPGStore` lädt und bereinigt `epg_cache.json` beim App-Start asynchron im Hintergrund, ohne den Main-Thread zu blockieren.
-3. **Siri-Remote-Wischgesten vs. Zap-Debounce:** `cancelPendingZap()` verhindert zuverlässig, dass eine Wischgeste auf dem Touchpad der Siri Remote nach einem ausgelösten `onMoveCommand` im Hintergrund noch den Sender wechselt.
-4. **Einheitliches Design-System:** Durchgängige Skalierung über `UI.s(...)` / `UI.font(...)`, einheitliches `PanelBackground` mit Glas-Effekt und feinem Rahmen auf allen Tafeln sowie konsistente Akzentfarben (`UI.accent`).
+- **Timeshift (`TimeshiftBufferManager`):** Der Live-Player schreibt den Stream parallel in segmentierte TS-Dateien (max. 4 GB je Segment). Bei Pause oder Rücksprung übernimmt ein zweiter Player die Wiedergabe aus dem Puffer, der Live-Player läuft stumm weiter. Pufferlänge: 30, 60, 90 oder 120 min.
+- **Spulen (`ProgressiveJump`):** Schrittweite wächst mit wiederholtem Tastendruck: 10 s, 30 s, 1 min, 3 min, 5 min, danach je +5 min.
+- **Von Anfang an (`HLSReplayPlayerView`):** Für Sender aus `PublicHLSChannels` wird auf den offiziellen HLS-Livestream gewechselt und per `AVPlayerItem.seek(to:)` anhand von `EXT-X-PROGRAM-DATE-TIME` zum Sendungsbeginn gesprungen.
+- **Mediathek (`MediathekSearchClient`, `MediathekSearchResultsView`, `MediathekPlayer`):** Abfrage der MediathekViewWeb-API (`/api/query`) nach Titel/Thema und Sender. Untertitel in TTML/EBU-TT-D und WebVTT werden mit `SubtitleParser` gelesen.
+
+## Bedienung
+
+### Live-Bild
+
+| Eingabe (Siri Remote / Mac) | Funktion |
+| :--- | :--- |
+| Hoch/Runter / `↑` `↓` | Senderwechsel mit Umlauf am Listenende, 350 ms Entprellung |
+| Nach oben wischen | Senderleiste (`ChannelFooter`), blendet nach 8 s ohne Eingabe aus |
+| Klick, nach unten wischen / `Return`, `⌘I`, Rechtsklick | Sendungsinfo (`InfoPanel`): Tonspur, Untertitel, „Von Anfang an“, „In Mediathek suchen“, Einstellungen |
+| Zurück / `Esc`, `⌘L`, Klick ins Bild | Senderliste (`ChannelListOverlay`); Fokusziel beim Öffnen einstellbar (Programmübersicht, letzter oder aktueller Sender) |
+| Play/Pause / Leertaste, `⌘P` | Timeshift anhalten/fortsetzen |
+| Links/Rechts / `←` `→`, Klick in Zeitleiste | Timeshift spulen; im Live-Bild Ziffern-Direktwahl |
+| – / Doppelklick ins Bild | Vollbild umschalten |
+
+### Programmübersicht (`EPGOverviewView`)
+
+| Eingabe | Funktion |
+| :--- | :--- |
+| `↑` `↓`, Mausrad, Trackpad | Senderzeile wechseln; das Live-Bild läuft im Vorschaufenster weiter |
+| `←` `→`, horizontales Scrollen | Von Sendung zu Sendung, −6 h bis +22 h; rastet beim Erreichen der laufenden Sendung auf „Jetzt“ ein |
+| Klick / `Return` | Laufende Sendung: umschalten. Sonst: `EPGDetailPanel` mit Titel, Untertitel, Beschreibung, „In Mediathek suchen“, „Umschalten“, „Schließen“ |
+| Play/Pause / Leertaste | Auf „Jetzt“: Detailtafel der laufenden Sendung (inkl. „Von Anfang an“). Bei verschobenem Zeitstrahl: zurück zu „Jetzt“ |
+
+## Implementierungsdetails
+
+1. **Zeilen-Virtualisierung:** `EPGOverviewView` und `ChannelListOverlay` rendern nur die sichtbaren Senderzeilen zuzüglich Puffer.
+2. **Zap-Entprellung:** `cancelPendingZap()` verwirft ausstehende Senderwechsel, damit eine Touchpad-Geste der Siri Remote nach einem `onMoveCommand` keinen zusätzlichen Wechsel auslöst.
+3. **Skalierung und Layout:** Abmessungen und Schriftgrößen über `UI.s(...)` / `UI.font(...)`; einheitlicher `PanelBackground` und Akzentfarbe `UI.accent`.
+4. **Top Shelf:** Die Erweiterung zeigt 12 Sender mit Deep Link `fritztv://channel/<nummer>`. Ohne App Group (kostenloses Personal Team) ist das eine feste Standardliste.
