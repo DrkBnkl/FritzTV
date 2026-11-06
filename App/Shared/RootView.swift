@@ -193,8 +193,9 @@ struct RootView: View {
     }
 
     /// Fensterknöpfe: mit der Steuerleiste, und immer, solange etwas anderes als das Bild zu sehen ist.
+    /// Im Vollbild blendet macOS die Titelleiste selbst ein und aus; die Knöpfe bleiben dort sichtbar.
     private var showsWindowButtons: Bool {
-        !model.isPlainLiveView || showsControlBar
+        !model.isPlainLiveView || showsControlBar || controls.isFullScreen
     }
 
     @ViewBuilder

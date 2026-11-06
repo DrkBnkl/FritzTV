@@ -17,6 +17,8 @@ final class MacControlsState: ObservableObject {
 
     private static let idleDelay: TimeInterval = 3
     private var lastMove = Date.distantPast
+    /// Liegt der Zeiger über dem Bild? Außerhalb des Fensters wird er nie ausgeblendet.
+    private var pointerInside = false
     private var hideTask: Task<Void, Never>?
     private var observers: [NSObjectProtocol] = []
 
@@ -52,6 +54,7 @@ final class MacControlsState: ObservableObject {
     /// nur eine Aufgabe, die bis drei Sekunden nach der letzten Bewegung wartet.
     func pointerMoved() {
         lastMove = Date()
+        pointerInside = true
         if !pointerActive {
             withAnimation(.easeOut(duration: 0.15)) { pointerActive = true }
         }
@@ -61,14 +64,21 @@ final class MacControlsState: ObservableObject {
 
     /// Maus hat das Fenster verlassen: bald ausblenden.
     func pointerLeft() {
+        pointerInside = false
         guard !hoveringBar else { return }
         lastMove = Date().addingTimeInterval(0.6 - Self.idleDelay)
         if hideTask == nil, pointerActive {
-            hideTask = Task { [weak self] in await self?.hideWhenIdle(hideCursor: false) }
+            hideTask = Task { [weak self] in await self?.hideWhenIdle() }
         }
     }
 
-    private func hideWhenIdle(hideCursor: Bool = true) async {
+    /// Die Leiste verschwindet (z. B. weil ein Overlay aufgeht): Ein Hover-Ende meldet SwiftUI
+    /// dann nicht immer, ohne Rücksetzen bliebe die Leiste danach dauerhaft stehen.
+    func barDisappeared() {
+        hoveringBar = false
+    }
+
+    private func hideWhenIdle() async {
         while true {
             let remaining = lastMove.addingTimeInterval(Self.idleDelay).timeIntervalSinceNow
             if remaining <= 0 { break }
@@ -78,7 +88,7 @@ final class MacControlsState: ObservableObject {
         hideTask = nil
         guard !hoveringBar else { return }
         withAnimation(.easeIn(duration: 0.3)) { pointerActive = false }
-        if hideCursor, allowsCursorHiding() {
+        if pointerInside, allowsCursorHiding() {
             NSCursor.setHiddenUntilMouseMoves(true)
         }
     }
@@ -153,6 +163,7 @@ struct MacControlBar: View {
             .environment(\.colorScheme, .dark)
             .frame(maxWidth: 720)
             .onHover { controls.hoveringBar = $0 }
+            .onDisappear { controls.barDisappeared() }
             .padding(.horizontal, 20)
             .padding(.bottom, 18)
         }
