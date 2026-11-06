@@ -98,12 +98,14 @@ private struct NowPlayingHeader: View {
                     .font(.caption)
                     .foregroundStyle(line.isProblem ? Color.orange : Color.secondary)
                     .fixedSize(horizontal: false, vertical: true)
-            } else if model.showsAudioFormat, model.player.status == .playing,
-                      let format = model.player.audioFormat {
-                Text(format.summary)
+            } else if model.showsAudioFormat, model.current != nil {
+                // Die Zeile hält ihren Platz, auch solange das Format noch nicht bekannt ist:
+                // Sonst rutscht beim Umschalten alles darunter nach unten.
+                let format = model.player.status == .playing ? model.player.audioFormat : nil
+                Text(format?.summary ?? " ")
                     .font(.caption.monospacedDigit())
                     .foregroundStyle(.secondary)
-                    .help(format.isEstimate ? "Bitrate aus der Datenmenge geschätzt" : "")
+                    .help(format?.isEstimate == true ? "Bitrate aus der Datenmenge geschätzt" : "")
             }
             controls
         }
