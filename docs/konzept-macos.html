@@ -1,0 +1,500 @@
+<title>FritzTV für den Mac</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@500;700;800&family=Source+Sans+3:wght@400;600&family=JetBrains+Mono:wght@500&display=swap">
+<style>
+/* Layout: einspaltige Erzählung, breite Fensterentwürfe als „Bildschirmfotos“ mit nummerierten Markierungen und Legende daneben */
+:root {
+  --bg: #f3f5f8;
+  --surface: #ffffff;
+  --fg: #15202b;
+  --muted: #566376;
+  --line: #d8dee7;
+  --accent: #1b6ab0;
+  --accent-soft: #e2eef9;
+  --good: #2f7d4f;
+  --warn: #a2620c;
+  /* Entwürfe: immer dunkel wie ein Videofenster */
+  --win: #1d2229;
+  --win-bar: #2a3038;
+  --win-side: #20262d;
+  --win-line: #363d47;
+  --win-fg: #e9edf2;
+  --win-muted: #9aa5b3;
+  --win-accent: #7cc4ff;
+  --hud: rgba(30, 34, 40, 0.78);
+  --font-display: "Schibsted Grotesk", "Helvetica Neue", Arial, sans-serif;
+  --font-body: "Source Sans 3", "Helvetica Neue", Arial, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, Menlo, monospace;
+  --font-mac: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", Arial, sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0e141b; --surface: #151d26; --fg: #e5eaf0; --muted: #9ba7b6; --line: #263342;
+    --accent: #7cc4ff; --accent-soft: #16304a; --good: #6fcf97; --warn: #f2b45a; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0e141b; --surface: #151d26; --fg: #e5eaf0; --muted: #9ba7b6; --line: #263342;
+  --accent: #7cc4ff; --accent-soft: #16304a; --good: #6fcf97; --warn: #f2b45a; color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body {
+  background: var(--bg); color: var(--fg);
+  font: 17px/1.55 var(--font-body);
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 40px 72px;
+}
+main { max-width: 1060px; margin: 0 auto; display: grid; gap: 64px; }
+h1, h2, h3 { font-family: var(--font-display); text-wrap: balance; margin: 0; line-height: 1.15; }
+h1 { font-size: clamp(2rem, 5vw, 3.1rem); font-weight: 800; letter-spacing: -0.02em; }
+h2 { font-size: clamp(1.4rem, 3vw, 1.85rem); font-weight: 700; }
+h3 { font-size: 1.08rem; font-weight: 700; }
+p { margin: 0; max-width: 68ch; }
+.eyebrow { font: 600 0.78rem/1 var(--font-body); letter-spacing: 0.12em; text-transform: uppercase; color: var(--accent); }
+.lead { font-size: 1.2rem; color: var(--muted); }
+section { display: grid; gap: 20px; }
+.head { display: grid; gap: 10px; }
+kbd {
+  font: 500 0.8em/1 var(--font-mono); padding: 3px 6px; border-radius: 5px;
+  border: 1px solid var(--line); border-bottom-width: 2px; background: var(--surface); white-space: nowrap;
+}
+
+/* Vorher / Nachher */
+.compare { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; }
+.compare > div { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 20px 22px; display: grid; gap: 10px; align-content: start; }
+.compare ul { margin: 0; padding-left: 1.1em; display: grid; gap: 6px; }
+.tag { font: 600 0.75rem/1 var(--font-body); letter-spacing: 0.08em; text-transform: uppercase; }
+.tag.now { color: var(--warn); }
+.tag.new { color: var(--good); }
+
+/* Fensterentwürfe */
+.figure { display: grid; grid-template-columns: minmax(0, 1fr) 280px; gap: 24px; align-items: start; }
+@media (max-width: 900px) { .figure { grid-template-columns: minmax(0, 1fr); } }
+.scroll { overflow-x: auto; padding-bottom: 6px; }
+.mac {
+  min-width: 700px; background: var(--win); color: var(--win-fg); border-radius: 11px;
+  border: 1px solid #0b0d10; box-shadow: 0 22px 50px -18px rgba(10, 20, 35, 0.55);
+  font: 13px/1.35 var(--font-mac); overflow: hidden; position: relative;
+}
+.titlebar { height: 38px; display: flex; align-items: center; gap: 14px; padding: 0 14px; background: var(--win-bar); border-bottom: 1px solid var(--win-line); }
+.lights { display: flex; gap: 8px; }
+.lights i { width: 12px; height: 12px; border-radius: 50%; display: block; }
+.lights i:nth-child(1) { background: #ff5f57; } .lights i:nth-child(2) { background: #febc2e; } .lights i:nth-child(3) { background: #28c840; }
+.titlebar .title { font-weight: 600; color: var(--win-fg); }
+.titlebar .sub { color: var(--win-muted); }
+.tb-tools { margin-left: auto; display: flex; gap: 6px; align-items: center; }
+.tb-btn { height: 24px; min-width: 28px; padding: 0 8px; border-radius: 6px; display: grid; place-items: center; color: var(--win-muted); font-size: 13px; }
+.tb-btn.on { background: #3a414b; color: var(--win-fg); }
+.body { display: flex; height: 400px; }
+.sidebar { width: 236px; background: var(--win-side); border-right: 1px solid var(--win-line); display: flex; flex-direction: column; }
+.search { margin: 10px; height: 26px; border-radius: 7px; background: #2d343d; color: var(--win-muted); display: flex; align-items: center; padding: 0 9px; gap: 6px; font-size: 12.5px; }
+.group { font-size: 11px; font-weight: 600; color: var(--win-muted); padding: 8px 14px 4px; }
+.ch { display: grid; grid-template-columns: 22px 38px minmax(0, 1fr); gap: 8px; align-items: center; padding: 5px 10px; margin: 0 6px; border-radius: 6px; }
+.ch.sel { background: #2f5f8f; }
+.ch .num { color: var(--win-muted); font-size: 11px; text-align: right; font-variant-numeric: tabular-nums; }
+.ch .logo { height: 22px; border-radius: 4px; background: #e9edf2; color: #10161d; font: 800 9px/22px var(--font-mac); text-align: center; letter-spacing: -0.02em; }
+.ch .t { min-width: 0; }
+.ch .t b { display: block; font-weight: 600; font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ch .t span { display: block; color: var(--win-muted); font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ch.sel .t span { color: #cfe2f5; }
+.prog { height: 3px; border-radius: 2px; background: #3a424c; margin-top: 3px; overflow: hidden; }
+.prog i { display: block; height: 100%; background: var(--win-accent); }
+.video { flex: 1; position: relative; min-width: 0;
+  background:
+    radial-gradient(120% 90% at 70% 20%, #3b5878 0%, transparent 60%),
+    radial-gradient(90% 80% at 15% 90%, #5c3b2c 0%, transparent 55%),
+    linear-gradient(160deg, #1c2a3a, #0f151c);
+}
+.video .bug { position: absolute; top: 14px; right: 16px; font: 800 13px var(--font-mac); color: rgba(255,255,255,0.75); }
+.video .caption { position: absolute; left: 22px; top: 22px; color: rgba(255,255,255,0.55); font-size: 12px; }
+.hud {
+  position: absolute; left: 50%; bottom: 16px; transform: translateX(-50%); width: min(92%, 470px);
+  background: var(--hud); backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px);
+  border: 1px solid rgba(255,255,255,0.12); border-radius: 13px; padding: 9px 14px 11px; display: grid; gap: 8px;
+}
+.hud-row { display: flex; align-items: center; gap: 12px; }
+.ico { font-size: 15px; color: var(--win-fg); width: 18px; text-align: center; }
+.ico.big { font-size: 20px; }
+.vol { display: flex; align-items: center; gap: 6px; color: var(--win-muted); }
+.slider { width: 74px; height: 4px; border-radius: 2px; background: #545c67; position: relative; }
+.slider i { position: absolute; inset: 0 30% 0 0; background: var(--win-fg); border-radius: 2px; }
+.slider b { position: absolute; left: 70%; top: 50%; width: 11px; height: 11px; margin: -5.5px 0 0 -5.5px; border-radius: 50%; background: #fff; }
+.spacer { flex: 1; }
+.timeline { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 9px; align-items: center; font-size: 11px; color: var(--win-muted); font-variant-numeric: tabular-nums; }
+.track { height: 4px; border-radius: 2px; background: #4a525d; position: relative; }
+.track .buf { position: absolute; inset: 0 0 0 38%; background: #6a737f; border-radius: 2px; }
+.track .pos { position: absolute; left: 0; top: 0; bottom: 0; width: 86%; background: var(--win-fg); border-radius: 2px; }
+.live { font: 700 10px/1 var(--font-mac); color: #fff; background: #d23b3b; padding: 3px 5px; border-radius: 4px; letter-spacing: 0.04em; }
+.live.off { background: transparent; border: 1px solid #7b8490; color: var(--win-muted); }
+.hud .now { font-size: 12px; color: var(--win-fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hud .now span { color: var(--win-muted); }
+
+/* Markierungen */
+.pin { position: absolute; width: 22px; height: 22px; border-radius: 50%; background: var(--win-accent); color: #08131f; font: 800 12px/22px var(--font-mac); text-align: center; box-shadow: 0 0 0 3px rgba(124,196,255,0.28); z-index: 3; }
+.legend { list-style: none; margin: 0; padding: 0; display: grid; gap: 14px; }
+.legend li { display: grid; grid-template-columns: 26px minmax(0, 1fr); gap: 10px; }
+.legend .n { width: 22px; height: 22px; border-radius: 50%; background: var(--accent); color: var(--surface); font: 800 12px/22px var(--font-display); text-align: center; margin-top: 2px; }
+.legend b { display: block; font-family: var(--font-display); font-weight: 700; font-size: 0.98rem; }
+.legend span { color: var(--muted); font-size: 0.95rem; }
+
+/* Inspector */
+.inspector { width: 250px; background: var(--win-side); border-left: 1px solid var(--win-line); padding: 14px; display: grid; gap: 12px; align-content: start; }
+.inspector h4 { margin: 0; font-size: 15px; font-weight: 700; }
+.inspector .meta { color: var(--win-muted); font-size: 12px; }
+.inspector p { font-size: 12px; color: #c9d1db; }
+.seg { display: grid; grid-template-columns: 1fr 1fr; background: #2d343d; border-radius: 7px; padding: 2px; font-size: 12px; }
+.seg span { text-align: center; padding: 3px 0; border-radius: 5px; color: var(--win-muted); }
+.seg span.on { background: #4b535e; color: var(--win-fg); }
+.field { display: grid; gap: 4px; font-size: 11.5px; color: var(--win-muted); }
+.popup { height: 24px; border-radius: 6px; background: #3a414b; color: var(--win-fg); display: flex; align-items: center; justify-content: space-between; padding: 0 9px; font-size: 12px; }
+.btn { height: 26px; border-radius: 6px; background: #3a414b; color: var(--win-fg); display: grid; place-items: center; font-size: 12px; }
+.btn.primary { background: #2f6fb0; }
+
+/* Menü und Einstellungen */
+.duo { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 24px; align-items: start; }
+.menubar { background: #2b3139; color: var(--win-fg); font: 13px var(--font-mac); display: flex; gap: 18px; padding: 4px 14px; border-radius: 9px 9px 0 0; }
+.menubar b { font-weight: 700; }
+.menubar .act { background: #3b6ea4; border-radius: 4px; padding: 0 7px; margin: 0 -7px; }
+.menu { background: rgba(43, 49, 57, 0.97); color: var(--win-fg); font: 13px var(--font-mac); border-radius: 0 0 10px 10px; padding: 5px; border: 1px solid #11151a; border-top: 0; }
+.mi { display: flex; justify-content: space-between; gap: 24px; padding: 3px 10px; border-radius: 5px; }
+.mi .k { color: var(--win-muted); font-variant-numeric: tabular-nums; }
+.mi.hl { background: #3b6ea4; }
+.mi.hl .k { color: #e2eefa; }
+.sep { height: 1px; background: #444c57; margin: 5px 8px; }
+.sub::after { content: "›"; color: var(--win-muted); }
+.settings { background: var(--win); color: var(--win-fg); font: 13px var(--font-mac); border-radius: 11px; overflow: hidden; border: 1px solid #0b0d10; box-shadow: 0 22px 50px -18px rgba(10, 20, 35, 0.55); }
+.tabs { display: flex; justify-content: center; gap: 4px; padding: 8px 10px 10px; background: var(--win-bar); border-bottom: 1px solid var(--win-line); }
+.tab { display: grid; justify-items: center; gap: 3px; padding: 5px 10px; border-radius: 7px; color: var(--win-muted); font-size: 11.5px; }
+.tab i { font-style: normal; font-size: 18px; }
+.tab.on { background: #3a414b; color: var(--win-fg); }
+.form { padding: 16px 20px 20px; display: grid; grid-template-columns: 150px minmax(0, 1fr); gap: 11px 14px; align-items: center; font-size: 12.5px; }
+.form .l { text-align: right; color: var(--win-muted); }
+.check { display: flex; align-items: center; gap: 7px; }
+.check i { width: 14px; height: 14px; border-radius: 4px; background: #2f6fb0; display: grid; place-items: center; font: 700 10px/1 var(--font-mac); font-style: normal; color: #fff; }
+.check i.off { background: #3a414b; }
+
+/* EPG-Fenster */
+.epg { display: grid; grid-template-columns: 120px minmax(0, 1fr); font-size: 12px; }
+.epg .rowh { padding: 0 10px; height: 34px; display: flex; align-items: center; border-bottom: 1px solid var(--win-line); color: var(--win-fg); font-weight: 600; background: var(--win-side); }
+.epg .lane { position: relative; height: 34px; border-bottom: 1px solid var(--win-line); }
+.epg .p { position: absolute; top: 4px; bottom: 4px; background: #2c333c; border-radius: 5px; padding: 3px 7px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: #d5dce5; }
+.epg .p.cur { background: #2f5f8f; color: #fff; }
+.epg .times { position: relative; height: 24px; border-bottom: 1px solid var(--win-line); color: var(--win-muted); font-size: 11px; }
+.epg .times span { position: absolute; top: 5px; }
+.nowline { position: absolute; top: 0; bottom: 0; width: 2px; background: #ff5f57; z-index: 2; }
+
+/* Tastatur */
+table { border-collapse: collapse; width: 100%; min-width: 560px; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+th, td { text-align: left; padding: 10px 14px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { font: 600 0.78rem/1.2 var(--font-body); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); background: var(--bg); }
+tr:last-child td { border-bottom: 0; }
+td.same { color: var(--good); font-weight: 600; white-space: nowrap; }
+td.diff { color: var(--warn); font-weight: 600; white-space: nowrap; }
+
+/* Phasen */
+.phases { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 14px; }
+.phase { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 18px 20px; display: grid; gap: 8px; align-content: start; }
+.phase .step { font: 700 0.8rem/1 var(--font-display); color: var(--accent); letter-spacing: 0.04em; }
+.phase ul { margin: 0; padding-left: 1.1em; display: grid; gap: 4px; color: var(--muted); font-size: 0.95rem; }
+.effort { font-size: 0.85rem; color: var(--muted); border-top: 1px solid var(--line); padding-top: 8px; margin-top: 4px; }
+.note { background: var(--accent-soft); border-radius: 12px; padding: 18px 22px; display: grid; gap: 8px; }
+.questions { display: grid; gap: 12px; margin: 0; padding: 0; list-style: none; }
+.questions li { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 14px 18px; display: grid; gap: 4px; }
+.questions li span { color: var(--muted); font-size: 0.95rem; }
+.example { font-size: 0.85rem; color: var(--muted); }
+</style>
+
+<main>
+  <header class="head">
+    <div class="eyebrow">Konzept · noch kein Code</div>
+    <h1>FritzTV für den Mac</h1>
+    <p class="lead">Heute ist FritzTV auf dem Mac die Apple-TV-Oberfläche, auf 55 % verkleinert: Tafeln über dem Bild, Bedienung wie mit der Siri Remote. Der Vorschlag macht daraus ein Mac-Fenster mit Seitenleiste, schwebender Steuerleiste mit eigener Lautstärke, echten Menüs und einem Einstellungsfenster. Die Apple-TV-App bleibt unverändert.</p>
+  </header>
+
+  <section>
+    <div class="compare">
+      <div>
+        <span class="tag now">Heute</span>
+        <h3>Fernbedienung am Schreibtisch</h3>
+        <ul>
+          <li>Senderliste, Sendungsinfo und Programmübersicht als Tafeln über dem Bild</li>
+          <li>Größen von Apple TV übernommen und mit Faktor 0,55 verkleinert</li>
+          <li>Einstellungen bedecken das ganze Fenster</li>
+          <li>Keine Lautstärke in der App, nur die Systemlautstärke</li>
+          <li>Ein Menü „Steuerung“ mit sieben Befehlen</li>
+        </ul>
+      </div>
+      <div>
+        <span class="tag new">Vorschlag</span>
+        <h3>Ein Mac-Fenster wie QuickTime oder die TV-App</h3>
+        <ul>
+          <li>Senderliste als einblendbare Seitenleiste, Bild bleibt frei</li>
+          <li>Schwebende Steuerleiste: Timeshift, Sender, Lautstärke, Ton und Untertitel</li>
+          <li>Sendungsinfo als Inspektor am rechten Rand</li>
+          <li>Programmübersicht und Mediathek in eigenen Fenstern</li>
+          <li>Einstellungsfenster mit Registern, vollständige Menüs</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="head">
+      <div class="eyebrow">Hauptfenster</div>
+      <h2>Seitenleiste, Bild und Steuerleiste</h2>
+      <p>Das Fenster behält das 16:9-Bild. Die Seitenleiste schiebt sich links daneben und lässt sich mit <kbd>⌃⌘S</kbd> ausblenden. Bewegt sich die Maus über das Bild, erscheint die Steuerleiste. Nach drei Sekunden Ruhe verschwinden Leiste, Titelzeile und Mauszeiger.</p>
+    </div>
+    <div class="figure">
+      <div class="scroll">
+        <div class="mac" role="img" aria-label="Entwurf: FritzTV-Fenster mit Senderliste links und Steuerleiste über dem Bild">
+          <div class="titlebar">
+            <div class="lights"><i></i><i></i><i></i></div>
+            <span class="tb-btn on">▤</span>
+            <span class="title">Das Erste HD</span><span class="sub">Tagesschau</span>
+            <div class="tb-tools">
+              <span class="tb-btn">▦ Programm</span>
+              <span class="tb-btn">⌕ Mediathek</span>
+              <span class="tb-btn">ⓘ</span>
+            </div>
+          </div>
+          <div class="body">
+            <div class="sidebar">
+              <div class="search">⌕ Sender suchen</div>
+              <div class="group">Favoriten</div>
+              <div class="ch sel"><span class="num">1</span><span class="logo">ARD</span><span class="t"><b>Das Erste HD</b><span>Tagesschau</span><div class="prog"><i style="width:62%"></i></div></span></div>
+              <div class="ch"><span class="num">2</span><span class="logo">ZDF</span><span class="t"><b>ZDF HD</b><span>heute journal</span><div class="prog"><i style="width:35%"></i></div></span></div>
+              <div class="ch"><span class="num">3</span><span class="logo">WDR</span><span class="t"><b>WDR HD Köln</b><span>Lokalzeit aus Köln</span><div class="prog"><i style="width:80%"></i></div></span></div>
+              <div class="group">Alle Sender</div>
+              <div class="ch"><span class="num">4</span><span class="logo">arte</span><span class="t"><b>arte HD</b><span>Stadt Land Kunst</span><div class="prog"><i style="width:20%"></i></div></span></div>
+              <div class="ch"><span class="num">5</span><span class="logo">3sat</span><span class="t"><b>3sat HD</b><span>Kulturzeit</span><div class="prog"><i style="width:48%"></i></div></span></div>
+              <div class="ch"><span class="num">6</span><span class="logo">phx</span><span class="t"><b>phoenix HD</b><span>phoenix der tag</span><div class="prog"><i style="width:71%"></i></div></span></div>
+            </div>
+            <div class="video">
+              <span class="caption">Live-Bild</span>
+              <span class="bug">ARD</span>
+              <div class="hud">
+                <div class="hud-row">
+                  <span class="ico">⏮</span><span class="ico big">⏸</span><span class="ico">⏭</span>
+                  <span class="now">Tagesschau <span>· 20:00 – 20:15</span></span>
+                  <span class="spacer"></span>
+                  <span class="ico" title="Ton und Untertitel">💬</span>
+                  <span class="vol"><span class="ico">🔈</span><span class="slider"><i></i><b></b></span></span>
+                  <span class="ico">⛶</span>
+                </div>
+                <div class="timeline"><span>−12:40</span><span class="track"><span class="buf"></span><span class="pos"></span></span><span class="live off">LIVE</span></div>
+              </div>
+            </div>
+          </div>
+          <span class="pin" style="left:118px; top:7px">1</span>
+          <span class="pin" style="left:226px; top:118px">2</span>
+          <span class="pin" style="left:330px; top:336px">3</span>
+          <span class="pin" style="left:604px; top:336px">4</span>
+          <span class="pin" style="left:480px; top:410px">5</span>
+          <span class="pin" style="right:44px; top:7px">6</span>
+        </div>
+      </div>
+      <ol class="legend">
+        <li><span class="n">1</span><div><b>Titelzeile mit Sender und Sendung</b><span>Wie bei QuickTime ausgeblendet, solange die Maus ruht. Knopf für die Seitenleiste links.</span></div></li>
+        <li><span class="n">2</span><div><b>Senderliste als Seitenleiste</b><span>Logo, Senderplatz, laufende Sendung mit Fortschritt. Suche, Favoriten, Rechtsklick für „Zu Favoriten“ und „Programm anzeigen“.</span></div></li>
+        <li><span class="n">3</span><div><b>Schwebende Steuerleiste</b><span>Voriger und nächster Sender, Anhalten für Timeshift, laufende Sendung.</span></div></li>
+        <li><span class="n">4</span><div><b>Eigene Lautstärke</b><span>Regler wie in FritzRadio, unabhängig von der Systemlautstärke, wird gespeichert. Klick aufs Lautsprechersymbol schaltet stumm.</span></div></li>
+        <li><span class="n">5</span><div><b>Timeshift-Zeitleiste</b><span>Ziehen zum Spulen, grau der gepufferte Bereich. „LIVE“ leuchtet rot im Live-Bild, Klick springt zurück dorthin.</span></div></li>
+        <li><span class="n">6</span><div><b>Werkzeugleiste</b><span>Programmübersicht, Mediathek und Inspektor. Im Vollbild entfällt sie, die Steuerleiste bleibt.</span></div></li>
+      </ol>
+    </div>
+    <p class="example">Sender und Sendungen sind Beispiele.</p>
+  </section>
+
+  <section>
+    <div class="head">
+      <div class="eyebrow">Sendungsinfo</div>
+      <h2>Inspektor statt Tafel über dem Bild</h2>
+      <p>Die heutige Info-Tafel wird ein Inspektor am rechten Rand, ein- und ausblendbar mit <kbd>⌘I</kbd>. Tonspur und Untertitel stehen dort und zusätzlich im Sprechblasen-Menü der Steuerleiste, wie in der TV-App.</p>
+    </div>
+    <div class="figure">
+      <div class="scroll">
+        <div class="mac" role="img" aria-label="Entwurf: Fenster ohne Seitenleiste, rechts Inspektor mit Sendungsinfo">
+          <div class="titlebar">
+            <div class="lights"><i></i><i></i><i></i></div>
+            <span class="tb-btn">▤</span>
+            <span class="title">ZDF HD</span><span class="sub">heute journal</span>
+            <div class="tb-tools"><span class="tb-btn">▦ Programm</span><span class="tb-btn">⌕ Mediathek</span><span class="tb-btn on">ⓘ</span></div>
+          </div>
+          <div class="body" style="height:360px">
+            <div class="video"><span class="caption">Live-Bild</span><span class="bug">ZDF</span></div>
+            <div class="inspector">
+              <div class="seg"><span class="on">Jetzt</span><span>Danach</span></div>
+              <div><h4>heute journal</h4><div class="meta">21:45 – 22:15 · noch 18 Min.</div></div>
+              <p>Nachrichten und Hintergründe des Tages aus Deutschland und der Welt.</p>
+              <div class="field">Tonspur<div class="popup">Deutsch (Stereo) <span>⌄</span></div></div>
+              <div class="field">Untertitel<div class="popup">Aus <span>⌄</span></div></div>
+              <div class="btn primary">Von Anfang an</div>
+              <div class="btn">In der Mediathek suchen</div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <ol class="legend">
+        <li><span class="n">✓</span><div><b>Bild bleibt sichtbar</b><span>Der Inspektor verkleinert den Bildbereich, statt ihn zu überdecken. Im Vollbild schwebt er halbtransparent am Rand.</span></div></li>
+        <li><span class="n">✓</span><div><b>Gleiche Funktionen wie heute</b><span>Jetzt und Danach, Beschreibung aus EIT oder XMLTV, „Von Anfang an“ für öffentlich-rechtliche Sender, Mediathek-Suche.</span></div></li>
+      </ol>
+    </div>
+  </section>
+
+  <section>
+    <div class="head">
+      <div class="eyebrow">Menüs und Einstellungen</div>
+      <h2>Alles in der Menüleiste, Einstellungen im eigenen Fenster</h2>
+      <p>Jeder Befehl steht in einem Menü, mit Kurzbefehl. Das macht ihn auffindbar, ohne die Tastaturbelegung zu kennen. Die Einstellungen öffnen mit <kbd>⌘,</kbd> ein normales Einstellungsfenster, das Bild läuft dahinter weiter.</p>
+    </div>
+    <div class="duo">
+      <div class="scroll">
+        <div style="min-width:340px" role="img" aria-label="Entwurf: geöffnetes Menü Wiedergabe">
+          <div class="menubar"><b>FritzTV</b><span>Ablage</span><span>Bearbeiten</span><span>Darstellung</span><span class="act">Wiedergabe</span><span>Sender</span><span>Fenster</span></div>
+          <div class="menu">
+            <div class="mi"><span>Anhalten</span><span class="k">Leertaste</span></div>
+            <div class="mi"><span>Zum Live-Bild</span><span class="k">⌘L</span></div>
+            <div class="mi"><span>10 Sekunden zurück</span><span class="k">←</span></div>
+            <div class="mi"><span>10 Sekunden vor</span><span class="k">→</span></div>
+            <div class="mi"><span>Von Anfang an</span><span class="k">⇧⌘←</span></div>
+            <div class="sep"></div>
+            <div class="mi hl"><span>Lauter</span><span class="k">⌘↑</span></div>
+            <div class="mi"><span>Leiser</span><span class="k">⌘↓</span></div>
+            <div class="mi"><span>Ton aus</span><span class="k">⌥⌘↓</span></div>
+            <div class="sep"></div>
+            <div class="mi sub"><span>Tonspur</span></div>
+            <div class="mi sub"><span>Untertitel</span></div>
+          </div>
+        </div>
+      </div>
+      <div class="scroll">
+        <div class="settings" style="min-width:420px" role="img" aria-label="Entwurf: Einstellungsfenster, Register Wiedergabe">
+          <div class="titlebar" style="border:0"><div class="lights"><i></i><i></i><i></i></div><span class="title" style="margin:0 auto; padding-right:52px">Wiedergabe</span></div>
+          <div class="tabs">
+            <span class="tab"><i>⚙︎</i>Allgemein</span>
+            <span class="tab on"><i>▶︎</i>Wiedergabe</span>
+            <span class="tab"><i>☰</i>Sender</span>
+            <span class="tab"><i>⌁</i>FRITZ!Box</span>
+          </div>
+          <div class="form">
+            <span class="l">Timeshift-Puffer:</span><div class="popup" style="width:140px">60 Minuten <span>⌄</span></div>
+            <span class="l">Beim Umschalten:</span><div class="check"><i>✓</i>Schwarzbild zeigen</div>
+            <span class="l">SD-Sender:</span><div class="check"><i>✓</i>Zeilensprung entfernen</div>
+            <span class="l">Untertitel:</span><div class="check"><i class="off"></i>Automatisch einschalten</div>
+            <span class="l">Lautstärke:</span><div class="check"><i>✓</i>Beim Senderwechsel beibehalten</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <p>Weitere Menüs: <b>Sender</b> mit nächster und vorheriger Sender, Favoriten 1–9 und Senderliste. <b>Darstellung</b> mit Seitenleiste, Inspektor, Vollbild und „Schwebend über allen Fenstern“. <b>Fenster</b> öffnet Programmübersicht und Mediathek.</p>
+  </section>
+
+  <section>
+    <div class="head">
+      <div class="eyebrow">Programmübersicht</div>
+      <h2>Eigenes Fenster mit Zeitstrahl</h2>
+      <p>Die Programmübersicht öffnet mit <kbd>⌘E</kbd> als eigenes, frei skalierbares Fenster. Waagerecht scrollen mit dem Trackpad bewegt den Zeitstrahl von −6 h bis +22 h. Klick auf eine Sendung zeigt Details in einem Popover, Doppelklick schaltet um. Das Live-Bild läuft im Hauptfenster weiter.</p>
+    </div>
+    <div class="scroll">
+      <div class="mac" role="img" aria-label="Entwurf: Fenster Programmübersicht mit Zeitstrahl und roter Jetzt-Linie">
+        <div class="titlebar">
+          <div class="lights"><i></i><i></i><i></i></div>
+          <span class="title">Programmübersicht</span>
+          <div class="tb-tools"><span class="tb-btn">‹</span><span class="tb-btn on">Jetzt</span><span class="tb-btn">›</span><span class="tb-btn">Heute ⌄</span></div>
+        </div>
+        <div class="epg">
+          <div class="rowh" style="height:24px; border-bottom:1px solid var(--win-line)"></div>
+          <div class="times"><span style="left:2%">20:00</span><span style="left:27%">20:30</span><span style="left:52%">21:00</span><span style="left:77%">21:30</span></div>
+          <div class="rowh">Das Erste HD</div>
+          <div class="lane"><span class="nowline" style="left:31%"></span><span class="p" style="left:0; width:24%">Tagesschau</span><span class="p cur" style="left:25%; width:49%">Tatort: Borowski und das Haus am Meer</span><span class="p" style="left:75%; width:25%">Tagesthemen</span></div>
+          <div class="rowh">ZDF HD</div>
+          <div class="lane"><span class="nowline" style="left:31%"></span><span class="p cur" style="left:0; width:49%">Der Bergdoktor</span><span class="p" style="left:50%; width:50%">Markus Lanz</span></div>
+          <div class="rowh">WDR HD Köln</div>
+          <div class="lane"><span class="nowline" style="left:31%"></span><span class="p" style="left:0; width:24%">Aktuelle Stunde</span><span class="p cur" style="left:25%; width:49%">Quarks</span><span class="p" style="left:75%; width:25%">WDR aktuell</span></div>
+          <div class="rowh">arte HD</div>
+          <div class="lane"><span class="nowline" style="left:31%"></span><span class="p cur" style="left:0; width:74%">Die Geheimnisse der Pyramiden</span><span class="p" style="left:75%; width:25%">Tracks East</span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="head">
+      <div class="eyebrow">Tastatur</div>
+      <h2>Gleiche Griffe wie in FritzRadio</h2>
+      <p>Wo FritzRadio schon eine Belegung hat, übernimmt FritzTV sie. Abweichungen gibt es nur, wo das Fernsehen etwas anderes braucht.</p>
+    </div>
+    <div class="scroll">
+      <table>
+        <thead><tr><th>Funktion</th><th>Heute</th><th>Vorschlag</th><th>FritzRadio</th></tr></thead>
+        <tbody>
+          <tr><td>Anhalten / Weiter</td><td><kbd>Leertaste</kbd> <kbd>⌘P</kbd></td><td><kbd>Leertaste</kbd> <kbd>⌘P</kbd></td><td class="same">gleich</td></tr>
+          <tr><td>Lauter / Leiser</td><td>–</td><td><kbd>⌘↑</kbd> <kbd>⌘↓</kbd></td><td class="same">gleich</td></tr>
+          <tr><td>Ton aus</td><td>–</td><td><kbd>⌥⌘↓</kbd> oder Klick aufs Symbol</td><td class="diff">neu</td></tr>
+          <tr><td>Nächster / voriger Sender</td><td><kbd>↑</kbd> <kbd>↓</kbd> <kbd>⌘↑</kbd> <kbd>⌘↓</kbd></td><td><kbd>↑</kbd> <kbd>↓</kbd> <kbd>⌘→</kbd> <kbd>⌘←</kbd></td><td class="same">gleich (⌘←/→)</td></tr>
+          <tr><td>Spulen im Timeshift</td><td><kbd>←</kbd> <kbd>→</kbd> mit wachsender Schrittweite</td><td><kbd>←</kbd> <kbd>→</kbd> unverändert</td><td class="diff">nur TV</td></tr>
+          <tr><td>Zum Live-Bild</td><td><kbd>⌘0</kbd></td><td><kbd>⌘L</kbd></td><td class="diff">nur TV</td></tr>
+          <tr><td>Favorit 1–9</td><td>Ziffern = Senderplatz</td><td><kbd>⌘1</kbd> … <kbd>⌘9</kbd>, Ziffern bleiben Direktwahl</td><td class="same">gleich</td></tr>
+          <tr><td>Senderliste</td><td><kbd>⌘L</kbd> <kbd>Esc</kbd></td><td><kbd>⌃⌘S</kbd> (Seitenleiste)</td><td class="diff">Mac-Standard</td></tr>
+          <tr><td>Sendungsinfo</td><td><kbd>⌘I</kbd> <kbd>Return</kbd></td><td><kbd>⌘I</kbd> (Inspektor)</td><td class="diff">nur TV</td></tr>
+          <tr><td>Sender suchen</td><td>–</td><td><kbd>⌘F</kbd></td><td class="same">gleich</td></tr>
+          <tr><td>Vollbild</td><td>Doppelklick</td><td><kbd>⌃⌘F</kbd>, Doppelklick, <kbd>Esc</kbd> beendet</td><td class="diff">Mac-Standard</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>Die Lautstärketasten der Tastatur regeln weiter die Systemlautstärke. Der Regler in der App ist zusätzlich da, zum Beispiel um FritzTV leiser als Musik im Hintergrund zu stellen.</p>
+  </section>
+
+  <section>
+    <div class="head">
+      <div class="eyebrow">Umsetzung</div>
+      <h2>In vier Schritten, jeder für sich nutzbar</h2>
+    </div>
+    <div class="note">
+      <h3>Apple TV bleibt, wie es ist</h3>
+      <p>Wiedergabe, Programmdaten, Timeshift und Senderverwaltung (`AppModel`, `PlayerController`, `FritzTVKit`) bleiben gemeinsam. Neu sind nur Mac-eigene Ansichten in `App/macOS`. Die heutigen Tafeln bleiben für tvOS und verschwinden auf dem Mac schrittweise.</p>
+    </div>
+    <div class="phases">
+      <div class="phase">
+        <span class="step">Schritt 1</span>
+        <h3>Steuerleiste und Lautstärke</h3>
+        <ul><li>Schwebende Leiste mit Timeshift-Zeitleiste</li><li>Eigene Lautstärke, gespeichert, Stummschalten</li><li>Menüs „Wiedergabe“ und „Sender“</li><li>Auto-Ausblenden von Leiste und Zeiger</li></ul>
+        <div class="effort">Klein. Größter Gewinn im Alltag.</div>
+      </div>
+      <div class="phase">
+        <span class="step">Schritt 2</span>
+        <h3>Seitenleiste und Inspektor</h3>
+        <ul><li>Senderliste mit Suche und Favoriten</li><li>Sendungsinfo als Inspektor</li><li>Ton und Untertitel im Menü der Steuerleiste</li></ul>
+        <div class="effort">Mittel. Ersetzt die Tafeln über dem Bild.</div>
+      </div>
+      <div class="phase">
+        <span class="step">Schritt 3</span>
+        <h3>Einstellungsfenster</h3>
+        <ul><li>Register Allgemein, Wiedergabe, Sender, FRITZ!Box</li><li>Senderverwaltung als Liste mit Ziehen zum Sortieren</li><li>Tuner-Diagnose im Register FRITZ!Box</li></ul>
+        <div class="effort">Mittel. Viel bestehende Logik, neue Formulare.</div>
+      </div>
+      <div class="phase">
+        <span class="step">Schritt 4</span>
+        <h3>Eigene Fenster</h3>
+        <ul><li>Programmübersicht mit Trackpad-Scrollen und Popover</li><li>Mediathek mit Suchfeld in der Werkzeugleiste</li><li>Optional: schwebendes Mini-Fenster</li></ul>
+        <div class="effort">Größer. Die Programmübersicht ist heute auf Fernbedienung ausgelegt.</div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="head">
+      <div class="eyebrow">Zu entscheiden</div>
+      <h2>Offene Fragen</h2>
+    </div>
+    <ul class="questions">
+      <li><b>Seitenleiste beim Start sichtbar?</b><span>Vorschlag: sichtbar im Fenster, ausgeblendet im Vollbild. Die Einstellung wird gemerkt.</span></li>
+      <li><b>Pfeiltasten ↑/↓ für den Senderwechsel behalten?</b><span>Sie sind vom Fernseher gewohnt. In der Seitenleiste bewegen sie dann die Auswahl, ohne sofort umzuschalten; Return schaltet um.</span></li>
+      <li><b>Schwebendes Mini-Fenster statt Bild-in-Bild?</b><span>Echtes Bild-in-Bild von macOS geht mit VLC nicht direkt. Ein kleines Fenster „über allen anderen“ ist machbar und wirkt ähnlich.</span></li>
+      <li><b>Mit Schritt 1 anfangen?</b><span>Steuerleiste und Lautstärke bringen sofort etwas und ändern sonst wenig.</span></li>
+    </ul>
+  </section>
+</main>

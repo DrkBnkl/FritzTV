@@ -47,6 +47,8 @@ final class AppSettings: ObservableObject {
     /// Nur macOS: Dock-Vorschau bei minimiertem Fenster regelmäßig per Überblendung aktualisieren.
     /// Ist die Option deaktiviert, bleibt ein statisches Standbild des Minimierungszeitpunkts stehen.
     @Published var dockLivePreview: Bool { didSet { defaults.set(dockLivePreview, forKey: Keys.dockLivePreview) } }
+    /// Nur macOS: eigene Lautstärke der App (0–100), unabhängig von der Systemlautstärke.
+    @Published var volume: Int { didSet { defaults.set(volume, forKey: Keys.volume) } }
     /// Benutzername für die TR-064-Anmeldung (Sendersuchlauf). Das Kennwort liegt im Schlüsselbund.
     @Published var boxUsername: String { didSet { defaults.set(boxUsername, forKey: Keys.boxUsername) } }
     /// Zuletzt gesehene Sender (maximal 2 Schlüssel).
@@ -113,6 +115,7 @@ final class AppSettings: ObservableObject {
         match50Hz = defaults.bool(forKey: Keys.match50Hz)
         dockLivePreview = defaults.object(forKey: Keys.dockLivePreview) != nil ? defaults.bool(forKey: Keys.dockLivePreview) : true
         xmltvSource = defaults.string(forKey: Keys.xmltvSource) ?? ""
+        volume = min(max(defaults.object(forKey: Keys.volume) as? Int ?? 100, 0), 100)
         boxUsername = defaults.string(forKey: Keys.boxUsername) ?? ""
         recentKeys = Array((defaults.stringArray(forKey: Keys.recentKeys) ?? []).prefix(2))
         deadChannelIDs = Set(defaults.stringArray(forKey: Keys.deadChannels) ?? [])
@@ -169,6 +172,7 @@ final class AppSettings: ObservableObject {
         static let dockLivePreview = "dockLivePreview"
         static let xmltvSource = "xmltvSource"
         static let boxUsername = "boxUsername"
+        static let volume = "volume"
         static let lastChannel = "lastChannelKey"
         static let lineup = "lineupPreferences"
         static let recentKeys = "recentKeys"

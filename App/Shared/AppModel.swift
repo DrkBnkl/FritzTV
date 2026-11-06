@@ -117,6 +117,18 @@ final class AppModel: ObservableObject {
     /// Untertitel zum laufenden Mediathek-Video aus der Suche, falls vorhanden.
     private(set) var activeMediathekSubtitle: URL?
     @Published var searchResultDialog: (title: String, results: [MediathekSearchResult])?
+    /// Eigene Lautstärke (0–100), gespeichert. Auf dem Apple TV regelt die Fernbedienung den Fernseher.
+    @Published var volume: Int {
+        didSet {
+            settings.volume = volume
+            if volume > 0 { isMuted = false }
+            applyVolume()
+        }
+    }
+    /// Stumm geschaltet (nur für diese Sitzung, damit die App nie unerwartet stumm startet).
+    @Published var isMuted = false {
+        didSet { applyVolume() }
+    }
 
     let settings: AppSettings
     let player: PlayerController
@@ -144,6 +156,8 @@ final class AppModel: ObservableObject {
         } else {
             preferences = .standard
         }
+        volume = resolvedSettings.volume
+        resolvedPlayer.volume = resolvedSettings.volume
 
         resolvedPlayer.onVariantSuccess = { [weak self] variantKey, workingID, failedEarlier in
             Task { @MainActor in
@@ -320,6 +334,12 @@ final class AppModel: ObservableObject {
         }
     }
 
+    /// Nächster (+1) bzw. voriger (−1) Sender, unabhängig davon, was gerade eingeblendet ist (Menü, Steuerleiste).
+    func stepChannel(_ step: Int) {
+        if case .channelList = overlay {} else if overlay != .none { overlay = .none }
+        zap(step)
+    }
+
     private func zap(_ step: Int) {
         guard let next = lineup?.entry(after: currentNumber, step: step) else { return }
         currentNumber = next.number
@@ -412,6 +432,24 @@ final class AppModel: ObservableObject {
         guard loadState == .ready, player.status == .idle,
               activeHLSReplay == nil, activeMediathekURL == nil else { return }
         resume()
+    }
+
+    // MARK: Lautstärke
+
+    func changeVolume(by delta: Int) {
+        if isMuted, delta > 0 {
+            isMuted = false
+            return
+        }
+        volume = min(max(volume + delta, 0), 100)
+    }
+
+    func toggleMute() {
+        isMuted.toggle()
+    }
+
+    private func applyVolume() {
+        player.volume = isMuted ? 0 : volume
     }
 
     // MARK: Infoleiste

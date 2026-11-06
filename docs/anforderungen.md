@@ -44,13 +44,18 @@ Die FRITZ!Box liefert pro Client-IP nur einen RTSP-Stream. Ein zweiter Stream zu
 
 | Eingabe (Siri Remote / Mac) | Funktion |
 | :--- | :--- |
-| Hoch/Runter / `↑` `↓` | Senderwechsel mit Umlauf am Listenende, 350 ms Entprellung |
+| Hoch/Runter / `↑` `↓`, `⌘→` `⌘←` | Senderwechsel mit Umlauf am Listenende, 350 ms Entprellung |
 | Nach oben wischen | Senderleiste (`ChannelFooter`), blendet nach 8 s ohne Eingabe aus |
 | Klick, nach unten wischen / `Return`, `⌘I`, Rechtsklick | Sendungsinfo (`InfoPanel`): Tonspur, Untertitel, „Von Anfang an“, „In Mediathek suchen“, Einstellungen |
-| Zurück / `Esc`, `⌘L`, Klick ins Bild | Senderliste (`ChannelListOverlay`); Fokusziel beim Öffnen einstellbar (Programmübersicht, letzter oder aktueller Sender) |
+| Zurück / `Esc`, `⌃⌘S`, Klick ins Bild | Senderliste (`ChannelListOverlay`); Fokusziel beim Öffnen einstellbar (Programmübersicht, letzter oder aktueller Sender) |
 | Play/Pause / Leertaste, `⌘P` | Timeshift anhalten/fortsetzen |
-| Links/Rechts / `←` `→`, Klick in Zeitleiste | Timeshift spulen; im Live-Bild Ziffern-Direktwahl |
-| – / Doppelklick ins Bild | Vollbild umschalten |
+| Links/Rechts / `←` `→`, Ziehen in der Zeitleiste | Timeshift spulen; im Live-Bild Ziffern-Direktwahl |
+| – / `⌘L`, Klick auf „LIVE“ | Timeshift: zurück zum Live-Bild |
+| – / `⇧⌘←` | Von Anfang an (`PublicHLSChannels`) |
+| – / `⌘↑` `⌘↓`, `⌥⌘↓` | Lautstärke der App (`AppModel.volume`, gespeichert in `AppSettings.volume`), Ton aus (nur für die Sitzung) |
+| – / Doppelklick ins Bild, `⌃⌘F` | Vollbild umschalten |
+
+**Mac-Steuerleiste (`MacControlBar`, `MacCommands` in `App/macOS`):** Ersetzt auf dem Mac Infoleiste und Timeshift-Leiste. Sichtbar bei Mausbewegung (`MacControlsState`, 3 s Nachlauf, bleibt stehen, solange der Zeiger auf der Leiste liegt), nach dem Umschalten (`bannerVisible`) und während der Pause. Inhalt: Sender und Sendung, Timeshift-Zeitleiste (Breite = Puffer, auf 5 min gerundet, höchstens die eingestellte Pufferlänge; Ziehen springt per `seekToBehind`), „LIVE“-Knopf, Menü für Tonspur und Untertitel, Lautstärke, Vollbild. Das Fenster hat keine sichtbare Titelleiste; die Fensterknöpfe blenden sich mit der Leiste aus. Die Lautstärke wird auf Live- und Mitschnitt-Player angewendet; Stummschalten setzt sie auf 0, damit es sich nicht mit dem Stummschalten beim Wechsel zwischen Live-Bild und Mitschnitt überschneidet. Menüs „Wiedergabe“ und „Sender“ enthalten alle Befehle; ⌘-Befehle für das Live-Bild sind gesperrt, solange Einstellungen, Suchergebnisse oder Mediathek-Wiedergabe offen sind.
 
 ### Programmübersicht (`EPGOverviewView`)
 
