@@ -32,7 +32,7 @@ final class RadioPlayer: ObservableObject {
     /// Neue Verbindungsversuche nach einem Abriss, bevor der Sender als gestört gilt.
     private static let maxReconnects = 3
     /// Puffer für den Netzwerkempfang in Millisekunden.
-    private static let networkCaching = 2000
+    private static let networkCaching = 3000
 
     private let mediaPlayer = VLCMediaPlayer(library: library)
     let epgStore: EPGStore
@@ -311,9 +311,15 @@ struct RadioAudioFormat: Equatable {
 }
 
 /// Leitet SDT-/EIT-Meldungen von libVLC an den `EITLogParser` weiter, getrennt je Absender.
+///
+/// Der Rückruf läuft im Empfangsthread von libVLC. Kurz nach dem Einschalten schickt die Box das
+/// Programmheft aller Sender des Kanals, dann kommen über 10 000 Meldungen pro Sekunde. Würden sie
+/// hier ausgewertet, stünde der Empfang still und der Ton setzte aus. Daher nur ein schneller
+/// Vorfilter hier, die Auswertung läuft in einer eigenen Warteschlange.
 private final class EITLogReceiver: NSObject, VLCLogging, @unchecked Sendable {
     var level: VLCLogLevel = .debug
     private let parser: EITLogParser
+    private let queue = DispatchQueue(label: "de.home.fritzradio.eit", qos: .utility)
 
     init(parser: EITLogParser) {
         self.parser = parser
@@ -321,9 +327,21 @@ private final class EITLogReceiver: NSObject, VLCLogging, @unchecked Sendable {
     }
 
     func handleMessage(_ message: String, logLevel level: VLCLogLevel, context: VLCLogContext?) {
+        if Self.isTimingProblem(message) {
+            radioLog.notice("VLC: \(message, privacy: .public)")
+            return
+        }
         guard EITLogParser.isRelevant(message) else { return }
         let source = context.map { Int(truncatingIfNeeded: $0.objectId) } ?? 0
-        parser.processLine(message, source: source)
+        queue.async { [parser] in parser.processLine(message, source: source) }
+    }
+
+    /// Meldungen der Tonausgabe, wenn der Takt nicht passt (hörbare Aussetzer). Nur der Zeilenanfang
+    /// wird geprüft, damit der Filter bei vielen Meldungen nichts kostet.
+    private static func isTimingProblem(_ message: String) -> Bool {
+        guard message.first == "p" else { return false }
+        return message.hasPrefix("playback way too") || message.hasPrefix("playback too late (")
+            && message.contains("flushing")
     }
 }
 
