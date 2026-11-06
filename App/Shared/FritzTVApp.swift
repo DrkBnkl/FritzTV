@@ -41,6 +41,8 @@ struct FritzTVApp: App {
         }
         #if os(macOS)
         .defaultSize(width: 960, height: 540)
+        // Das Bild reicht bis an den oberen Rand; die Fensterknöpfe blenden sich mit der Steuerleiste aus.
+        .windowStyle(.hiddenTitleBar)
         #endif
         #if os(macOS)
         .commands {
@@ -50,61 +52,7 @@ struct FritzTVApp: App {
                 }
                 .keyboardShortcut(",", modifiers: .command)
             }
-            CommandMenu("Steuerung") {
-                Button("Programmübersicht") {
-                    if model.showEPGOverview {
-                        model.closeEPGOverview()
-                    } else {
-                        model.openEPGOverview()
-                    }
-                }
-                .keyboardShortcut("e", modifiers: .command)
-
-                Button("Sendungsinfo") {
-                    if case .info = model.overlay {
-                        model.overlay = .none
-                    } else {
-                        model.openInfoPanel()
-                    }
-                }
-                .keyboardShortcut("i", modifiers: .command)
-
-                Button("Senderliste") {
-                    if case .channelList = model.overlay {
-                        model.overlay = .none
-                    } else {
-                        model.openChannelList()
-                    }
-                }
-                .keyboardShortcut("l", modifiers: .command)
-
-                Divider()
-
-                Button("Anhalten / Weiter (Timeshift)") {
-                    model.player.togglePause()
-                    model.showBanner()
-                }
-                .keyboardShortcut("p", modifiers: .command)
-
-                if model.player.isTimeshifted {
-                    Button("Zum Live-Bild springen") {
-                        model.player.goLive()
-                    }
-                    .keyboardShortcut("0", modifiers: .command)
-                }
-
-                Divider()
-
-                Button("Nächster Sender") {
-                    model.handle(.up)
-                }
-                .keyboardShortcut(.upArrow, modifiers: .command)
-
-                Button("Vorheriger Sender") {
-                    model.handle(.down)
-                }
-                .keyboardShortcut(.downArrow, modifiers: .command)
-            }
+            MacCommands(model: model, player: model.player)
         }
         #endif
     }

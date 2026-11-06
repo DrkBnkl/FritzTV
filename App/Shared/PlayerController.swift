@@ -87,6 +87,13 @@ final class PlayerController: ObservableObject {
     /// Gesetzt, solange der Mitschnitt statt des Live-Bilds zu sehen ist.
     @Published private(set) var isReplaying = false
 
+    /// Eigene Lautstärke der App (0–100), unabhängig von der Systemlautstärke.
+    /// Gilt für Live-Bild und Mitschnitt; stumm geschaltet wird über die Lautstärke 0, damit sich
+    /// das nicht mit dem Stummschalten beim Wechsel zwischen Live-Bild und Mitschnitt überschneidet.
+    var volume = 100 {
+        didSet { applyVolume() }
+    }
+
     /// Bild ist da. `channelID`: zu merkende Variante (nur bei gewünschter Qualität, sonst `nil`);
     /// `staleIDs`: vorher fehlgeschlagene Varianten auf einer anderen Frequenz (veraltete Einträge).
     var onVariantSuccess: ((_ variantKey: String, _ channelID: String?, _ staleIDs: [String]) -> Void)?
@@ -324,6 +331,9 @@ final class PlayerController: ObservableObject {
             if wasPlaying { scheduleReconnect() } else { handleNoData() }
             return
         }
+
+        // VLC legt die Tonausgabe je Sendung neu an und beginnt dann wieder mit voller Lautstärke.
+        applyVolume()
 
         if mediaPlayer.isPlaying && hasMedia {
             if !wasPlaying {
@@ -1297,6 +1307,81 @@ final class PlayerController: ObservableObject {
             return name
         }
         return nil
+    }
+}
+
+
+// MARK: Lautstärke, Puffer, Spurauswahl (Mac-Steuerleiste und Menüs)
+
+/// Eine wählbare Ton- oder Untertitelspur. `id` ist die VLC-Spurnummer, −1 = aus.
+struct TrackOption: Identifiable, Hashable {
+    let id: Int32
+    let name: String
+}
+
+extension PlayerController {
+    fileprivate func applyVolume() {
+        let level = Int32(min(max(volume, 0), 100))
+        if let audio = mediaPlayer.audio, audio.volume != level { audio.volume = level }
+        if let audio = replayPlayer.audio, audio.volume != level { audio.volume = level }
+    }
+
+    /// Wie weit der Puffer zurückreicht (Sekunden bis jetzt), 0 ohne Mitschnitt.
+    var bufferedSeconds: TimeInterval {
+        guard options?.timeshift == true, let first = availableSegments.first else { return 0 }
+        return max(0, Date().timeIntervalSince(first.startedAt))
+    }
+
+    var audioTrackOptions: [TrackOption] {
+        let names = (mediaPlayer.audioTrackNames as? [String]) ?? []
+        let tracks = zip(names, indexes(mediaPlayer.audioTrackIndexes)).filter { $0.1 >= 0 }
+        let cleaned = tracks.map { track -> String in
+            let raw = track.0.lowercased()
+            let base = cleanAudioName(track.0)
+            if raw.contains("audio description") || raw.contains("visually impaired") || raw.contains("audiodeskription") {
+                return "\(base.replacingOccurrences(of: " (Dolby Digital)", with: "")) · Audiodeskription"
+            }
+            if raw.contains("clean audio") || raw.contains("hearing impaired") {
+                return "Klare Sprache"
+            }
+            return base
+        }
+        return tracks.enumerated().map { offset, track in
+            // Gleich lautende Spuren (z. B. zweimal „Deutsch“, eine mit Audiodeskription) unterscheidbar halten.
+            let name = cleaned.filter { $0 == cleaned[offset] }.count > 1 ? track.0 : cleaned[offset]
+            return TrackOption(id: track.1, name: name)
+        }
+    }
+
+    var currentAudioTrackID: Int32 { mediaPlayer.currentAudioTrackIndex }
+
+    func selectAudioTrack(_ id: Int32) {
+        guard id != mediaPlayer.currentAudioTrackIndex else { return }
+        mediaPlayer.currentAudioTrackIndex = id
+        if isReplaying { replayPlayer.currentAudioTrackIndex = id }
+        applyAudioDelay()
+        refreshTrackNames()
+    }
+
+    /// Untertitel einschließlich „Aus“ (−1).
+    var subtitleOptions: [TrackOption] {
+        let names = (mediaPlayer.videoSubTitlesNames as? [String]) ?? []
+        let ids = indexes(mediaPlayer.videoSubTitlesIndexes)
+        let allowed = Set(subtitleTrackIDs())
+        var options = [TrackOption(id: -1, name: "Aus")]
+        for (name, id) in zip(names, ids) where id >= 0 && allowed.contains(id) {
+            options.append(TrackOption(id: id, name: cleanSubtitleName(name)))
+        }
+        return options
+    }
+
+    var currentSubtitleID: Int32 { mediaPlayer.currentVideoSubTitleIndex }
+
+    func selectSubtitle(_ id: Int32) {
+        guard id != mediaPlayer.currentVideoSubTitleIndex else { return }
+        mediaPlayer.currentVideoSubTitleIndex = id
+        if isReplaying { replayPlayer.currentVideoSubTitleIndex = id }
+        refreshTrackNames()
     }
 }
 
