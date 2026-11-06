@@ -31,6 +31,8 @@ final class RadioPlayer: ObservableObject {
     private static let stallTimeout: TimeInterval = 8
     /// Neue Verbindungsversuche nach einem Abriss, bevor der Sender als gestört gilt.
     private static let maxReconnects = 3
+    /// Puffer für den Netzwerkempfang in Millisekunden.
+    private static let networkCaching = 3000
 
     private let mediaPlayer = VLCMediaPlayer(library: library)
     let epgStore: EPGStore
@@ -59,6 +61,17 @@ final class RadioPlayer: ObservableObject {
     private var monitorTask: Task<Void, Never>?
     /// Gelesene Bytes über die letzten Sekunden, für die geschätzte Bitrate.
     private var byteSamples: [(date: Date, bytes: Int)] = []
+    /// Fehlerzähler von libVLC beim letzten Blick, um Aussetzer zu protokollieren.
+    private var lastErrorCounts: (corrupted: Int32, discontinuity: Int32, lostAudio: Int32) = (0, 0, 0)
+    /// Codec, Abtastrate und Kanäle der Tonspur, sobald libVLC sie kennt.
+    private var audioTrack: AudioTrack?
+
+    private struct AudioTrack {
+        var codec: String
+        var sampleRate: Int
+        var channels: Int
+        var kilobitsPerSecond: Int
+    }
 
     /// Gewünschte Lautstärke (0–100). Sie wird bei jeder neuen Verbindung erneut gesetzt:
     /// Solange libVLC noch keine Tonausgabe geöffnet hat, geht ein gesetzter Wert sonst verloren.
@@ -127,7 +140,9 @@ final class RadioPlayer: ObservableObject {
         channel = variant
         radioLog.notice("Verbinde \(variant.name, privacy: .public): \(variant.streamURL.absoluteString, privacy: .public)")
         let media = VLCMedia(url: variant.streamURL)
-        media.addOption(":network-caching=\(variant.networkCachingMilliseconds ?? 1000)")
+        // Die Box liefert nur RTP über UDP; im WLAN kommen Pakete in Schüben. Mehr Puffer als die
+        // 1000 ms aus der Senderliste verhindert kurze Aussetzer, die Verzögerung stört beim Radio nicht.
+        media.addOption(":network-caching=\(max(variant.networkCachingMilliseconds ?? 0, Self.networkCaching))")
         mediaPlayer.media = media
         mediaPlayer.play()
         applyVolume()
@@ -137,6 +152,8 @@ final class RadioPlayer: ObservableObject {
         status = .connecting
         audioFormat = nil
         byteSamples = []
+        lastErrorCounts = (0, 0, 0)
+        audioTrack = nil
         monitorTask?.cancel()
         monitorTask = Task { [weak self] in
             while !Task.isCancelled {
@@ -196,18 +213,31 @@ extension RadioPlayer {
     /// DVB meist nicht, dann wird sie aus den gelesenen Bytes geschätzt.
     private func updateAudioFormat(now: Date) {
         guard let media = mediaPlayer.media else { return }
-        let bytes = Int(media.statistics.demuxReadBytes)
+        let stats = media.statistics
+        let counts = (stats.demuxCorrupted, stats.demuxDiscontinuity, stats.lostAudioBuffers)
+        if counts.0 > lastErrorCounts.corrupted || counts.1 > lastErrorCounts.discontinuity || counts.2 > lastErrorCounts.lostAudio {
+            radioLog.notice("Aussetzer: beschädigt \(counts.0), Lücken \(counts.1), verlorene Tonpuffer \(counts.2)")
+        }
+        lastErrorCounts = counts
+        let bytes = Int(stats.demuxReadBytes)
         if let last = byteSamples.last, bytes < last.bytes { byteSamples = [] }
         byteSamples.append((now, bytes))
         byteSamples.removeAll { now.timeIntervalSince($0.date) > Self.bitrateWindow }
 
-        let tracks = (media.tracksInformation as? [[String: Any]]) ?? []
-        guard let track = tracks.first(where: { $0[VLCMediaTracksInformationType] as? String == VLCMediaTracksInformationTypeAudio }),
-              let fourcc = (track[VLCMediaTracksInformationCodec] as? NSNumber)?.uint32Value
-        else { return }
-        let sampleRate = (track[VLCMediaTracksInformationAudioRate] as? NSNumber)?.intValue ?? 0
-        let channels = (track[VLCMediaTracksInformationAudioChannelsNumber] as? NSNumber)?.intValue ?? 0
-        var kbps = ((track[VLCMediaTracksInformationBitrate] as? NSNumber)?.intValue ?? 0) / 1000
+        // Die Spurinformationen ändern sich während der Wiedergabe nicht: einmal lesen.
+        if audioTrack == nil {
+            let tracks = (media.tracksInformation as? [[String: Any]]) ?? []
+            guard let track = tracks.first(where: { $0[VLCMediaTracksInformationType] as? String == VLCMediaTracksInformationTypeAudio }),
+                  let fourcc = (track[VLCMediaTracksInformationCodec] as? NSNumber)?.uint32Value
+            else { return }
+            audioTrack = AudioTrack(codec: RadioAudioFormat.codecName(fourcc: fourcc),
+                                    sampleRate: (track[VLCMediaTracksInformationAudioRate] as? NSNumber)?.intValue ?? 0,
+                                    channels: (track[VLCMediaTracksInformationAudioChannelsNumber] as? NSNumber)?.intValue ?? 0,
+                                    kilobitsPerSecond: ((track[VLCMediaTracksInformationBitrate] as? NSNumber)?.intValue ?? 0) / 1000)
+        }
+        guard let track = audioTrack else { return }
+
+        var kbps = track.kilobitsPerSecond
         var estimated = false
         if kbps <= 0, let first = byteSamples.first, let last = byteSamples.last {
             let seconds = last.date.timeIntervalSince(first.date)
@@ -219,11 +249,11 @@ extension RadioPlayer {
         }
         var shown = kbps > 0 ? Self.rounded(kbps) : nil
         // Kleine Schwankungen der Schätzung nicht anzeigen.
-        if estimated, let shown0 = shown, let previous = audioFormat?.kilobitsPerSecond, abs(shown0 - previous) <= 8 {
+        if estimated, let value = shown, let previous = audioFormat?.kilobitsPerSecond, abs(value - previous) <= 8 {
             shown = previous
         }
-        let format = RadioAudioFormat(codec: RadioAudioFormat.codecName(fourcc: fourcc), sampleRate: sampleRate,
-                                      channels: channels, kilobitsPerSecond: shown, isEstimate: estimated)
+        let format = RadioAudioFormat(codec: track.codec, sampleRate: track.sampleRate, channels: track.channels,
+                                      kilobitsPerSecond: shown, isEstimate: estimated)
         if format != audioFormat {
             audioFormat = format
             radioLog.debug("Tonformat \(format.summary, privacy: .public) (roh \(kbps) kbit/s)")
@@ -281,9 +311,15 @@ struct RadioAudioFormat: Equatable {
 }
 
 /// Leitet SDT-/EIT-Meldungen von libVLC an den `EITLogParser` weiter, getrennt je Absender.
+///
+/// Der Rückruf läuft im Empfangsthread von libVLC. Kurz nach dem Einschalten schickt die Box das
+/// Programmheft aller Sender des Kanals, dann kommen über 10 000 Meldungen pro Sekunde. Würden sie
+/// hier ausgewertet, stünde der Empfang still und der Ton setzte aus. Daher nur ein schneller
+/// Vorfilter hier, die Auswertung läuft in einer eigenen Warteschlange.
 private final class EITLogReceiver: NSObject, VLCLogging, @unchecked Sendable {
     var level: VLCLogLevel = .debug
     private let parser: EITLogParser
+    private let queue = DispatchQueue(label: "de.home.fritzradio.eit", qos: .utility)
 
     init(parser: EITLogParser) {
         self.parser = parser
@@ -291,9 +327,21 @@ private final class EITLogReceiver: NSObject, VLCLogging, @unchecked Sendable {
     }
 
     func handleMessage(_ message: String, logLevel level: VLCLogLevel, context: VLCLogContext?) {
+        if Self.isTimingProblem(message) {
+            radioLog.notice("VLC: \(message, privacy: .public)")
+            return
+        }
         guard EITLogParser.isRelevant(message) else { return }
         let source = context.map { Int(truncatingIfNeeded: $0.objectId) } ?? 0
-        parser.processLine(message, source: source)
+        queue.async { [parser] in parser.processLine(message, source: source) }
+    }
+
+    /// Meldungen der Tonausgabe, wenn der Takt nicht passt (hörbare Aussetzer). Nur der Zeilenanfang
+    /// wird geprüft, damit der Filter bei vielen Meldungen nichts kostet.
+    private static func isTimingProblem(_ message: String) -> Bool {
+        guard message.first == "p" else { return false }
+        return message.hasPrefix("playback way too") || message.hasPrefix("playback too late (")
+            && message.contains("flushing")
     }
 }
 
