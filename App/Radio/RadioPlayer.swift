@@ -212,22 +212,25 @@ extension RadioPlayer {
         if kbps <= 0, let first = byteSamples.first, let last = byteSamples.last {
             let seconds = last.date.timeIntervalSince(first.date)
             if seconds >= 3 {
-                // Abzüglich Transportstrom-Hülle (TS- und PES-Köpfe, Tabellen).
-                kbps = Int(Double(last.bytes - first.bytes) * 8 / seconds / 1000 * Self.payloadShare)
+                // Die Demux-Bytes sind die Nutzdaten des Tons (mit ffprobe abgeglichen).
+                kbps = Int(Double(last.bytes - first.bytes) * 8 / seconds / 1000)
                 estimated = true
             }
         }
+        var shown = kbps > 0 ? Self.rounded(kbps) : nil
+        // Kleine Schwankungen der Schätzung nicht anzeigen.
+        if estimated, let shown0 = shown, let previous = audioFormat?.kilobitsPerSecond, abs(shown0 - previous) <= 8 {
+            shown = previous
+        }
         let format = RadioAudioFormat(codec: RadioAudioFormat.codecName(fourcc: fourcc), sampleRate: sampleRate,
-                                      channels: channels, kilobitsPerSecond: kbps > 0 ? Self.rounded(kbps) : nil,
-                                      isEstimate: estimated)
+                                      channels: channels, kilobitsPerSecond: shown, isEstimate: estimated)
         if format != audioFormat {
             audioFormat = format
-            radioLog.notice("Tonformat \(format.summary, privacy: .public) (roh \(kbps) kbit/s)")
+            radioLog.debug("Tonformat \(format.summary, privacy: .public) (roh \(kbps) kbit/s)")
         }
     }
 
-    private static let bitrateWindow: TimeInterval = 10
-    private static let payloadShare = 0.92
+    private static let bitrateWindow: TimeInterval = 20
 
     /// Auf 8 kbit/s runden, damit die Anzeige nicht ständig springt.
     private static func rounded(_ kbps: Int) -> Int {
