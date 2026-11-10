@@ -31,7 +31,7 @@ struct RootView: View {
                 }
                 // In der Programmübersicht läuft das Bild verkleinert im Vorschaufenster weiter.
                 // Dieselbe Ansicht wird nur verschoben (kein zweiter Player, kein Neuaufbau).
-                PlayerSurface(player: player.mediaPlayer, previewFrame: previewFrame, dockLivePreview: model.settings.dockLivePreview)
+                PlayerSurface(player: player.mediaPlayer, previewFrame: previewFrame, dockLivePreview: model.settings.dockLivePreview, zoom: player.liveZoom)
                     .modifier(EPGPreviewPlacement(
                         frame: previewFrame,
                         channelText: model.currentEntry.map { "\($0.number) · \($0.group.displayName)" } ?? "Live-TV",
@@ -46,7 +46,7 @@ struct RootView: View {
                     Color.black.ignoresSafeArea()
                 }
                 // Timeshift: Mitschnitt-Wiedergabe liegt über dem stumm weiterlaufenden Live-Bild.
-                PlayerSurface(player: player.replayPlayer, previewFrame: previewFrame, dockLivePreview: model.settings.dockLivePreview)
+                PlayerSurface(player: player.replayPlayer, previewFrame: previewFrame, dockLivePreview: model.settings.dockLivePreview, zoom: player.replayZoom)
                     .opacity(player.isReplaying ? 1 : 0)
                     .allowsHitTesting(false)
                     .modifier(EPGPreviewPlacement(frame: previewFrame, showOverlay: false))

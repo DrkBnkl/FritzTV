@@ -344,46 +344,48 @@ final class PlayerController: ObservableObject {
     }
 
     private var lastLoggedState: Int = -1
-    /// Gesetzter Bildbeschnitt je Player (`nil` = keiner).
-    private var appliedCrop: [ObjectIdentifier: String] = [:]
+    /// Vergrößerung der Bildfläche für Overscan und Standardformat bei SD (`PictureCrop`), getrennt
+    /// für Live- und Mitschnitt-Player. Die Bildfläche (`PlayerSurface`) setzt sie um.
+    @Published private(set) var liveZoom: PictureCrop.Zoom = .none
+    @Published private(set) var replayZoom: PictureCrop.Zoom = .none
+    /// Videoformat je geöffnetem Medium nur einmal protokollieren.
+    private var loggedCropFormat = false
 
-    /// Prüft die Videospur und setzt bei SD-Sendern den Bildausschnitt (Overscan, Standardformat;
-    /// `PictureCrop`), auch wenn das Format mitten in der Sendung wechselt.
+    private func setZoom(_ zoom: PictureCrop.Zoom, for player: VLCMediaPlayer) {
+        if player === replayPlayer {
+            if replayZoom != zoom { replayZoom = zoom }
+        } else if liveZoom != zoom {
+            liveZoom = zoom
+        }
+    }
+
+    /// Prüft die Videospur und passt bei SD-Sendern die Vergrößerung an, auch wenn das Format mitten
+    /// in der Sendung wechselt.
     private func updateCrop(for player: VLCMediaPlayer, isSD: Bool) {
         guard isSD, let tracks = player.media?.tracksInformation as? [[String: Any]],
               let video = tracks.first(where: { ($0[VLCMediaTracksInformationType] as? String) == VLCMediaTracksInformationTypeVideo })
         else { return }
-        func value(_ key: String) -> Double { (video[key] as? NSNumber)?.doubleValue ?? 0 }
+        func value(_ key: String) -> Int { (video[key] as? NSNumber)?.intValue ?? 0 }
         let width = value(VLCMediaTracksInformationVideoWidth)
         let height = value(VLCMediaTracksInformationVideoHeight)
-        let den = value(VLCMediaTracksInformationSourceAspectRatioDenominator)
-        // Spur noch ohne Format: beim Öffnen gesetzten Beschnitt beibehalten.
-        guard width > 0, height > 0, den > 0 else { return }
-        let crop = PictureCrop.geometry(width: Int(width), height: Int(height),
-                                        sampleAspect: value(VLCMediaTracksInformationSourceAspectRatio) / den)
-        let key = ObjectIdentifier(player)
-        guard appliedCrop[key] != crop else { return }
-        appliedCrop[key] = crop
-        Self.setCrop(crop, on: player)
-        DebugLog.log("Bildbeschnitt: \(crop ?? "aus") (\(Int(width))×\(Int(height)))")
-    }
-
-    private static func setCrop(_ crop: String?, on player: VLCMediaPlayer) {
-        if let crop {
-            crop.withCString { player.videoCropGeometry = UnsafeMutablePointer(mutating: $0) }
-        } else {
-            player.videoCropGeometry = nil
+        let sarNum = value(VLCMediaTracksInformationSourceAspectRatio)
+        let sarDen = value(VLCMediaTracksInformationSourceAspectRatioDenominator)
+        // Spur noch ohne Format: beim Öffnen gesetzte Vergrößerung beibehalten.
+        guard width > 0, height > 0, sarNum > 0, sarDen > 0,
+              let zoom = PictureCrop.zoom(width: width, height: height, sampleAspect: Double(sarNum) / Double(sarDen))
+        else { return }
+        if !loggedCropFormat {
+            loggedCropFormat = true
+            DebugLog.log("Videoformat: \(width)×\(height), SAR \(sarNum):\(sarDen), Vergrößerung \(String(format: "%.4f × %.4f", zoom.x, zoom.y))")
         }
+        setZoom(zoom, for: player)
     }
 
-    /// Vor dem Öffnen eines Mediums: Der Beschnitt hängt am Player und gälte sonst weiter. SD-Sender
-    /// bekommen gleich den Ausschnitt für 720 × 576 (16:9), damit er ab dem ersten Bild gilt. Er muss
-    /// am Player gesetzt werden: Die Videoausgabe von VLC hängt am Player, nicht am Medium, und erbt
-    /// eine Medienoption `:crop=…` deshalb nicht. Weicht die Videospur ab, korrigiert `updateCrop`.
+    /// Vor dem Öffnen eines Mediums: SD-Sender bekommen gleich die Vergrößerung für 720 × 576 (16:9),
+    /// HD-Sender keine. Weicht die Videospur ab, korrigiert `updateCrop`.
     private func resetCrop(for player: VLCMediaPlayer, isSD: Bool) {
-        let crop = isSD ? PictureCrop.defaultSDGeometry : nil
-        appliedCrop[ObjectIdentifier(player)] = crop
-        Self.setCrop(crop, on: player)
+        loggedCropFormat = false
+        setZoom(isSD ? PictureCrop.defaultSD : .none, for: player)
     }
 
     private func poll() {
