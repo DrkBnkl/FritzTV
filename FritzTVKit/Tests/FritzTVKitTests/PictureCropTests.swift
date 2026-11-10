@@ -11,12 +11,12 @@ final class PictureCropTests: XCTestCase {
 
     func testPALWidescreenGetsOverscanAndExact16By9() {
         let geometry = PictureCrop.geometry(width: 720, height: 576, sampleAspect: 16.0 / 11.0)
-        XCTAssertEqual(geometry, "670x548+26+14")
+        XCTAssertEqual(geometry, "684x560+18+8")
         XCTAssertEqual(aspect(of: geometry, sampleAspect: 16.0 / 11.0)!, 16.0 / 9.0, accuracy: 0.01)
     }
 
     func testAlignedDecoderHeightUsesVisibleLines() {
-        XCTAssertEqual(PictureCrop.geometry(width: 720, height: 578, sampleAspect: 16.0 / 11.0), "670x548+26+14")
+        XCTAssertEqual(PictureCrop.geometry(width: 720, height: 578, sampleAspect: 16.0 / 11.0), "684x560+18+8")
     }
 
     func testExact16By9SourceAlsoGetsOverscan() {
@@ -43,6 +43,6 @@ final class PictureCropTests: XCTestCase {
     }
 
     func testDefaultMatchesPALWidescreen() {
-        XCTAssertEqual(PictureCrop.defaultSDGeometry, "670x548+26+14")
+        XCTAssertEqual(PictureCrop.defaultSDGeometry, "684x560+18+8")
     }
 }

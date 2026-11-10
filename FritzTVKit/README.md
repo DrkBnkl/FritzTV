@@ -24,7 +24,7 @@ Swift-Paket ohne UI-Abhängigkeiten mit der plattformunabhängigen Logik von Fri
 | `FritzBoxStationSearch` | TR-064-Sendersuchlauf (`X_AVM-DE_Media:1`, Port 49000, HTTP-Digest) |
 | `FritzBoxTuner` | Tunerstatus per UPnP (`satip:1`, Port 49000) |
 | `PlaybackStatistics` | Bild- und Empfangsstatistik des laufenden Streams |
-| `PictureCrop` | Bildausschnitt für SD: Overscan (2,5 % je Rand) und exakt 16:9 bzw. 4:3 |
+| `PictureCrop` | Bildausschnitt für SD: Overscan (1,5 % je Rand) und exakt 16:9 bzw. 4:3 |
 | `RadioStations` | Radiosenderliste für FritzRadio (ohne Senderplätze) |
 | `ChannelLogo` | Logo-URLs nach dem Namensschema des AVM-Logoservers |
 | `TopShelfStore` | Senderdaten für die tvOS-Top-Shelf-Erweiterung |
