@@ -17,18 +17,22 @@ final class MacControlsState: ObservableObject {
 
     private static let idleDelay: TimeInterval = 3
     private var lastMove = Date.distantPast
+    /// Liegt der Zeiger über dem Bild? Außerhalb des Fensters wird er nie ausgeblendet.
+    private var pointerInside = false
     private var hideTask: Task<Void, Never>?
     private var observers: [NSObjectProtocol] = []
 
-    var hoveringBar = false {
-        didSet {
-            guard hoveringBar != oldValue else { return }
-            if hoveringBar {
-                hideTask?.cancel()
-                hideTask = nil
-            } else {
-                pointerMoved()
-            }
+    private(set) var hoveringBar = false
+
+    /// Zeiger liegt auf der Leiste bzw. hat sie verlassen (`onHover`).
+    func setHoveringBar(_ hovering: Bool) {
+        guard hovering != hoveringBar else { return }
+        hoveringBar = hovering
+        if hovering {
+            hideTask?.cancel()
+            hideTask = nil
+        } else {
+            pointerMoved()
         }
     }
 
@@ -52,6 +56,7 @@ final class MacControlsState: ObservableObject {
     /// nur eine Aufgabe, die bis drei Sekunden nach der letzten Bewegung wartet.
     func pointerMoved() {
         lastMove = Date()
+        pointerInside = true
         if !pointerActive {
             withAnimation(.easeOut(duration: 0.15)) { pointerActive = true }
         }
@@ -61,14 +66,28 @@ final class MacControlsState: ObservableObject {
 
     /// Maus hat das Fenster verlassen: bald ausblenden.
     func pointerLeft() {
+        pointerInside = false
         guard !hoveringBar else { return }
         lastMove = Date().addingTimeInterval(0.6 - Self.idleDelay)
-        if hideTask == nil, pointerActive {
-            hideTask = Task { [weak self] in await self?.hideWhenIdle(hideCursor: false) }
+        guard pointerActive else { return }
+        // Eine laufende Aufgabe schläft noch bis zum alten Zeitpunkt: neu starten.
+        hideTask?.cancel()
+        hideTask = Task { [weak self] in await self?.hideWhenIdle() }
+    }
+
+    /// Die Leiste verschwindet (z. B. weil ein Overlay aufgeht): Ein Hover-Ende meldet SwiftUI
+    /// dann nicht immer, ohne Rücksetzen bliebe die Leiste danach dauerhaft stehen.
+    /// Das ist keine Mausbewegung: Die Leiste darf dadurch nicht wieder erscheinen (sonst hielte
+    /// sie sich unter einem ruhenden Zeiger selbst fest, etwa nach dem Umschalten per Tastatur).
+    func barDisappeared() {
+        guard hoveringBar else { return }
+        hoveringBar = false
+        if pointerActive, hideTask == nil {
+            hideTask = Task { [weak self] in await self?.hideWhenIdle() }
         }
     }
 
-    private func hideWhenIdle(hideCursor: Bool = true) async {
+    private func hideWhenIdle() async {
         while true {
             let remaining = lastMove.addingTimeInterval(Self.idleDelay).timeIntervalSinceNow
             if remaining <= 0 { break }
@@ -78,7 +97,7 @@ final class MacControlsState: ObservableObject {
         hideTask = nil
         guard !hoveringBar else { return }
         withAnimation(.easeIn(duration: 0.3)) { pointerActive = false }
-        if hideCursor, allowsCursorHiding() {
+        if pointerInside, allowsCursorHiding() {
             NSCursor.setHiddenUntilMouseMoves(true)
         }
     }
@@ -152,7 +171,8 @@ struct MacControlBar: View {
             .shadow(color: .black.opacity(0.35), radius: 16, y: 6)
             .environment(\.colorScheme, .dark)
             .frame(maxWidth: 720)
-            .onHover { controls.hoveringBar = $0 }
+            .onHover { controls.setHoveringBar($0) }
+            .onDisappear { controls.barDisappeared() }
             .padding(.horizontal, 20)
             .padding(.bottom, 18)
         }
@@ -344,7 +364,7 @@ private struct VolumeControl: View {
             }
             .help(model.isMuted ? "Ton an (⌥⌘↓)" : "Ton aus (⌥⌘↓)")
             Slider(value: Binding(get: { Double(model.isMuted ? 0 : model.volume) },
-                                  set: { model.volume = Int($0.rounded()) }),
+                                  set: { model.setVolume(Int($0.rounded())) }),
                    in: 0...100)
                 .controlSize(.mini)
                 .frame(width: 84)

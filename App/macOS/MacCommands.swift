@@ -15,6 +15,12 @@ struct MacCommands: Commands {
             && model.activeHLSReplay == nil && model.activeMediathekURL == nil
     }
 
+    /// Lautstärke regelt das Live-Bild (VLC). Gesperrt in den Einstellungen (⌘↑/⌘↓ gehören dort
+    /// den Textfeldern) und bei Mediathek- bzw. HLS-Wiedergabe mit eigenem Player.
+    private var volumeCommandsEnabled: Bool {
+        !model.showSettings && model.activeHLSReplay == nil && model.activeMediathekURL == nil
+    }
+
     var body: some Commands {
         CommandMenu("Wiedergabe") {
             Button(player.pausedSince != nil ? "Weiter" : "Anhalten") {
@@ -52,10 +58,13 @@ struct MacCommands: Commands {
 
             Button("Lauter") { model.changeVolume(by: 10) }
                 .keyboardShortcut(.upArrow, modifiers: .command)
+                .disabled(!volumeCommandsEnabled)
             Button("Leiser") { model.changeVolume(by: -10) }
                 .keyboardShortcut(.downArrow, modifiers: .command)
-            Toggle("Ton aus", isOn: $model.isMuted)
+                .disabled(!volumeCommandsEnabled)
+            Toggle("Ton aus", isOn: Binding(get: { model.isMuted }, set: { _ in model.toggleMute() }))
                 .keyboardShortcut(.downArrow, modifiers: [.command, .option])
+                .disabled(!volumeCommandsEnabled)
 
             Divider()
 

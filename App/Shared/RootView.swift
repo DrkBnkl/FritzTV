@@ -51,12 +51,12 @@ struct RootView: View {
                     .allowsHitTesting(false)
                     .modifier(EPGPreviewPlacement(frame: previewFrame, showOverlay: false))
                 if let replay = model.activeHLSReplay {
-                    HLSReplayPlayerView(url: replay.url, startDate: replay.startDate) {
+                    HLSReplayPlayerView(url: replay.url, startDate: replay.startDate, volume: model.outputVolume) {
                         model.hlsReplayClosed()
                     }
                     .ignoresSafeArea()
                 } else if let url = model.activeMediathekURL {
-                    MediathekPlayer(url: url, subtitleURL: model.activeMediathekSubtitle) {
+                    MediathekPlayer(url: url, subtitleURL: model.activeMediathekSubtitle, volume: model.outputVolume) {
                         model.mediathekPlayClosed()
                     }
                     .ignoresSafeArea()
@@ -193,8 +193,9 @@ struct RootView: View {
     }
 
     /// Fensterknöpfe: mit der Steuerleiste, und immer, solange etwas anderes als das Bild zu sehen ist.
+    /// Im Vollbild blendet macOS die Titelleiste selbst ein und aus; die Knöpfe bleiben dort sichtbar.
     private var showsWindowButtons: Bool {
-        !model.isPlainLiveView || showsControlBar
+        !model.isPlainLiveView || showsControlBar || controls.isFullScreen
     }
 
     @ViewBuilder
