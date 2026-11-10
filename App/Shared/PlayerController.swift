@@ -311,7 +311,7 @@ final class PlayerController: ObservableObject {
         } else {
             discardBuffer()
         }
-        resetCrop(for: mediaPlayer, media: media, isSD: !channel.isHD)
+        resetCrop(for: mediaPlayer, isSD: !channel.isHD)
         mediaPlayer.media = media
         mediaPlayer.setDeinterlaceFilter(Self.deinterlaceFilter(options: options, isSD: !channel.isHD))
         mediaPlayer.audio?.isMuted = true
@@ -376,17 +376,14 @@ final class PlayerController: ObservableObject {
         }
     }
 
-    /// Vor dem Öffnen eines Mediums: Der Beschnitt am Player gälte sonst weiter. SD-Sender bekommen
-    /// den Ausschnitt für 720 × 576 (16:9) gleich als Medienoption, damit er ab dem ersten Bild gilt.
-    /// Weicht die Videospur ab (4:3, andere Breite), korrigiert `updateCrop` den Wert.
-    private func resetCrop(for player: VLCMediaPlayer, media: VLCMedia, isSD: Bool) {
-        Self.setCrop(nil, on: player)
-        if isSD {
-            media.addOption(":crop=\(PictureCrop.defaultSDGeometry)")
-            appliedCrop[ObjectIdentifier(player)] = PictureCrop.defaultSDGeometry
-        } else {
-            appliedCrop[ObjectIdentifier(player)] = nil
-        }
+    /// Vor dem Öffnen eines Mediums: Der Beschnitt hängt am Player und gälte sonst weiter. SD-Sender
+    /// bekommen gleich den Ausschnitt für 720 × 576 (16:9), damit er ab dem ersten Bild gilt. Er muss
+    /// am Player gesetzt werden: Die Videoausgabe von VLC hängt am Player, nicht am Medium, und erbt
+    /// eine Medienoption `:crop=…` deshalb nicht. Weicht die Videospur ab, korrigiert `updateCrop`.
+    private func resetCrop(for player: VLCMediaPlayer, isSD: Bool) {
+        let crop = isSD ? PictureCrop.defaultSDGeometry : nil
+        appliedCrop[ObjectIdentifier(player)] = crop
+        Self.setCrop(crop, on: player)
     }
 
     private func poll() {
@@ -1066,7 +1063,7 @@ final class PlayerController: ObservableObject {
         media.addOption(":input-fast-seek")
         media.addOption(":vbi-opaque=0")
         Self.addPictureOptions(to: media, options: options, isSD: channel?.isHD == false)
-        resetCrop(for: replayPlayer, media: media, isSD: channel?.isHD == false)
+        resetCrop(for: replayPlayer, isSD: channel?.isHD == false)
         replayPlayer.media = media
         replayPlayer.setDeinterlaceFilter(Self.deinterlaceFilter(options: options, isSD: channel?.isHD == false))
         mediaPlayer.audio?.isMuted = true
