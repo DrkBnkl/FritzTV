@@ -31,6 +31,8 @@ final class AppSettings: ObservableObject {
     @Published var networkCaching: Int { didSet { defaults.set(networkCaching, forKey: Keys.networkCaching) } }
     @Published var rtspTCP: Bool { didSet { defaults.set(rtspTCP, forKey: Keys.rtspTCP) } }
     @Published var deinterlaceSD: Bool { didSet { defaults.set(deinterlaceSD, forKey: Keys.deinterlaceSD) } }
+    /// Nur macOS: SD-Sender vor dem Hochskalieren nachschärfen.
+    @Published var sharpenSD: Bool { didSet { defaults.set(sharpenSD, forKey: Keys.sharpenSD) } }
     @Published var audioDelayMs: Int { didSet { defaults.set(audioDelayMs, forKey: Keys.audioDelayMs) } }
     @Published var audioDelayAC3Ms: Int { didSet { defaults.set(audioDelayAC3Ms, forKey: Keys.audioDelayAC3Ms) } }
     @Published var blackScreenOnZap: Bool { didSet { defaults.set(blackScreenOnZap, forKey: Keys.blackScreenOnZap) } }
@@ -75,6 +77,7 @@ final class AppSettings: ObservableObject {
             Keys.networkCaching: 0,
             Keys.rtspTCP: false,
             Keys.deinterlaceSD: true,
+            Keys.sharpenSD: false,
             Keys.audioDelayMs: 0,
             Keys.audioDelayAC3Ms: 0,
             Keys.blackScreenOnZap: true,
@@ -89,6 +92,7 @@ final class AppSettings: ObservableObject {
         networkCaching = defaults.integer(forKey: Keys.networkCaching)
         rtspTCP = defaults.bool(forKey: Keys.rtspTCP)
         deinterlaceSD = defaults.bool(forKey: Keys.deinterlaceSD)
+        sharpenSD = defaults.bool(forKey: Keys.sharpenSD)
         audioDelayMs = defaults.integer(forKey: Keys.audioDelayMs)
         audioDelayAC3Ms = defaults.object(forKey: Keys.audioDelayAC3Ms) != nil ? defaults.integer(forKey: Keys.audioDelayAC3Ms) : defaults.integer(forKey: Keys.audioDelayMs)
         blackScreenOnZap = defaults.object(forKey: Keys.blackScreenOnZap) != nil ? defaults.bool(forKey: Keys.blackScreenOnZap) : true
@@ -158,6 +162,7 @@ final class AppSettings: ObservableObject {
         static let networkCaching = "networkCaching"
         static let rtspTCP = "rtspTCP"
         static let deinterlaceSD = "deinterlaceSD"
+        static let sharpenSD = "sharpenSD"
         static let audioDelayMs = "audioDelayMs"
         static let audioDelayAC3Ms = "audioDelayAC3Ms"
         static let blackScreenOnZap = "blackScreenOnZap"

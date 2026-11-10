@@ -31,6 +31,12 @@ Die FRITZ!Box liefert pro Client-IP nur einen RTSP-Stream. Ein zweiter Stream zu
 
 `EPGStore` ordnet beide Quellen den Sendern zu und speichert sie in `epg_cache.json`. Der Cache wird beim Start asynchron geladen und bereinigt.
 
+## SD-Bildaufbereitung
+
+- **Deinterlacing:** Für SD-Sender setzt `PlayerController` den Filter `yadif2x` (Einstellung `deinterlaceSD`, Standard an). Jedes Halbbild wird zu einem Vollbild, die Ausgabe hat 50 Bilder/s und passt zur 50-Hz-Anzeige (`DisplayCriteria.request50Hz()`). HD-Sender bleiben ungefiltert.
+- **Nachschärfen (nur macOS):** Einstellung `sharpenSD` (Standard aus) hängt an das `VLCMedia` die Optionen `:video-filter=sharpen` und `:sharpen-sigma=0.1`. Das Modul ist nur in VLCKit für macOS enthalten, in TVVLCKit fehlt es (ebenso `postproc`).
+- **Skalierung:** Die Vergrößerung auf die Fenster- bzw. Bildschirmauflösung übernimmt die OpenGL-Videoausgabe von VLCKit 3 (bilinear). Ein hochwertigerer Skalierer (z. B. libplacebo in VLC 4 oder MetalFX) ist mit VLCKit 3 nicht ohne eigene Videoausgabe möglich.
+
 ## Timeshift, „Von Anfang an“, Mediathek
 
 - **Timeshift (`TimeshiftBufferManager`):** Der Live-Player schreibt den Stream parallel in segmentierte TS-Dateien (max. 4 GB je Segment). Bei Pause oder Rücksprung übernimmt ein zweiter Player die Wiedergabe aus dem Puffer, der Live-Player läuft stumm weiter. Pufferlänge: 30, 60, 90 oder 120 min.

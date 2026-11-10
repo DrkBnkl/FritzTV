@@ -131,6 +131,7 @@ Auf dem Mac erscheint bei Mausbewegung über dem Bild, nach dem Umschalten und w
 ## Funktionen
 
 - **Live-TV:** Wiedergabe der RTSP-Streams mit VLCKit. Pro Sender werden alle Frequenzvarianten der Reihe nach probiert (HD bevorzugt); die funktionierende Variante wird gespeichert. Liefert ein Sender nach 6 s kein Bild, werden fehlende Audio-/Video-PIDs aus der PMT ermittelt und im RTSP-Link ergänzt. Optional Schwarzbild beim Umschalten.
+- **SD-Bild:** SD-Sender (576i) werden mit `yadif2x` deinterlaced: 50 Vollbilder pro Sekunde statt 25, passend zur 50-Hz-Ausgabe auf dem Apple TV. Auf dem Mac lässt sich das SD-Bild zusätzlich vor dem Hochskalieren nachschärfen (VLC-Filter `sharpen`, abschaltbar, Standard aus); TVVLCKit enthält diesen Filter nicht.
 - **EPG:** Für den aktuell empfangenen Multiplex werden DVB-EIT-Daten (inkl. Extended Event Descriptors) aus dem Stream gelesen. Alle übrigen Sender kommen aus einer komprimierten XMLTV-Quelle, die alle 12 h aktualisiert wird. Hintergrund: Die FRITZ!Box liefert pro Client-IP nur einen RTSP-Stream, ein zweiter Tuner für EPG-Daten steht nicht zur Verfügung.
 - **Timeshift:** Der Live-Stream wird parallel in segmentierte TS-Dateien geschrieben (`TimeshiftBufferManager`, 30–120 min einstellbar). Wiedergabe aus dem Puffer ohne zusätzliche RTSP-Sitzung.
 - **Von Anfang an:** Für öffentlich-rechtliche Sender wird auf deren HLS-Livestream gewechselt und über `EXT-X-PROGRAM-DATE-TIME` zum Sendungsbeginn gesprungen.
