@@ -18,8 +18,8 @@ packages:
 settings:
   base:
     SWIFT_VERSION: "5.0"
-    MARKETING_VERSION: "1.4.2"
-    CURRENT_PROJECT_VERSION: "11"
+    MARKETING_VERSION: "1.5.0"
+    CURRENT_PROJECT_VERSION: "12"
     CODE_SIGN_STYLE: Automatic
 
 targets:
