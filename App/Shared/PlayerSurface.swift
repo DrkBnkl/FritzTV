@@ -1,4 +1,5 @@
 import SwiftUI
+import FritzTVKit
 import VLCKitSPM
 #if canImport(TVVLCKit)
 import TVVLCKit
@@ -77,11 +78,14 @@ struct PlayerSurface: NSViewRepresentable {
     /// Nur Apple TV; auf dem Mac verkleinert `EPGPreviewPlacement`.
     var previewFrame: CGRect? = nil
     var dockLivePreview: Bool = true
+    /// Vergrößerung der VLC-Fläche (Overscan bei SD, `PictureCrop`); der Rand wird abgeschnitten.
+    var zoom: PictureCrop.Zoom = .none
 
     func makeNSView(context: Context) -> MacVideoHostView {
         let view = MacVideoHostView()
         view.player = player
         view.dockLivePreview = dockLivePreview
+        view.zoom = zoom
         bindDrawable(view.videoView)
         return view
     }
@@ -89,6 +93,7 @@ struct PlayerSurface: NSViewRepresentable {
     func updateNSView(_ nsView: MacVideoHostView, context: Context) {
         nsView.player = player
         nsView.dockLivePreview = dockLivePreview
+        nsView.zoom = zoom
         if (player.drawable as? NSView) != nsView.videoView {
             bindDrawable(nsView.videoView)
         }
@@ -114,6 +119,9 @@ struct PlayerSurface: NSViewRepresentable {
 final class MacVideoHostView: NSView {
     weak var player: VLCMediaPlayer?
     var dockLivePreview: Bool = true
+    var zoom: PictureCrop.Zoom = .none {
+        didSet { if zoom != oldValue { needsLayout = true } }
+    }
     let videoView = NSView()
     private var windowObservers: [NSObjectProtocol] = []
     private var snapshotTimer: Timer?
@@ -129,9 +137,10 @@ final class MacVideoHostView: NSView {
         super.init(frame: frameRect)
         wantsLayer = true
         layer?.backgroundColor = NSColor.black.cgColor
+        // Die VLC-Fläche kann größer sein als der Behälter (Overscan); der Rand wird abgeschnitten.
+        layer?.masksToBounds = true
         videoView.wantsLayer = true
         videoView.layer?.backgroundColor = NSColor.black.cgColor
-        videoView.autoresizingMask = [.width, .height]
         videoView.frame = bounds
         addSubview(videoView)
     }
@@ -140,8 +149,9 @@ final class MacVideoHostView: NSView {
 
     override func layout() {
         super.layout()
-        if videoView.frame != bounds {
-            videoView.frame = bounds
+        let target = zoom.frame(in: bounds)
+        if videoView.frame != target {
+            videoView.frame = target
         }
     }
 
@@ -339,7 +349,7 @@ final class MacVideoHostView: NSView {
             window.dockTile.contentView = nil
             window.dockTile.display()
         }
-        videoView.frame = bounds
+        videoView.frame = zoom.frame(in: bounds)
         videoView.needsLayout = true
         videoView.needsDisplay = true
         videoView.layer?.setNeedsDisplay()
@@ -374,9 +384,12 @@ struct PlayerSurface: UIViewRepresentable {
     /// Vorschaufenster der Programmübersicht (Bildschirmkoordinaten) oder `nil` für Vollbild.
     var previewFrame: CGRect? = nil
     var dockLivePreview: Bool = true
+    /// Vergrößerung der VLC-Fläche (Overscan bei SD, `PictureCrop`); der Rand wird abgeschnitten.
+    var zoom: PictureCrop.Zoom = .none
 
     func makeUIView(context: Context) -> VideoHostView {
         let view = VideoHostView()
+        view.zoom = zoom
         player.drawable = view.videoView
         return view
     }
@@ -386,6 +399,7 @@ struct PlayerSurface: UIViewRepresentable {
             player.drawable = uiView.videoView
         }
         uiView.previewFrame = previewFrame
+        uiView.zoom = zoom
     }
 }
 
@@ -395,16 +409,25 @@ struct PlayerSurface: UIViewRepresentable {
 /// Transformation am Behälter führten zu Abstürzen.)
 final class VideoHostView: UIView {
     let videoView = UIView()
+    /// Rechteckiger Ausschnitt um die VLC-Fläche: Bei Overscan ist sie größer als der Bildbereich.
+    private let clipView = UIView()
 
     var previewFrame: CGRect? {
         didSet { if previewFrame != oldValue { setNeedsLayout() } }
     }
 
+    var zoom: PictureCrop.Zoom = .none {
+        didSet { if zoom != oldValue { setNeedsLayout() } }
+    }
+
     override init(frame: CGRect) {
         super.init(frame: frame)
         backgroundColor = .clear
+        clipView.backgroundColor = .black
+        clipView.clipsToBounds = true
         videoView.backgroundColor = .black
-        addSubview(videoView)
+        clipView.addSubview(videoView)
+        addSubview(clipView)
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) wird nicht verwendet") }
@@ -412,15 +435,23 @@ final class VideoHostView: UIView {
     override func layoutSubviews() {
         super.layoutSubviews()
         // Vorschau: Die VLC-Fläche bekommt wirklich die kleine Größe (kein Skalieren per
-        // Transformation, keine Maske). Auf dem Apple TV hielt das skalierte, abgerundete
+        // Transformation, keine abgerundete Maske). Auf dem Apple TV hielt das skalierte, abgerundete
         // Vollbild-Video den Hauptthread pro Bild auf – die Übersicht reagierte nur zäh.
         var target = bounds
         if let preview = previewFrame, preview.width >= 10, preview.height >= 10,
            preview.minX.isFinite, preview.minY.isFinite, window != nil {
             target = convert(preview, from: nil)
         }
-        if videoView.transform != .identity { videoView.transform = .identity }
-        if videoView.frame != target { videoView.frame = target }
+        if clipView.frame != target { clipView.frame = target }
+        // Overscan per Skalierung statt größerem Rahmen: Bei 4K-Ausgabe wäre die vergrößerte Fläche
+        // über 4096 Pixel breit, mehr erlaubt OpenGL ES nicht – VLC könnte keine Videoausgabe anlegen
+        // („Failed to make complete framebuffer object“, Ton ohne Bild).
+        let size = clipView.bounds.size
+        if videoView.bounds.size != size { videoView.bounds = CGRect(origin: .zero, size: size) }
+        let center = CGPoint(x: size.width / 2, y: size.height / 2)
+        if videoView.center != center { videoView.center = center }
+        let transform = CGAffineTransform(scaleX: zoom.x, y: zoom.y)
+        if videoView.transform != transform { videoView.transform = transform }
     }
 
     override func didMoveToWindow() {

@@ -16,6 +16,8 @@ struct PlaybackOptions: Equatable {
     var networkCachingMs: Int
     var rtspTCP: Bool
     var deinterlace: Bool
+    /// Nur macOS: SD-Bild vor dem Hochskalieren nachschärfen (VLC-Filter `sharpen`).
+    var sharpenSD: Bool
     var audioDelayMs: Int
     var audioDelayAC3Ms: Int
     var timeshift: Bool
@@ -55,6 +57,26 @@ final class PlayerController: ObservableObject {
         "--no-osd"
     ])
 
+    /// Stärke des Nachschärfens (VLC-Standard 0,05, Bereich 0–2). Wirkt auf das 576er-Bild vor dem
+    /// Hochskalieren, deshalb zurückhaltend gewählt, damit MPEG-2-Blockartefakte nicht hervortreten.
+    private static let sharpenSigma = "0.1"
+
+    /// SD-Sender senden 576i. `yadif2x` erzeugt aus jedem Halbbild ein Vollbild (50 statt 25 Bilder
+    /// pro Sekunde); das erhält die Bewegungsauflösung und passt zur 50-Hz-Ausgabe auf dem Apple TV.
+    private static func deinterlaceFilter(options: PlaybackOptions, isSD: Bool) -> String? {
+        options.deinterlace && isSD ? "yadif2x" : nil
+    }
+
+    /// Bildfilter je Medium. `sharpen` ist nur in VLCKit für macOS enthalten, nicht in TVVLCKit.
+    private static func addPictureOptions(to media: VLCMedia, options: PlaybackOptions, isSD: Bool) {
+        #if os(macOS)
+        if options.sharpenSD && isSD {
+            media.addOption(":video-filter=sharpen")
+            media.addOption(":sharpen-sigma=\(sharpenSigma)")
+        }
+        #endif
+    }
+
     let mediaPlayer = VLCMediaPlayer(library: vlcLibrary)
     let epgStore: EPGStore
     let epgParser: EITLogParser
@@ -86,6 +108,13 @@ final class PlayerController: ObservableObject {
     let replayPlayer = VLCMediaPlayer(library: vlcLibrary)
     /// Gesetzt, solange der Mitschnitt statt des Live-Bilds zu sehen ist.
     @Published private(set) var isReplaying = false
+
+    /// Eigene Lautstärke der App (0–100), unabhängig von der Systemlautstärke.
+    /// Gilt für Live-Bild und Mitschnitt; stumm geschaltet wird über die Lautstärke 0, damit sich
+    /// das nicht mit dem Stummschalten beim Wechsel zwischen Live-Bild und Mitschnitt überschneidet.
+    var volume = 100 {
+        didSet { applyVolume() }
+    }
 
     /// Bild ist da. `channelID`: zu merkende Variante (nur bei gewünschter Qualität, sonst `nil`);
     /// `staleIDs`: vorher fehlgeschlagene Varianten auf einer anderen Frequenz (veraltete Einträge).
@@ -275,14 +304,16 @@ final class PlayerController: ObservableObject {
         if options.rtspTCP || forceTCP {
             media.addOption(":rtsp-tcp")
         }
+        Self.addPictureOptions(to: media, options: options, isSD: !channel.isHD)
         DebugLog.log("Öffne Stream per \(options.rtspTCP || forceTCP ? "TCP" : "UDP"), Puffer \(options.networkCachingMs) ms")
         if options.timeshift {
             prepareRecording(keepHistory: preserveTimeshift)
         } else {
             discardBuffer()
         }
+        resetCrop(for: mediaPlayer, isSD: !channel.isHD)
         mediaPlayer.media = media
-        mediaPlayer.setDeinterlaceFilter(options.deinterlace && !channel.isHD ? "yadif" : nil)
+        mediaPlayer.setDeinterlaceFilter(Self.deinterlaceFilter(options: options, isSD: !channel.isHD))
         mediaPlayer.audio?.isMuted = true
         mediaPlayer.play()
 
@@ -298,7 +329,7 @@ final class PlayerController: ObservableObject {
             while !Task.isCancelled {
                 // Bis das erste Bild da ist, öfter nachsehen: Die schwarze Abdeckung soll ohne
                 // Verzögerung verschwinden.
-                let interval = (self?.awaitingFirstPicture ?? false) ? 100 : 500
+                let interval = (self?.needsFastPolling ?? false) ? 100 : 500
                 try? await Task.sleep(for: .milliseconds(interval))
                 guard let self, !Task.isCancelled else { return }
                 self.poll()
@@ -306,7 +337,56 @@ final class PlayerController: ObservableObject {
         }
     }
 
+    /// Kurzer Takt, bis das erste Bild da ist, und in den ersten Sekunden eines Mitschnitts: Dessen
+    /// Tonausgabe beginnt mit voller Lautstärke, die eigene Lautstärke soll sofort wieder gelten.
+    private var needsFastPolling: Bool {
+        awaitingFirstPicture || (isReplaying && volume < 100 && Date().timeIntervalSince(replayOpenedAt) < 2)
+    }
+
     private var lastLoggedState: Int = -1
+    /// Vergrößerung der Bildfläche für Overscan und Standardformat bei SD (`PictureCrop`), getrennt
+    /// für Live- und Mitschnitt-Player. Die Bildfläche (`PlayerSurface`) setzt sie um.
+    @Published private(set) var liveZoom: PictureCrop.Zoom = .none
+    @Published private(set) var replayZoom: PictureCrop.Zoom = .none
+    /// Videoformat je geöffnetem Medium nur einmal protokollieren.
+    private var loggedCropFormat = false
+
+    private func setZoom(_ zoom: PictureCrop.Zoom, for player: VLCMediaPlayer) {
+        if player === replayPlayer {
+            if replayZoom != zoom { replayZoom = zoom }
+        } else if liveZoom != zoom {
+            liveZoom = zoom
+        }
+    }
+
+    /// Prüft die Videospur und passt bei SD-Sendern die Vergrößerung an, auch wenn das Format mitten
+    /// in der Sendung wechselt.
+    private func updateCrop(for player: VLCMediaPlayer, isSD: Bool) {
+        guard isSD, let tracks = player.media?.tracksInformation as? [[String: Any]],
+              let video = tracks.first(where: { ($0[VLCMediaTracksInformationType] as? String) == VLCMediaTracksInformationTypeVideo })
+        else { return }
+        func value(_ key: String) -> Int { (video[key] as? NSNumber)?.intValue ?? 0 }
+        let width = value(VLCMediaTracksInformationVideoWidth)
+        let height = value(VLCMediaTracksInformationVideoHeight)
+        let sarNum = value(VLCMediaTracksInformationSourceAspectRatio)
+        let sarDen = value(VLCMediaTracksInformationSourceAspectRatioDenominator)
+        // Spur noch ohne Format: beim Öffnen gesetzte Vergrößerung beibehalten.
+        guard width > 0, height > 0, sarNum > 0, sarDen > 0,
+              let zoom = PictureCrop.zoom(width: width, height: height, sampleAspect: Double(sarNum) / Double(sarDen))
+        else { return }
+        if !loggedCropFormat {
+            loggedCropFormat = true
+            DebugLog.log("Videoformat: \(width)×\(height), SAR \(sarNum):\(sarDen), Vergrößerung \(String(format: "%.4f × %.4f", zoom.x, zoom.y))")
+        }
+        setZoom(zoom, for: player)
+    }
+
+    /// Vor dem Öffnen eines Mediums: SD-Sender bekommen gleich die Vergrößerung für 720 × 576 (16:9),
+    /// HD-Sender keine. Weicht die Videospur ab, korrigiert `updateCrop`.
+    private func resetCrop(for player: VLCMediaPlayer, isSD: Bool) {
+        loggedCropFormat = false
+        setZoom(isSD ? PictureCrop.defaultSD : .none, for: player)
+    }
 
     private func poll() {
         let state = mediaPlayer.state
@@ -324,6 +404,9 @@ final class PlayerController: ObservableObject {
             if wasPlaying { scheduleReconnect() } else { handleNoData() }
             return
         }
+
+        // VLC legt die Tonausgabe je Sendung neu an und beginnt dann wieder mit voller Lautstärke.
+        applyVolume()
 
         if mediaPlayer.isPlaying && hasMedia {
             if !wasPlaying {
@@ -362,6 +445,7 @@ final class PlayerController: ObservableObject {
             }
             setStatus((isReplaying && replayAnchor.paused) ? .paused : .playing)
             updateFirstPicture()
+            updateCrop(for: mediaPlayer, isSD: channel?.isHD == false)
             if collectStats { updatePlaybackStats() }
             refreshTrackNames()
             checkStreamHealth()
@@ -980,11 +1064,14 @@ final class PlayerController: ObservableObject {
         media.addOption(":file-caching=300")
         media.addOption(":input-fast-seek")
         media.addOption(":vbi-opaque=0")
+        Self.addPictureOptions(to: media, options: options, isSD: channel?.isHD == false)
+        resetCrop(for: replayPlayer, isSD: channel?.isHD == false)
         replayPlayer.media = media
-        replayPlayer.setDeinterlaceFilter(options.deinterlace && channel?.isHD == false ? "yadif" : nil)
+        replayPlayer.setDeinterlaceFilter(Self.deinterlaceFilter(options: options, isSD: channel?.isHD == false))
         mediaPlayer.audio?.isMuted = true
         replayPlayer.audio?.isMuted = paused
         replayPlayer.play()
+        applyVolume()
         replaySegment = segment
         replayAnchor = (position, Date(), paused)
         replaySeekPending = position > 0.5 ? position : nil
@@ -1037,6 +1124,7 @@ final class PlayerController: ObservableObject {
             let hasReplayMedia = hasReplayVideo || replayPlayer.numberOfAudioTracks > 0
 
             if replayPlayer.isPlaying && hasReplayMedia {
+                updateCrop(for: replayPlayer, isSD: channel?.isHD == false)
                 if !replayTracksSynced {
                     replayTracksSynced = true
                     if mediaPlayer.currentAudioTrackIndex >= 0 {
@@ -1297,6 +1385,81 @@ final class PlayerController: ObservableObject {
             return name
         }
         return nil
+    }
+}
+
+
+// MARK: Lautstärke, Puffer, Spurauswahl (Mac-Steuerleiste und Menüs)
+
+/// Eine wählbare Ton- oder Untertitelspur. `id` ist die VLC-Spurnummer, −1 = aus.
+struct TrackOption: Identifiable, Hashable {
+    let id: Int32
+    let name: String
+}
+
+extension PlayerController {
+    fileprivate func applyVolume() {
+        let level = Int32(min(max(volume, 0), 100))
+        if let audio = mediaPlayer.audio, audio.volume != level { audio.volume = level }
+        if let audio = replayPlayer.audio, audio.volume != level { audio.volume = level }
+    }
+
+    /// Wie weit der Puffer zurückreicht (Sekunden bis jetzt), 0 ohne Mitschnitt.
+    var bufferedSeconds: TimeInterval {
+        guard options?.timeshift == true, let first = availableSegments.first else { return 0 }
+        return max(0, Date().timeIntervalSince(first.startedAt))
+    }
+
+    var audioTrackOptions: [TrackOption] {
+        let names = (mediaPlayer.audioTrackNames as? [String]) ?? []
+        let tracks = zip(names, indexes(mediaPlayer.audioTrackIndexes)).filter { $0.1 >= 0 }
+        let cleaned = tracks.map { track -> String in
+            let raw = track.0.lowercased()
+            let base = cleanAudioName(track.0)
+            if raw.contains("audio description") || raw.contains("visually impaired") || raw.contains("audiodeskription") {
+                return "\(base.replacingOccurrences(of: " (Dolby Digital)", with: "")) · Audiodeskription"
+            }
+            if raw.contains("clean audio") || raw.contains("hearing impaired") {
+                return "Klare Sprache"
+            }
+            return base
+        }
+        return tracks.enumerated().map { offset, track in
+            // Gleich lautende Spuren (z. B. zweimal „Deutsch“, eine mit Audiodeskription) unterscheidbar halten.
+            let name = cleaned.filter { $0 == cleaned[offset] }.count > 1 ? track.0 : cleaned[offset]
+            return TrackOption(id: track.1, name: name)
+        }
+    }
+
+    var currentAudioTrackID: Int32 { mediaPlayer.currentAudioTrackIndex }
+
+    func selectAudioTrack(_ id: Int32) {
+        guard id != mediaPlayer.currentAudioTrackIndex else { return }
+        mediaPlayer.currentAudioTrackIndex = id
+        if isReplaying { replayPlayer.currentAudioTrackIndex = id }
+        applyAudioDelay()
+        refreshTrackNames()
+    }
+
+    /// Untertitel einschließlich „Aus“ (−1).
+    var subtitleOptions: [TrackOption] {
+        let names = (mediaPlayer.videoSubTitlesNames as? [String]) ?? []
+        let ids = indexes(mediaPlayer.videoSubTitlesIndexes)
+        let allowed = Set(subtitleTrackIDs())
+        var options = [TrackOption(id: -1, name: "Aus")]
+        for (name, id) in zip(names, ids) where id >= 0 && allowed.contains(id) {
+            options.append(TrackOption(id: id, name: cleanSubtitleName(name)))
+        }
+        return options
+    }
+
+    var currentSubtitleID: Int32 { mediaPlayer.currentVideoSubTitleIndex }
+
+    func selectSubtitle(_ id: Int32) {
+        guard id != mediaPlayer.currentVideoSubTitleIndex else { return }
+        mediaPlayer.currentVideoSubTitleIndex = id
+        if isReplaying { replayPlayer.currentVideoSubTitleIndex = id }
+        refreshTrackNames()
     }
 }
 

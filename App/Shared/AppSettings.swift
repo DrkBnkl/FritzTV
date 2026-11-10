@@ -31,6 +31,8 @@ final class AppSettings: ObservableObject {
     @Published var networkCaching: Int { didSet { defaults.set(networkCaching, forKey: Keys.networkCaching) } }
     @Published var rtspTCP: Bool { didSet { defaults.set(rtspTCP, forKey: Keys.rtspTCP) } }
     @Published var deinterlaceSD: Bool { didSet { defaults.set(deinterlaceSD, forKey: Keys.deinterlaceSD) } }
+    /// Nur macOS: SD-Sender vor dem Hochskalieren nachschärfen.
+    @Published var sharpenSD: Bool { didSet { defaults.set(sharpenSD, forKey: Keys.sharpenSD) } }
     @Published var audioDelayMs: Int { didSet { defaults.set(audioDelayMs, forKey: Keys.audioDelayMs) } }
     @Published var audioDelayAC3Ms: Int { didSet { defaults.set(audioDelayAC3Ms, forKey: Keys.audioDelayAC3Ms) } }
     @Published var blackScreenOnZap: Bool { didSet { defaults.set(blackScreenOnZap, forKey: Keys.blackScreenOnZap) } }
@@ -47,6 +49,8 @@ final class AppSettings: ObservableObject {
     /// Nur macOS: Dock-Vorschau bei minimiertem Fenster regelmäßig per Überblendung aktualisieren.
     /// Ist die Option deaktiviert, bleibt ein statisches Standbild des Minimierungszeitpunkts stehen.
     @Published var dockLivePreview: Bool { didSet { defaults.set(dockLivePreview, forKey: Keys.dockLivePreview) } }
+    /// Nur macOS: eigene Lautstärke der App (0–100), unabhängig von der Systemlautstärke.
+    @Published var volume: Int { didSet { defaults.set(volume, forKey: Keys.volume) } }
     /// Benutzername für die TR-064-Anmeldung (Sendersuchlauf). Das Kennwort liegt im Schlüsselbund.
     @Published var boxUsername: String { didSet { defaults.set(boxUsername, forKey: Keys.boxUsername) } }
     /// Zuletzt gesehene Sender (maximal 2 Schlüssel).
@@ -73,6 +77,7 @@ final class AppSettings: ObservableObject {
             Keys.networkCaching: 0,
             Keys.rtspTCP: false,
             Keys.deinterlaceSD: true,
+            Keys.sharpenSD: false,
             Keys.audioDelayMs: 0,
             Keys.audioDelayAC3Ms: 0,
             Keys.blackScreenOnZap: true,
@@ -87,6 +92,7 @@ final class AppSettings: ObservableObject {
         networkCaching = defaults.integer(forKey: Keys.networkCaching)
         rtspTCP = defaults.bool(forKey: Keys.rtspTCP)
         deinterlaceSD = defaults.bool(forKey: Keys.deinterlaceSD)
+        sharpenSD = defaults.bool(forKey: Keys.sharpenSD)
         audioDelayMs = defaults.integer(forKey: Keys.audioDelayMs)
         audioDelayAC3Ms = defaults.object(forKey: Keys.audioDelayAC3Ms) != nil ? defaults.integer(forKey: Keys.audioDelayAC3Ms) : defaults.integer(forKey: Keys.audioDelayMs)
         blackScreenOnZap = defaults.object(forKey: Keys.blackScreenOnZap) != nil ? defaults.bool(forKey: Keys.blackScreenOnZap) : true
@@ -113,6 +119,7 @@ final class AppSettings: ObservableObject {
         match50Hz = defaults.bool(forKey: Keys.match50Hz)
         dockLivePreview = defaults.object(forKey: Keys.dockLivePreview) != nil ? defaults.bool(forKey: Keys.dockLivePreview) : true
         xmltvSource = defaults.string(forKey: Keys.xmltvSource) ?? ""
+        volume = min(max(defaults.object(forKey: Keys.volume) as? Int ?? 100, 0), 100)
         boxUsername = defaults.string(forKey: Keys.boxUsername) ?? ""
         recentKeys = Array((defaults.stringArray(forKey: Keys.recentKeys) ?? []).prefix(2))
         deadChannelIDs = Set(defaults.stringArray(forKey: Keys.deadChannels) ?? [])
@@ -155,6 +162,7 @@ final class AppSettings: ObservableObject {
         static let networkCaching = "networkCaching"
         static let rtspTCP = "rtspTCP"
         static let deinterlaceSD = "deinterlaceSD"
+        static let sharpenSD = "sharpenSD"
         static let audioDelayMs = "audioDelayMs"
         static let audioDelayAC3Ms = "audioDelayAC3Ms"
         static let blackScreenOnZap = "blackScreenOnZap"
@@ -169,6 +177,7 @@ final class AppSettings: ObservableObject {
         static let dockLivePreview = "dockLivePreview"
         static let xmltvSource = "xmltvSource"
         static let boxUsername = "boxUsername"
+        static let volume = "volume"
         static let lastChannel = "lastChannelKey"
         static let lineup = "lineupPreferences"
         static let recentKeys = "recentKeys"

@@ -90,15 +90,20 @@ Für die tvOS-Signatur genügt ein kostenloses „Personal Team“; das Team wir
 
 | Siri Remote | Mac | Funktion |
 | --- | --- | --- |
-| Hoch / Runter (Ring-Klick) | ↑ / ↓ | Nächster / vorheriger Sender |
+| Hoch / Runter (Ring-Klick) | ↑ / ↓, `⌘→` / `⌘←` | Nächster / vorheriger Sender |
 | Nach oben wischen | – | Senderleiste am unteren Rand |
-| Klick oder nach unten wischen | Return / `⌘I` / Rechtsklick | Sendungsinfo: Tonspur, Untertitel, „Von Anfang an“, „In Mediathek suchen“, Einstellungen |
-| Zurück | Esc / `⌘L` / Klick ins Bild | Senderliste (Mausrad-Scrollen, Hover-Vorschau) |
+| Klick oder nach unten wischen | Return / `⌘I` / Info-Knopf in der Steuerleiste / Rechtsklick | Sendungsinfo: Tonspur, Untertitel, „Von Anfang an“, „In Mediathek suchen“, Einstellungen |
+| Zurück | Esc / `⌃⌘S` / Klick ins Bild | Senderliste (Mausrad-Scrollen, Hover-Vorschau) |
 | – | `⌘E` / Rechtsklick | Programmübersicht |
-| – | Doppelklick ins Bild | Vollbild umschalten |
+| – | Doppelklick ins Bild / `⌃⌘F` | Vollbild umschalten |
 | Play/Pause | Leertaste / `⌘P` | Timeshift: anhalten / fortsetzen |
-| Links / Rechts | ← / → oder Klick in Zeitleiste | Timeshift: Spulen mit wachsender Schrittweite (10 s → 30 s → 1 min → 3 min → 5 min) |
+| Links / Rechts | ← / → oder Ziehen in der Zeitleiste | Timeshift: Spulen mit wachsender Schrittweite (10 s → 30 s → 1 min → 3 min → 5 min) |
+| – | `⌘L` / Klick auf „LIVE“ | Timeshift: zurück zum Live-Bild |
+| – | `⇧⌘←` | Sendung von Anfang an (Sender mit öffentlichem HLS-Stream) |
+| – | `⌘↑` / `⌘↓`, `⌥⌘↓` | Lautstärke der App, Ton aus |
 | – | Ziffern / Mausklick | Direktwahl |
+
+Auf dem Mac erscheint bei Mausbewegung über dem Bild, nach dem Umschalten und während der Pause eine Steuerleiste: Sender, laufende Sendung, Timeshift-Zeitleiste mit „LIVE“-Knopf, Info-Knopf für die Sendungsinfo, Menü für Tonspur und Untertitel, eigene Lautstärke (unabhängig von der Systemlautstärke, gespeichert) und Vollbild. Nach 3 s ohne Mausbewegung blenden sich Leiste, Fensterknöpfe und Mauszeiger aus. Alle Befehle stehen zusätzlich in den Menüs „Wiedergabe“ und „Sender“. Die Schalter der Sendungsinfo sind Symbole (Ton, Untertitel, Von Anfang an, Mediathek, Einstellungen), die Beschriftung des gewählten Schalters steht daneben; in kleinen Fenstern zeigt die Sendungsinfo eine kompakte Fassung.
 
 ### Programmübersicht (EPG-Zeitstrahl)
 
@@ -126,6 +131,7 @@ Für die tvOS-Signatur genügt ein kostenloses „Personal Team“; das Team wir
 ## Funktionen
 
 - **Live-TV:** Wiedergabe der RTSP-Streams mit VLCKit. Pro Sender werden alle Frequenzvarianten der Reihe nach probiert (HD bevorzugt); die funktionierende Variante wird gespeichert. Liefert ein Sender nach 6 s kein Bild, werden fehlende Audio-/Video-PIDs aus der PMT ermittelt und im RTSP-Link ergänzt. Optional Schwarzbild beim Umschalten.
+- **SD-Bild:** SD-Sender (576i) werden mit `yadif2x` deinterlaced: 50 Vollbilder pro Sekunde statt 25, passend zur 50-Hz-Ausgabe auf dem Apple TV. Wie bei einem Fernseher werden rund 2,5 % an jedem Rand abgeschnitten (Overscan) und das Bild dabei auf exakt 16:9 bzw. 4:3 gebracht; so verschwinden schwarze Randzeilen des Sendesignals und schmale Balken. Auf dem Mac lässt sich das SD-Bild zusätzlich vor dem Hochskalieren nachschärfen (VLC-Filter `sharpen`, abschaltbar, Standard aus); TVVLCKit enthält diesen Filter nicht.
 - **EPG:** Für den aktuell empfangenen Multiplex werden DVB-EIT-Daten (inkl. Extended Event Descriptors) aus dem Stream gelesen. Alle übrigen Sender kommen aus einer komprimierten XMLTV-Quelle, die alle 12 h aktualisiert wird. Hintergrund: Die FRITZ!Box liefert pro Client-IP nur einen RTSP-Stream, ein zweiter Tuner für EPG-Daten steht nicht zur Verfügung.
 - **Timeshift:** Der Live-Stream wird parallel in segmentierte TS-Dateien geschrieben (`TimeshiftBufferManager`, 30–120 min einstellbar). Wiedergabe aus dem Puffer ohne zusätzliche RTSP-Sitzung.
 - **Von Anfang an:** Für öffentlich-rechtliche Sender wird auf deren HLS-Livestream gewechselt und über `EXT-X-PROGRAM-DATE-TIME` zum Sendungsbeginn gesprungen.

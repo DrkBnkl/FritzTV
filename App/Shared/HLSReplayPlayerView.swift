@@ -12,6 +12,8 @@ import AppKit
 struct HLSReplayPlayerView: View {
     let url: URL
     let startDate: Date?
+    /// Eigene Lautstärke der App (0…1), siehe `AppModel.outputVolume`.
+    var volume: Float = 1
     var onClose: (() -> Void)? = nil
     @Environment(\.dismiss) private var dismiss
     @State private var player = AVPlayer()
@@ -32,6 +34,8 @@ struct HLSReplayPlayerView: View {
             .overlay {
                 if playbackFailed { PlaybackFailedCard() }
             }
+            .onAppear { player.volume = volume }
+            .onChange(of: volume) { _, level in player.volume = level }
             .task { await start() }
             .onAppear { showHeader() }
             .onDisappear {

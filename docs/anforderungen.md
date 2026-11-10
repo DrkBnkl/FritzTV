@@ -31,6 +31,13 @@ Die FRITZ!Box liefert pro Client-IP nur einen RTSP-Stream. Ein zweiter Stream zu
 
 `EPGStore` ordnet beide Quellen den Sendern zu und speichert sie in `epg_cache.json`. Der Cache wird beim Start asynchron geladen und bereinigt.
 
+## SD-Bildaufbereitung
+
+- **Deinterlacing:** Für SD-Sender setzt `PlayerController` den Filter `yadif2x` (Einstellung `deinterlaceSD`, Standard an). Jedes Halbbild wird zu einem Vollbild, die Ausgabe hat 50 Bilder/s und passt zur 50-Hz-Anzeige (`DisplayCriteria.request50Hz()`). HD-Sender bleiben ungefiltert.
+- **Nachschärfen (nur macOS):** Einstellung `sharpenSD` (Standard aus) hängt an das `VLCMedia` die Optionen `:video-filter=sharpen` und `:sharpen-sigma=0.1`. Das Modul ist nur in VLCKit für macOS enthalten, in TVVLCKit fehlt es (ebenso `postproc`).
+- **Bildausschnitt für SD (`PictureCrop`):** PAL-SD mit 720 Pixeln und SAR 16:11 bzw. 12:11 ist knapp breiter als 16:9 bzw. 4:3 (Randspalten der Austastung); viele Sender schicken zudem schwarze Randspalten und -zeilen mit (Kabel Eins links und rechts je rund 22 Spalten). VLC zeichnet das volle Bild; `PlayerSurface` vergrößert die VLC-Fläche um `PictureCrop.Zoom` und schneidet den Rand ab (macOS: `masksToBounds` am Behälter, tvOS: `clipsToBounds` an einer Zwischenansicht, auch im Vorschaufenster; dort per Skalierung (`transform`) statt größerem Rahmen, da die OpenGL-ES-Fläche von VLC höchstens 4096 Pixel breit sein darf und bei 4K-Ausgabe sonst keine Videoausgabe entsteht). Die Vergrößerung ist so gewählt, dass ein Ausschnitt mit 2,5 % Overscan je Rand genau 16:9 bzw. 4:3 füllt (bei 720 × 576, SAR 16:11: 1,0766 × 1,0526); andere Formate behalten ihr Seitenverhältnis. `PlayerController` setzt beim Öffnen die Werte für 720 × 576 (`liveZoom`, `replayZoom`) und korrigiert sie, sobald die Videospur Größe und SAR meldet. Der Beschnitt der VLC-Videoausgabe (`crop`, `videoCropGeometry`) ist dafür ungeeignet: Auf dem Mac verschob er den Rand nur von oben und unten an die Seiten; als Medienoption wirkt er gar nicht, weil die Videoausgabe am Player hängt.
+- **Skalierung:** Die Vergrößerung auf die Fenster- bzw. Bildschirmauflösung übernimmt die OpenGL-Videoausgabe von VLCKit 3 (bilinear). Ein hochwertigerer Skalierer (z. B. libplacebo in VLC 4 oder MetalFX) ist mit VLCKit 3 nicht ohne eigene Videoausgabe möglich.
+
 ## Timeshift, „Von Anfang an“, Mediathek
 
 - **Timeshift (`TimeshiftBufferManager`):** Der Live-Player schreibt den Stream parallel in segmentierte TS-Dateien (max. 4 GB je Segment). Bei Pause oder Rücksprung übernimmt ein zweiter Player die Wiedergabe aus dem Puffer, der Live-Player läuft stumm weiter. Pufferlänge: 30, 60, 90 oder 120 min.
@@ -44,13 +51,18 @@ Die FRITZ!Box liefert pro Client-IP nur einen RTSP-Stream. Ein zweiter Stream zu
 
 | Eingabe (Siri Remote / Mac) | Funktion |
 | :--- | :--- |
-| Hoch/Runter / `↑` `↓` | Senderwechsel mit Umlauf am Listenende, 350 ms Entprellung |
+| Hoch/Runter / `↑` `↓`, `⌘→` `⌘←` | Senderwechsel mit Umlauf am Listenende, 350 ms Entprellung |
 | Nach oben wischen | Senderleiste (`ChannelFooter`), blendet nach 8 s ohne Eingabe aus |
-| Klick, nach unten wischen / `Return`, `⌘I`, Rechtsklick | Sendungsinfo (`InfoPanel`): Tonspur, Untertitel, „Von Anfang an“, „In Mediathek suchen“, Einstellungen |
-| Zurück / `Esc`, `⌘L`, Klick ins Bild | Senderliste (`ChannelListOverlay`); Fokusziel beim Öffnen einstellbar (Programmübersicht, letzter oder aktueller Sender) |
+| Klick, nach unten wischen / `Return`, `⌘I`, Info-Knopf der Steuerleiste, Rechtsklick | Sendungsinfo (`InfoPanel`): Tonspur, Untertitel, „Von Anfang an“, „In Mediathek suchen“, Einstellungen |
+| Zurück / `Esc`, `⌃⌘S`, Klick ins Bild | Senderliste (`ChannelListOverlay`); Fokusziel beim Öffnen einstellbar (Programmübersicht, letzter oder aktueller Sender) |
 | Play/Pause / Leertaste, `⌘P` | Timeshift anhalten/fortsetzen |
-| Links/Rechts / `←` `→`, Klick in Zeitleiste | Timeshift spulen; im Live-Bild Ziffern-Direktwahl |
-| – / Doppelklick ins Bild | Vollbild umschalten |
+| Links/Rechts / `←` `→`, Ziehen in der Zeitleiste | Timeshift spulen; im Live-Bild Ziffern-Direktwahl |
+| – / `⌘L`, Klick auf „LIVE“ | Timeshift: zurück zum Live-Bild |
+| – / `⇧⌘←` | Von Anfang an (`PublicHLSChannels`) |
+| – / `⌘↑` `⌘↓`, `⌥⌘↓` | Lautstärke der App (`AppModel.volume`, gespeichert in `AppSettings.volume`), Ton aus (nur für die Sitzung) |
+| – / Doppelklick ins Bild, `⌃⌘F` | Vollbild umschalten |
+
+**Mac-Steuerleiste (`MacControlBar`, `MacCommands` in `App/macOS`):** Ersetzt auf dem Mac Infoleiste und Timeshift-Leiste. Sichtbar bei Mausbewegung (`MacControlsState`, 3 s Nachlauf, bleibt stehen, solange der Zeiger auf der Leiste liegt), nach dem Umschalten (`bannerVisible`) und während der Pause. Inhalt: Sender und Sendung, Timeshift-Zeitleiste (Breite = Puffer, auf 5 min gerundet, höchstens die eingestellte Pufferlänge; Ziehen springt per `seekToBehind`), „LIVE“-Knopf, Info-Knopf (öffnet `InfoPanel`), Menü für Tonspur und Untertitel, Lautstärke, Vollbild. Das Fenster hat keine sichtbare Titelleiste und wird als Ganzes auf 16:9 gehalten (`WindowAspectRatioModifier`: `NSWindow.aspectRatio` statt `contentAspectRatio`, da das Bild unter die ausgeblendete Titelleiste reicht; SwiftUI-Mindesthöhe 328 pt plus Titelleiste ergibt 640 × 360; abweichend wiederhergestellte Fensterrahmen werden korrigiert); die Fensterknöpfe blenden sich mit der Leiste aus (im Vollbild verwaltet macOS die Titelleiste selbst). Den Mauszeiger blendet die App nur über dem Bild aus, nie außerhalb des Fensters. Die Schalter von `InfoPanel` sind auf beiden Plattformen Symbole; die Beschriftung des gewählten Schalters steht daneben, auf dem Mac zusätzlich als Tooltip. In Fenstern unter 900 × 500 pt zeigt `InfoPanel` eine kompakte Tafel: je eine Zeile für Sendung, Untertitel, „Danach“ und Empfangsdaten (Auflösung, Bitrate, Bildfehler), ohne Bedienhinweis. Hinweise auf Wischgesten erscheinen nur auf dem Apple TV (`UI.swipeHint`). Die Lautstärke wird auf Live- und Mitschnitt-Player angewendet und als Ausgangswert an die AVPlayer von Mediathek und „Von Anfang an“ übergeben (`AppModel.outputVolume`); Stummschalten setzt sie auf 0, damit es sich nicht mit dem Stummschalten beim Wechsel zwischen Live-Bild und Mitschnitt überschneidet. „Leiser“ lässt eine Stummschaltung bestehen; „Lauter“ und der Regler heben sie auf. Menüs „Wiedergabe“ und „Sender“ enthalten alle Befehle; ⌘-Befehle für das Live-Bild sind gesperrt, solange Einstellungen, Suchergebnisse oder Mediathek-Wiedergabe offen sind; die Lautstärke-Befehle in den Einstellungen (Textfelder) und bei Mediathek- bzw. HLS-Wiedergabe.
 
 ### Programmübersicht (`EPGOverviewView`)
 

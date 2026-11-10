@@ -35,12 +35,17 @@ struct FritzTVApp: App {
         WindowGroup {
             RootView(model: model, player: model.player)
             #if os(macOS)
-                .frame(minWidth: 640, minHeight: 360)
+                // Die SwiftUI-Mindesthöhe gilt für den Inhalt ohne Titelleiste (rund 32 pt). Mit 360 wäre
+                // das Fenster mindestens 640 × 392 und bei kleinster Breite nie 16:9. 328 + 32 ergibt
+                // 640 × 360; die Höhe folgt sonst aus dem Seitenverhältnis (`WindowAspectRatioModifier`).
+                .frame(minWidth: 640, minHeight: 328)
                 .modifier(WindowAspectRatioModifier(aspectRatio: NSSize(width: 16, height: 9), minSize: NSSize(width: 640, height: 360)))
             #endif
         }
         #if os(macOS)
         .defaultSize(width: 960, height: 540)
+        // Das Bild reicht bis an den oberen Rand; die Fensterknöpfe blenden sich mit der Steuerleiste aus.
+        .windowStyle(.hiddenTitleBar)
         #endif
         #if os(macOS)
         .commands {
@@ -50,61 +55,7 @@ struct FritzTVApp: App {
                 }
                 .keyboardShortcut(",", modifiers: .command)
             }
-            CommandMenu("Steuerung") {
-                Button("Programmübersicht") {
-                    if model.showEPGOverview {
-                        model.closeEPGOverview()
-                    } else {
-                        model.openEPGOverview()
-                    }
-                }
-                .keyboardShortcut("e", modifiers: .command)
-
-                Button("Sendungsinfo") {
-                    if case .info = model.overlay {
-                        model.overlay = .none
-                    } else {
-                        model.openInfoPanel()
-                    }
-                }
-                .keyboardShortcut("i", modifiers: .command)
-
-                Button("Senderliste") {
-                    if case .channelList = model.overlay {
-                        model.overlay = .none
-                    } else {
-                        model.openChannelList()
-                    }
-                }
-                .keyboardShortcut("l", modifiers: .command)
-
-                Divider()
-
-                Button("Anhalten / Weiter (Timeshift)") {
-                    model.player.togglePause()
-                    model.showBanner()
-                }
-                .keyboardShortcut("p", modifiers: .command)
-
-                if model.player.isTimeshifted {
-                    Button("Zum Live-Bild springen") {
-                        model.player.goLive()
-                    }
-                    .keyboardShortcut("0", modifiers: .command)
-                }
-
-                Divider()
-
-                Button("Nächster Sender") {
-                    model.handle(.up)
-                }
-                .keyboardShortcut(.upArrow, modifiers: .command)
-
-                Button("Vorheriger Sender") {
-                    model.handle(.down)
-                }
-                .keyboardShortcut(.downArrow, modifiers: .command)
-            }
+            MacCommands(model: model, player: model.player)
         }
         #endif
     }
@@ -136,6 +87,15 @@ enum UI {
         formatter.dateFormat = "HH:mm"
         return formatter
     }()
+
+    /// Wischgesten gibt es nur auf der Siri Remote: auf dem Apple TV der Hinweis, auf dem Mac `mac`.
+    static func swipeHint(_ hint: String, mac: String = "") -> String {
+        #if os(tvOS)
+        hint
+        #else
+        mac
+        #endif
+    }
 
     static func s(_ value: CGFloat) -> CGFloat { value * scale }
     /// Apple TV: nie kleiner als 23 pt (Mindestgröße laut Apple-Richtlinien, Standard 29 pt).

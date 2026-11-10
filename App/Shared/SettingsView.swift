@@ -25,13 +25,14 @@ struct SettingsView: View {
         case rtspTCP = 6
         case preferHD = 7
         case deinterlaceSD = 8
-        case blackScreenOnZap = 9
-        case timeshift = 10
-        case timeshiftMinutes = 11
-        case audioDelay = 12
-        case audioDelayAC3 = 13
-        case mediathekSubtitles = 14
-        case reloadXMLTV = 15
+        case sharpenSD = 9
+        case blackScreenOnZap = 10
+        case timeshift = 11
+        case timeshiftMinutes = 12
+        case audioDelay = 13
+        case audioDelayAC3 = 14
+        case mediathekSubtitles = 15
+        case reloadXMLTV = 16
     }
 
     private let cachingValues = [500, 1000, 2000, 3000, 5000]
@@ -119,6 +120,11 @@ struct SettingsView: View {
 
                     Toggle("Deinterlacing für SD-Sender", isOn: $settings.deinterlaceSD)
                         .cursorRow(.deinterlaceSD, focusedIndex: $focusedIndex)
+
+                    #if os(macOS)
+                    Toggle("SD-Sender nachschärfen", isOn: $settings.sharpenSD)
+                        .cursorRow(.sharpenSD, focusedIndex: $focusedIndex)
+                    #endif
 
                     Toggle("Schwarzer Bildschirm beim Umschalten", isOn: $settings.blackScreenOnZap)
                         .cursorRow(.blackScreenOnZap, focusedIndex: $focusedIndex)
@@ -288,6 +294,8 @@ struct SettingsView: View {
             settings.preferHD = (delta > 0)
         case .deinterlaceSD:
             settings.deinterlaceSD = (delta > 0)
+        case .sharpenSD:
+            settings.sharpenSD = (delta > 0)
         case .blackScreenOnZap:
             settings.blackScreenOnZap = (delta > 0)
         case .timeshift:
@@ -338,6 +346,8 @@ struct SettingsView: View {
             settings.preferHD.toggle()
         case .deinterlaceSD:
             settings.deinterlaceSD.toggle()
+        case .sharpenSD:
+            settings.sharpenSD.toggle()
         case .blackScreenOnZap:
             settings.blackScreenOnZap.toggle()
         case .timeshift:

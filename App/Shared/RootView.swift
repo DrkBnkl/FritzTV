@@ -14,7 +14,7 @@ struct RootView: View {
     @State private var epgPreviewFrame: CGRect?
     #if os(macOS)
     @State private var singleClickTask: Task<Void, Never>?
-    @State private var cursorHideTask: Task<Void, Never>?
+    @StateObject private var controls = MacControlsState()
     #endif
 
     private var previewFrame: CGRect? { model.showEPGOverview ? epgPreviewFrame : nil }
@@ -31,7 +31,7 @@ struct RootView: View {
                 }
                 // In der Programmübersicht läuft das Bild verkleinert im Vorschaufenster weiter.
                 // Dieselbe Ansicht wird nur verschoben (kein zweiter Player, kein Neuaufbau).
-                PlayerSurface(player: player.mediaPlayer, previewFrame: previewFrame, dockLivePreview: model.settings.dockLivePreview)
+                PlayerSurface(player: player.mediaPlayer, previewFrame: previewFrame, dockLivePreview: model.settings.dockLivePreview, zoom: player.liveZoom)
                     .modifier(EPGPreviewPlacement(
                         frame: previewFrame,
                         channelText: model.currentEntry.map { "\($0.number) · \($0.group.displayName)" } ?? "Live-TV",
@@ -46,17 +46,17 @@ struct RootView: View {
                     Color.black.ignoresSafeArea()
                 }
                 // Timeshift: Mitschnitt-Wiedergabe liegt über dem stumm weiterlaufenden Live-Bild.
-                PlayerSurface(player: player.replayPlayer, previewFrame: previewFrame, dockLivePreview: model.settings.dockLivePreview)
+                PlayerSurface(player: player.replayPlayer, previewFrame: previewFrame, dockLivePreview: model.settings.dockLivePreview, zoom: player.replayZoom)
                     .opacity(player.isReplaying ? 1 : 0)
                     .allowsHitTesting(false)
                     .modifier(EPGPreviewPlacement(frame: previewFrame, showOverlay: false))
                 if let replay = model.activeHLSReplay {
-                    HLSReplayPlayerView(url: replay.url, startDate: replay.startDate) {
+                    HLSReplayPlayerView(url: replay.url, startDate: replay.startDate, volume: model.outputVolume) {
                         model.hlsReplayClosed()
                     }
                     .ignoresSafeArea()
                 } else if let url = model.activeMediathekURL {
-                    MediathekPlayer(url: url, subtitleURL: model.activeMediathekSubtitle) {
+                    MediathekPlayer(url: url, subtitleURL: model.activeMediathekSubtitle, volume: model.outputVolume) {
                         model.mediathekPlayClosed()
                     }
                     .ignoresSafeArea()
@@ -66,18 +66,13 @@ struct RootView: View {
                     // - Doppelklick: Vollbild umschalten
                     // - Einfacher Klick: Senderliste öffnen
                     // - Rechtsklick: Kontextmenü mit allen Aktionen
-                    // - Mausbewegung: im Timeshift Steuerleiste einblenden, nach 3 s Ruhe Mauszeiger ausblenden
+                    // - Mausbewegung: Steuerleiste einblenden, nach 3 s Ruhe Leiste und Mauszeiger ausblenden
                     Color.clear
                         .contentShape(Rectangle())
                         .onContinuousHover { phase in
                             switch phase {
-                            case .active:
-                                if player.isTimeshifted && model.overlay == .none {
-                                    model.showBanner()
-                                }
-                                scheduleCursorAutoHide()
-                            case .ended:
-                                cursorHideTask?.cancel()
+                            case .active: controls.pointerMoved()
+                            case .ended: controls.pointerLeft()
                             }
                         }
                         .onTapGesture(count: 2) {
@@ -99,9 +94,18 @@ struct RootView: View {
                         }
                     #endif
                     OverlayLayer(model: model, player: player)
+                    #if os(macOS)
+                    if showsControlBar {
+                        MacControlBar(model: model, player: player, controls: controls)
+                            .transition(.opacity)
+                    }
+                    #endif
                 }
             }
             .environment(\.windowSize, windowGeo.size)
+            #if os(macOS)
+            .background(WindowButtonsFader(visible: showsWindowButtons))
+            #endif
         }
         .onPreferenceChange(EPGPreviewFrameKey.self) { epgPreviewFrame = $0 }
         .modifier(RemoteInputModifier(model: model))
@@ -166,8 +170,10 @@ struct RootView: View {
             }
         }
         #if os(macOS)
+        .onAppear {
+            controls.allowsCursorHiding = { [model] in model.isPlainLiveView }
+        }
         .onDisappear {
-            cursorHideTask?.cancel()
             singleClickTask?.cancel()
             player.stop()
             KeepAwake.update(for: .idle)
@@ -180,14 +186,16 @@ struct RootView: View {
     }
 
     #if os(macOS)
-    private func scheduleCursorAutoHide() {
-        cursorHideTask?.cancel()
-        guard model.isPlainLiveView else { return }
-        cursorHideTask = Task { @MainActor in
-            try? await Task.sleep(for: .seconds(3))
-            guard !Task.isCancelled, model.isPlainLiveView else { return }
-            NSCursor.setHiddenUntilMouseMoves(true)
-        }
+    /// Steuerleiste im Live-Bild: bei Mausbewegung, nach dem Umschalten und solange angehalten.
+    private var showsControlBar: Bool {
+        guard model.loadState == .ready, model.overlay == .none else { return false }
+        return controls.pointerActive || model.bannerVisible || player.pausedSince != nil
+    }
+
+    /// Fensterknöpfe: mit der Steuerleiste, und immer, solange etwas anderes als das Bild zu sehen ist.
+    /// Im Vollbild blendet macOS die Titelleiste selbst ein und aus; die Knöpfe bleiben dort sichtbar.
+    private var showsWindowButtons: Bool {
+        !model.isPlainLiveView || showsControlBar || controls.isFullScreen
     }
 
     @ViewBuilder
@@ -248,15 +256,15 @@ struct RootView: View {
         Divider()
 
         Button {
-            model.handle(.up)
+            model.stepChannel(+1)
         } label: {
-            Label("Nächster Sender", systemImage: "chevron.up")
+            Label("Nächster Sender", systemImage: "forward.fill")
         }
 
         Button {
-            model.handle(.down)
+            model.stepChannel(-1)
         } label: {
-            Label("Vorheriger Sender", systemImage: "chevron.down")
+            Label("Voriger Sender", systemImage: "backward.fill")
         }
 
         Button {
@@ -324,6 +332,8 @@ struct OverlayLayer: View {
                        hint: "Bleibt das Bild weg: Sind alle 4 Tuner der FRITZ!Box belegt?", busy: true)
         }
 
+        // Auf dem Mac übernimmt die Steuerleiste (`MacControlBar`) Infoleiste und Timeshift-Leiste.
+        #if !os(macOS)
         if model.overlay == .none {
             if player.isTimeshifted {
                 if player.pausedSince != nil || model.bannerVisible {
@@ -335,6 +345,7 @@ struct OverlayLayer: View {
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
+        #endif
 
         switch model.overlay {
         case .none:

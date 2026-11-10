@@ -7,6 +7,8 @@ struct MediathekPlayer: View {
     let url: URL
     /// Untertitel-Datei (TTML/WebVTT), falls bekannt.
     var subtitleURL: URL? = nil
+    /// Eigene Lautstärke der App (0…1), siehe `AppModel.outputVolume`.
+    var volume: Float = 1
     var onClose: (() -> Void)? = nil
 
     @State private var player = AVPlayer()
@@ -30,6 +32,8 @@ struct MediathekPlayer: View {
             .overlay {
                 if playbackFailed { PlaybackFailedCard() }
             }
+            .onAppear { player.volume = volume }
+            .onChange(of: volume) { _, level in player.volume = level }
             .task {
                 await player.waitForPlaybackFailure()
                 playbackFailed = !Task.isCancelled

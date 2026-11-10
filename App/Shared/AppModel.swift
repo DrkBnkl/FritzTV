@@ -117,6 +117,18 @@ final class AppModel: ObservableObject {
     /// Untertitel zum laufenden Mediathek-Video aus der Suche, falls vorhanden.
     private(set) var activeMediathekSubtitle: URL?
     @Published var searchResultDialog: (title: String, results: [MediathekSearchResult])?
+    /// Eigene Lautstärke (0–100), gespeichert. Auf dem Apple TV regelt die Fernbedienung den Fernseher.
+    /// Geändert wird sie über `setVolume` (Regler) und `changeVolume(by:)` (Kurzbefehle).
+    @Published private(set) var volume: Int {
+        didSet {
+            settings.volume = volume
+            applyVolume()
+        }
+    }
+    /// Stumm geschaltet (nur für diese Sitzung, damit die App nie unerwartet stumm startet).
+    @Published var isMuted = false {
+        didSet { applyVolume() }
+    }
 
     let settings: AppSettings
     let player: PlayerController
@@ -144,6 +156,8 @@ final class AppModel: ObservableObject {
         } else {
             preferences = .standard
         }
+        volume = resolvedSettings.volume
+        resolvedPlayer.volume = resolvedSettings.volume
 
         resolvedPlayer.onVariantSuccess = { [weak self] variantKey, workingID, failedEarlier in
             Task { @MainActor in
@@ -320,6 +334,12 @@ final class AppModel: ObservableObject {
         }
     }
 
+    /// Nächster (+1) bzw. voriger (−1) Sender, unabhängig davon, was gerade eingeblendet ist (Menü, Steuerleiste).
+    func stepChannel(_ step: Int) {
+        if case .channelList = overlay {} else if overlay != .none { overlay = .none }
+        zap(step)
+    }
+
     private func zap(_ step: Int) {
         guard let next = lineup?.entry(after: currentNumber, step: step) else { return }
         currentNumber = next.number
@@ -382,6 +402,7 @@ final class AppModel: ObservableObject {
             networkCachingMs: settings.networkCaching > 0 ? settings.networkCaching : (isWired ? 500 : 1000),
             rtspTCP: settings.rtspTCP,
             deinterlace: settings.deinterlaceSD,
+            sharpenSD: settings.sharpenSD,
             audioDelayMs: settings.audioDelayMs,
             audioDelayAC3Ms: settings.audioDelayAC3Ms,
             timeshift: settings.timeshift,
@@ -412,6 +433,38 @@ final class AppModel: ObservableObject {
         guard loadState == .ready, player.status == .idle,
               activeHLSReplay == nil, activeMediathekURL == nil else { return }
         resume()
+    }
+
+    // MARK: Lautstärke
+
+    /// Hörbare Lautstärke als Faktor 0…1 (für die AVPlayer von Mediathek und „Von Anfang an“).
+    var outputVolume: Float { isMuted ? 0 : Float(volume) / 100 }
+
+    /// Regler: Eine gewählte Lautstärke über 0 hebt die Stummschaltung auf.
+    func setVolume(_ value: Int) {
+        let level = min(max(value, 0), 100)
+        if level > 0, isMuted { isMuted = false }
+        volume = level
+    }
+
+    /// Kurzbefehle: „Lauter“ hebt eine Stummschaltung nur auf, „Leiser“ lässt sie bestehen.
+    func changeVolume(by delta: Int) {
+        if isMuted, delta > 0 {
+            if volume == 0 { volume = min(delta, 100) }
+            isMuted = false
+            return
+        }
+        volume = min(max(volume + delta, 0), 100)
+    }
+
+    func toggleMute() {
+        // Bei Lautstärke 0 bliebe „Ton an“ ohne Wirkung.
+        if isMuted, volume == 0 { volume = 10 }
+        isMuted.toggle()
+    }
+
+    private func applyVolume() {
+        player.volume = isMuted ? 0 : volume
     }
 
     // MARK: Infoleiste
