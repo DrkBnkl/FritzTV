@@ -7,12 +7,12 @@ import Foundation
 /// weil die Randspalten zur Austastung gehören. Außerdem enthalten viele SD-Signale oben und unten
 /// einige schwarze Zeilen, die ein Fernseher per Overscan ausblendet.
 ///
-/// `geometry` liefert deshalb einen Ausschnitt, der an allen Rändern rund 1,5 % abschneidet und
+/// `geometry` liefert deshalb einen Ausschnitt, der an allen Rändern rund 2,5 % abschneidet (SAT.1 etwa sendet oben und unten je rund 11 schwarze Zeilen) und
 /// dabei genau das Standardformat trifft. Liegt das Bild nicht nahe an 16:9 oder 4:3, bleibt sein
 /// eigenes Seitenverhältnis erhalten.
 public enum PictureCrop {
     /// Anteil der Bildhöhe, der oben und unten jeweils abgeschnitten wird.
-    public static let overscan = 0.015
+    public static let overscan = 0.025
 
     /// Ausschnitt für 720 × 576 mit SAR 16:11, solange die Videospur noch kein Format meldet.
     public static let defaultSDGeometry = geometry(width: 720, height: 576, sampleAspect: 16.0 / 11.0)!
