@@ -16,6 +16,8 @@ struct PlaybackOptions: Equatable {
     var networkCachingMs: Int
     var rtspTCP: Bool
     var deinterlace: Bool
+    /// Nur macOS: SD-Bild vor dem Hochskalieren nachschärfen (VLC-Filter `sharpen`).
+    var sharpenSD: Bool
     var audioDelayMs: Int
     var audioDelayAC3Ms: Int
     var timeshift: Bool
@@ -54,6 +56,26 @@ final class PlayerController: ObservableObject {
         "--no-snapshot-preview",
         "--no-osd"
     ])
+
+    /// Stärke des Nachschärfens (VLC-Standard 0,05, Bereich 0–2). Wirkt auf das 576er-Bild vor dem
+    /// Hochskalieren, deshalb zurückhaltend gewählt, damit MPEG-2-Blockartefakte nicht hervortreten.
+    private static let sharpenSigma = "0.1"
+
+    /// SD-Sender senden 576i. `yadif2x` erzeugt aus jedem Halbbild ein Vollbild (50 statt 25 Bilder
+    /// pro Sekunde); das erhält die Bewegungsauflösung und passt zur 50-Hz-Ausgabe auf dem Apple TV.
+    private static func deinterlaceFilter(options: PlaybackOptions, isSD: Bool) -> String? {
+        options.deinterlace && isSD ? "yadif2x" : nil
+    }
+
+    /// Bildfilter je Medium. `sharpen` ist nur in VLCKit für macOS enthalten, nicht in TVVLCKit.
+    private static func addPictureOptions(to media: VLCMedia, options: PlaybackOptions, isSD: Bool) {
+        #if os(macOS)
+        if options.sharpenSD && isSD {
+            media.addOption(":video-filter=sharpen")
+            media.addOption(":sharpen-sigma=\(sharpenSigma)")
+        }
+        #endif
+    }
 
     let mediaPlayer = VLCMediaPlayer(library: vlcLibrary)
     let epgStore: EPGStore
@@ -282,6 +304,7 @@ final class PlayerController: ObservableObject {
         if options.rtspTCP || forceTCP {
             media.addOption(":rtsp-tcp")
         }
+        Self.addPictureOptions(to: media, options: options, isSD: !channel.isHD)
         DebugLog.log("Öffne Stream per \(options.rtspTCP || forceTCP ? "TCP" : "UDP"), Puffer \(options.networkCachingMs) ms")
         if options.timeshift {
             prepareRecording(keepHistory: preserveTimeshift)
@@ -289,7 +312,7 @@ final class PlayerController: ObservableObject {
             discardBuffer()
         }
         mediaPlayer.media = media
-        mediaPlayer.setDeinterlaceFilter(options.deinterlace && !channel.isHD ? "yadif" : nil)
+        mediaPlayer.setDeinterlaceFilter(Self.deinterlaceFilter(options: options, isSD: !channel.isHD))
         mediaPlayer.audio?.isMuted = true
         mediaPlayer.play()
 
@@ -996,8 +1019,9 @@ final class PlayerController: ObservableObject {
         media.addOption(":file-caching=300")
         media.addOption(":input-fast-seek")
         media.addOption(":vbi-opaque=0")
+        Self.addPictureOptions(to: media, options: options, isSD: channel?.isHD == false)
         replayPlayer.media = media
-        replayPlayer.setDeinterlaceFilter(options.deinterlace && channel?.isHD == false ? "yadif" : nil)
+        replayPlayer.setDeinterlaceFilter(Self.deinterlaceFilter(options: options, isSD: channel?.isHD == false))
         mediaPlayer.audio?.isMuted = true
         replayPlayer.audio?.isMuted = paused
         replayPlayer.play()

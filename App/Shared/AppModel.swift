@@ -402,6 +402,7 @@ final class AppModel: ObservableObject {
             networkCachingMs: settings.networkCaching > 0 ? settings.networkCaching : (isWired ? 500 : 1000),
             rtspTCP: settings.rtspTCP,
             deinterlace: settings.deinterlaceSD,
+            sharpenSD: settings.sharpenSD,
             audioDelayMs: settings.audioDelayMs,
             audioDelayAC3Ms: settings.audioDelayAC3Ms,
             timeshift: settings.timeshift,
