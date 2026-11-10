@@ -305,12 +305,18 @@ final class PlayerController: ObservableObject {
             while !Task.isCancelled {
                 // Bis das erste Bild da ist, öfter nachsehen: Die schwarze Abdeckung soll ohne
                 // Verzögerung verschwinden.
-                let interval = (self?.awaitingFirstPicture ?? false) ? 100 : 500
+                let interval = (self?.needsFastPolling ?? false) ? 100 : 500
                 try? await Task.sleep(for: .milliseconds(interval))
                 guard let self, !Task.isCancelled else { return }
                 self.poll()
             }
         }
+    }
+
+    /// Kurzer Takt, bis das erste Bild da ist, und in den ersten Sekunden eines Mitschnitts: Dessen
+    /// Tonausgabe beginnt mit voller Lautstärke, die eigene Lautstärke soll sofort wieder gelten.
+    private var needsFastPolling: Bool {
+        awaitingFirstPicture || (isReplaying && volume < 100 && Date().timeIntervalSince(replayOpenedAt) < 2)
     }
 
     private var lastLoggedState: Int = -1
@@ -995,6 +1001,7 @@ final class PlayerController: ObservableObject {
         mediaPlayer.audio?.isMuted = true
         replayPlayer.audio?.isMuted = paused
         replayPlayer.play()
+        applyVolume()
         replaySegment = segment
         replayAnchor = (position, Date(), paused)
         replaySeekPending = position > 0.5 ? position : nil

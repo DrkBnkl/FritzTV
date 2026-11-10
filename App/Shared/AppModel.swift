@@ -118,10 +118,10 @@ final class AppModel: ObservableObject {
     private(set) var activeMediathekSubtitle: URL?
     @Published var searchResultDialog: (title: String, results: [MediathekSearchResult])?
     /// Eigene Lautstärke (0–100), gespeichert. Auf dem Apple TV regelt die Fernbedienung den Fernseher.
-    @Published var volume: Int {
+    /// Geändert wird sie über `setVolume` (Regler) und `changeVolume(by:)` (Kurzbefehle).
+    @Published private(set) var volume: Int {
         didSet {
             settings.volume = volume
-            if volume > 0 { isMuted = false }
             applyVolume()
         }
     }
@@ -436,8 +436,20 @@ final class AppModel: ObservableObject {
 
     // MARK: Lautstärke
 
+    /// Hörbare Lautstärke als Faktor 0…1 (für die AVPlayer von Mediathek und „Von Anfang an“).
+    var outputVolume: Float { isMuted ? 0 : Float(volume) / 100 }
+
+    /// Regler: Eine gewählte Lautstärke über 0 hebt die Stummschaltung auf.
+    func setVolume(_ value: Int) {
+        let level = min(max(value, 0), 100)
+        if level > 0, isMuted { isMuted = false }
+        volume = level
+    }
+
+    /// Kurzbefehle: „Lauter“ hebt eine Stummschaltung nur auf, „Leiser“ lässt sie bestehen.
     func changeVolume(by delta: Int) {
         if isMuted, delta > 0 {
+            if volume == 0 { volume = min(delta, 100) }
             isMuted = false
             return
         }
@@ -445,6 +457,8 @@ final class AppModel: ObservableObject {
     }
 
     func toggleMute() {
+        // Bei Lautstärke 0 bliebe „Ton an“ ohne Wirkung.
+        if isMuted, volume == 0 { volume = 10 }
         isMuted.toggle()
     }
 

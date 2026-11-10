@@ -51,12 +51,12 @@ struct RootView: View {
                     .allowsHitTesting(false)
                     .modifier(EPGPreviewPlacement(frame: previewFrame, showOverlay: false))
                 if let replay = model.activeHLSReplay {
-                    HLSReplayPlayerView(url: replay.url, startDate: replay.startDate) {
+                    HLSReplayPlayerView(url: replay.url, startDate: replay.startDate, volume: model.outputVolume) {
                         model.hlsReplayClosed()
                     }
                     .ignoresSafeArea()
                 } else if let url = model.activeMediathekURL {
-                    MediathekPlayer(url: url, subtitleURL: model.activeMediathekSubtitle) {
+                    MediathekPlayer(url: url, subtitleURL: model.activeMediathekSubtitle, volume: model.outputVolume) {
                         model.mediathekPlayClosed()
                     }
                     .ignoresSafeArea()

@@ -62,7 +62,7 @@ struct MacCommands: Commands {
             Button("Leiser") { model.changeVolume(by: -10) }
                 .keyboardShortcut(.downArrow, modifiers: .command)
                 .disabled(!volumeCommandsEnabled)
-            Toggle("Ton aus", isOn: $model.isMuted)
+            Toggle("Ton aus", isOn: Binding(get: { model.isMuted }, set: { _ in model.toggleMute() }))
                 .keyboardShortcut(.downArrow, modifiers: [.command, .option])
                 .disabled(!volumeCommandsEnabled)
 
