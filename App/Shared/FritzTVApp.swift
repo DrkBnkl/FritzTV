@@ -35,7 +35,10 @@ struct FritzTVApp: App {
         WindowGroup {
             RootView(model: model, player: model.player)
             #if os(macOS)
-                .frame(minWidth: 640, minHeight: 360)
+                // Die SwiftUI-Mindesthöhe gilt für den Inhalt ohne Titelleiste (rund 32 pt). Mit 360 wäre
+                // das Fenster mindestens 640 × 392 und bei kleinster Breite nie 16:9. 328 + 32 ergibt
+                // 640 × 360; die Höhe folgt sonst aus dem Seitenverhältnis (`WindowAspectRatioModifier`).
+                .frame(minWidth: 640, minHeight: 328)
                 .modifier(WindowAspectRatioModifier(aspectRatio: NSSize(width: 16, height: 9), minSize: NSSize(width: 640, height: 360)))
             #endif
         }
