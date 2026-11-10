@@ -101,6 +101,13 @@ struct EPGOverviewView: View {
         return formatter
     }()
 
+    private static let shortHeaderFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "de_DE")
+        formatter.dateFormat = "EE, d.M. · HH:mm"
+        return formatter
+    }()
+
     private var headerDateString: String { Self.headerFormatter.string(from: Date()) }
 
     var body: some View {
@@ -214,8 +221,18 @@ struct EPGOverviewView: View {
         return EPGMetrics.previewSize
     }
 
+    /// Abstand oben: Auf dem Mac hat das Fenster keine Titelleiste, die Fensterknöpfe liegen
+    /// über dem Inhalt und brauchen links oben Platz (Knopfzeile etwa 28 pt hoch).
+    private var headerTopPadding: CGFloat {
+        #if os(macOS)
+        return 32
+        #else
+        return EPGMetrics.s(18)
+        #endif
+    }
+
     private var headerHeight: CGFloat {
-        livePreviewSize.height + EPGMetrics.s(36)
+        livePreviewSize.height + headerTopPadding + EPGMetrics.s(18)
     }
 
     private var headerBar: some View {
@@ -224,8 +241,9 @@ struct EPGOverviewView: View {
             headerProgramDetails
         }
         .padding(.horizontal, EPGMetrics.s(26))
-        .padding(.vertical, EPGMetrics.s(18))
-        .frame(height: headerHeight)
+        .padding(.top, headerTopPadding)
+        .padding(.bottom, EPGMetrics.s(18))
+        .frame(height: headerHeight, alignment: .top)
         .background(EPGColors.header)
     }
 
@@ -245,24 +263,42 @@ struct EPGOverviewView: View {
             #endif
     }
 
-    /// Sendungsdetails rechts neben dem Live-Bild
+    /// Sendungsdetails rechts neben dem Live-Bild. In kleinen Fenstern entfallen nacheinander
+    /// die Tasten-Hinweise, die zweite Zeile der Beschreibung und die Beschreibung ganz.
     private var headerProgramDetails: some View {
+        ViewThatFits(in: .vertical) {
+            programDetails(descriptionLines: 2, showsHints: true)
+            programDetails(descriptionLines: 2, showsHints: false)
+            programDetails(descriptionLines: 1, showsHints: false)
+            programDetails(descriptionLines: 0, showsHints: false)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    private func programDetails(descriptionLines: Int, showsHints: Bool) -> some View {
         let entry = selectedEntry
         let prog = focusedProgram
         let now = Date()
 
         return VStack(alignment: .leading, spacing: EPGMetrics.s(8)) {
             // Zeile 1: Überschrift links & Datum/Uhrzeit / Steuerung rechts
-            HStack(alignment: .center) {
+            HStack(alignment: .center, spacing: EPGMetrics.s(10)) {
                 Text("Programmübersicht")
                     .font(EPGMetrics.font(15, .bold))
                     .foregroundStyle(EPGColors.accent)
+                    .lineLimit(1)
+                    .layoutPriority(1)
 
-                Spacer()
+                Spacer(minLength: 0)
 
-                Text(headerDateString)
-                    .font(EPGMetrics.font(15, .medium))
-                    .foregroundStyle(EPGColors.secondaryText)
+                ViewThatFits(in: .horizontal) {
+                    Text(headerDateString)
+                    Text(Self.shortHeaderFormatter.string(from: Date()))
+                    Text(Self.formatTime(Date()))
+                }
+                .font(EPGMetrics.font(15, .medium))
+                .foregroundStyle(EPGColors.secondaryText)
+                .lineLimit(1)
 
                 #if os(macOS)
                 if nav.cursorTime != nil {
@@ -272,61 +308,66 @@ struct EPGOverviewView: View {
                         BadgePill(text: "Jetzt", fg: Color(red: 0.04, green: 0.08, blue: 0.14), bg: EPGColors.accent, size: 12)
                     }
                     .buttonStyle(.plain)
+                    .fixedSize()
                     .help("Zur aktuellen Uhrzeit springen")
                 }
                 Button(action: { model.closeEPGOverview() }) {
                     BadgePill(text: "✕", fg: EPGColors.secondaryText, bg: Color.white.opacity(0.12), size: 12)
                 }
                 .buttonStyle(.plain)
+                .fixedSize()
                 .help("Programmübersicht schließen (Esc)")
                 #endif
             }
 
-            // Zeile 2: Sender & Badges
+            // Zeile 2: Sender & Badges. Erst wird die Zeitangabe verkürzt, zuletzt der Sendername.
             HStack(spacing: EPGMetrics.s(10)) {
                 if let entry = entry {
                     Text("\(entry.number) · \(entry.group.displayName)")
                         .font(EPGMetrics.font(18, .bold))
                         .foregroundStyle(EPGColors.secondaryText)
+                        .lineLimit(1)
+                        .layoutPriority(3)
                 }
 
                 if let prog = prog {
                     let isLive = prog.isLive(at: now)
                     let isPast = prog.endDate <= now
 
-                    if isLive {
-                        BadgePill(text: "JETZT",
-                                  fg: Color(red: 0.04, green: 0.08, blue: 0.14),
-                                  bg: EPGColors.accent,
-                                  size: 12)
-                    } else if isPast {
-                        BadgePill(text: "VERGANGEN",
-                                  fg: EPGColors.secondaryText,
-                                  bg: Color.white.opacity(0.09),
-                                  size: 12)
-                    } else {
-                        BadgePill(text: "DEMNÄCHST",
-                                  fg: EPGColors.secondaryText,
-                                  bg: Color.white.opacity(0.09),
-                                  size: 12)
-                    }
-
-                    let startStr = EPGOverviewView.formatTime(prog.startDate)
-                    let endStr = EPGOverviewView.formatTime(prog.endDate)
-                    let timePillText: String = {
+                    Group {
                         if isLive {
-                            let rem = max(1, Int(prog.endDate.timeIntervalSince(now) / 60))
-                            return "\(startStr) – \(endStr) · noch \(rem) Min."
+                            BadgePill(text: "JETZT",
+                                      fg: Color(red: 0.04, green: 0.08, blue: 0.14),
+                                      bg: EPGColors.accent,
+                                      size: 12)
+                        } else if isPast {
+                            BadgePill(text: "VERGANGEN",
+                                      fg: EPGColors.secondaryText,
+                                      bg: Color.white.opacity(0.09),
+                                      size: 12)
                         } else {
-                            let dur = max(1, Int(prog.duration / 60))
-                            return "\(startStr) – \(endStr) · \(dur) Min."
+                            BadgePill(text: "DEMNÄCHST",
+                                      fg: EPGColors.secondaryText,
+                                      bg: Color.white.opacity(0.09),
+                                      size: 12)
                         }
-                    }()
-                    BadgePill(text: timePillText,
-                              fg: EPGColors.secondaryText,
-                              bg: Color.white.opacity(0.09),
-                              size: 12)
+                    }
+                    .fixedSize()
+                    .layoutPriority(2)
+
+                    let times = "\(EPGOverviewView.formatTime(prog.startDate)) – \(EPGOverviewView.formatTime(prog.endDate))"
+                    let detail: String = isLive
+                        ? "noch \(max(1, Int(prog.endDate.timeIntervalSince(now) / 60))) Min."
+                        : "\(max(1, Int(prog.duration / 60))) Min."
+                    ViewThatFits(in: .horizontal) {
+                        BadgePill(text: "\(times) · \(detail)", fg: EPGColors.secondaryText,
+                                  bg: Color.white.opacity(0.09), size: 12)
+                        BadgePill(text: times, fg: EPGColors.secondaryText,
+                                  bg: Color.white.opacity(0.09), size: 12)
+                    }
+                    .layoutPriority(1)
                 }
+                Spacer(minLength: 0)
             }
 
             // Zeile 3: Sendungstitel
@@ -349,33 +390,43 @@ struct EPGOverviewView: View {
             }
 
             // Zeile 5: Beschreibung
-            if let desc = prog?.description, !desc.isEmpty, desc != prog?.subtitle {
-                Text(desc)
-                    .font(EPGMetrics.font(15, .regular))
-                    .foregroundStyle(EPGColors.secondaryText)
-                    .lineLimit(2)
-            } else if prog == nil {
-                Text("Für diesen Sender liegen derzeit keine Programminformationen vor.")
-                    .font(EPGMetrics.font(15, .regular))
-                    .foregroundStyle(EPGColors.secondaryText)
-                    .lineLimit(2)
+            if descriptionLines > 0 {
+                if let desc = prog?.description, !desc.isEmpty, desc != prog?.subtitle {
+                    Text(desc)
+                        .font(EPGMetrics.font(15, .regular))
+                        .foregroundStyle(EPGColors.secondaryText)
+                        .lineLimit(descriptionLines)
+                } else if prog == nil {
+                    Text("Für diesen Sender liegen derzeit keine Programminformationen vor.")
+                        .font(EPGMetrics.font(15, .regular))
+                        .foregroundStyle(EPGColors.secondaryText)
+                        .lineLimit(descriptionLines)
+                }
             }
 
-            Spacer(minLength: 4)
-
-            // Zeile 6: Tasten-Hinweise
-            HStack(spacing: EPGMetrics.s(18)) {
-                hintItem("Hoch/Runter", "Sender")
-                hintItem("Links/Rechts", "Zeit (-6 Std. bis +24 Std.)")
-                hintItem("Klick", "Umschalten / Details")
-                hintItem("Play/Pause", "Von Anfang an & Mediathek")
-                hintItem("Zurück", "Live-TV")
+            // Zeile 6: Tasten-Hinweise; passen nicht alle in die Breite, nur die wichtigsten.
+            if showsHints {
+                Spacer(minLength: 4)
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: EPGMetrics.s(18)) { ForEach(Self.hints, id: \.key) { hintItem($0.key, $0.label) } }
+                    HStack(spacing: EPGMetrics.s(18)) { ForEach(Self.hints.prefix(3), id: \.key) { hintItem($0.key, $0.label) } }
+                    HStack(spacing: EPGMetrics.s(18)) { ForEach(Self.hints.prefix(2), id: \.key) { hintItem($0.key, $0.label) } }
+                }
+                .lineLimit(1)
             }
-            .lineLimit(1)
-            .minimumScaleFactor(0.8)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
     }
+
+    /// Tasten-Hinweise in der Reihenfolge ihrer Wichtigkeit.
+    private static let hints: [(key: String, label: String)] = {
+        #if os(macOS)
+        return [("↑ ↓", "Sender"), ("← →", "Zeit (−6 bis +24 Std.)"), ("Klick", "Umschalten / Details"),
+                ("Leertaste", "Von Anfang an & Mediathek"), ("Esc", "Live-TV")]
+        #else
+        return [("Hoch/Runter", "Sender"), ("Links/Rechts", "Zeit (-6 Std. bis +24 Std.)"), ("Klick", "Umschalten / Details"),
+                ("Play/Pause", "Von Anfang an & Mediathek"), ("Zurück", "Live-TV")]
+        #endif
+    }()
 
     private func hintItem(_ key: String, _ label: String) -> some View {
         HStack(spacing: 6) {
@@ -626,6 +677,7 @@ struct BadgePill: View {
         Text(text)
             .font(.system(size: size, weight: .bold))
             .foregroundStyle(fg)
+            .lineLimit(1)
             .padding(.horizontal, 8)
             .padding(.vertical, 4)
             .background(bg, in: RoundedRectangle(cornerRadius: 5, style: .continuous))
