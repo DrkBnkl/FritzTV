@@ -88,6 +88,15 @@ enum UI {
         return formatter
     }()
 
+    /// Wischgesten gibt es nur auf der Siri Remote: auf dem Apple TV der Hinweis, auf dem Mac `mac`.
+    static func swipeHint(_ hint: String, mac: String = "") -> String {
+        #if os(tvOS)
+        hint
+        #else
+        mac
+        #endif
+    }
+
     static func s(_ value: CGFloat) -> CGFloat { value * scale }
     /// Apple TV: nie kleiner als 23 pt (Mindestgröße laut Apple-Richtlinien, Standard 29 pt).
     static func font(_ size: CGFloat, _ weight: Font.Weight = .regular) -> Font {

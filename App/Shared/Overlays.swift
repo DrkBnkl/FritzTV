@@ -72,16 +72,19 @@ private struct BottomPanel<Content: View>: View {
 /// Tafel am oberen Rand (Info, wie die Info-Reiter des Apple-Players: Wischen nach unten).
 private struct TopPanel<Content: View>: View {
     var onTapOutside: (() -> Void)? = nil
+    /// Kleines Mac-Fenster: knappere Ränder.
+    var compact = false
     @ViewBuilder let content: Content
 
     var body: some View {
         VStack {
             content
-                .padding(.horizontal, UI.s(48))
-                .padding(.vertical, UI.s(36))
+                .padding(.horizontal, compact ? 16 : UI.s(48))
+                .padding(.vertical, compact ? 12 : UI.s(36))
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background { PanelBackground(cornerRadius: UI.s(32)) }
-                .padding(.horizontal, UI.s(16))
+                .background { PanelBackground(cornerRadius: compact ? 16 : UI.s(32)) }
+                .padding(.horizontal, compact ? 10 : UI.s(16))
+                .padding(.top, compact ? 8 : 0)
             Spacer()
                 #if os(macOS)
                 .frame(maxWidth: .infinity)
@@ -315,8 +318,154 @@ struct InfoPanel: View {
     @ObservedObject var model: AppModel
     @ObservedObject var player: PlayerController
     let selection: Int
+    @Environment(\.windowSize) private var windowSize
+
+    /// Kleines Mac-Fenster: Die volle Tafel füllte bei 640 × 360 fast das ganze Bild, Schalter und
+    /// Zeilen wurden abgeschnitten oder umbrochen. Kompakt: Symbolschalter, eine Zeile je Angabe.
+    private var isCompact: Bool {
+        #if os(macOS)
+        return windowSize.width < 900 || windowSize.height < 500
+        #else
+        return false
+        #endif
+    }
 
     var body: some View {
+        if isCompact {
+            compactBody
+        } else {
+            fullBody
+        }
+    }
+
+    private var compactBody: some View {
+        TopPanel(onTapOutside: { model.overlay = .none }, compact: true) {
+            VStack(alignment: .leading, spacing: 8) {
+                let pills = model.availableInfoPills
+                HStack(spacing: 8) {
+                    ForEach(0..<pills.count, id: \.self) { index in
+                        compactPill(pills[index], selected: selection == index)
+                            #if os(macOS)
+                            .contentShape(Capsule())
+                            .onHover { hovering in
+                                if hovering { model.overlay = .info(selection: index) }
+                            }
+                            .onTapGesture {
+                                model.executeInfoPill(at: index)
+                            }
+                            .help(title(for: pills[index]))
+                            #endif
+                    }
+                    if pills.indices.contains(selection) {
+                        Text(title(for: pills[selection]))
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(UI.secondary)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                            .padding(.leading, 4)
+                    }
+                    Spacer(minLength: 8)
+                    #if os(macOS)
+                    Button(action: { model.overlay = .none }) {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 12, weight: .bold))
+                            .foregroundStyle(UI.text)
+                            .frame(width: 28, height: 28)
+                            .background(Color.white.opacity(0.12), in: Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .focusable(false)
+                    .help("Schließen")
+                    #endif
+                }
+
+                HStack(spacing: 8) {
+                    ChannelLogoView(channelName: model.currentEntry?.group.displayName ?? "", height: 16, maxWidth: 50)
+                    Text("\(player.isTimeshifted ? "ZEITVERSETZT" : "JETZT") · \(model.currentEntry?.number ?? 0) \(model.currentEntry?.group.displayName ?? "")")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(UI.secondary)
+                        .lineLimit(1)
+                }
+
+                if let current = player.displayedProgram {
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Text("\(Self.formatTime(current.startDate)) – \(Self.formatTime(current.endDate))")
+                            .font(.system(size: 13, weight: .bold))
+                            .foregroundStyle(UI.accent)
+                        Text(current.title)
+                            .font(.system(size: 17, weight: .bold))
+                            .lineLimit(1)
+                    }
+                    TimelineView(.periodic(from: .now, by: 10)) { context in
+                        let effectiveDate = context.date.addingTimeInterval(-player.currentBehind)
+                        let progress = current.progress(at: effectiveDate)
+                        GeometryReader { geo in
+                            ZStack(alignment: .leading) {
+                                Capsule().fill(Color.white.opacity(0.15))
+                                Capsule().fill(UI.accent)
+                                    .frame(width: max(geo.size.width * progress, 3))
+                            }
+                        }
+                        .frame(height: 3)
+                    }
+                    if let subtitle = current.subtitle ?? current.description {
+                        Text(subtitle)
+                            .font(.system(size: 12))
+                            .foregroundStyle(UI.secondary)
+                            .lineLimit(1)
+                    }
+                } else {
+                    Text(player.nowPlaying ?? "Keine Programminformation")
+                        .font(.system(size: 17, weight: .bold))
+                        .lineLimit(1)
+                }
+
+                if let next = player.displayedNextProgram {
+                    (Text("Danach \(Self.formatTime(next.startDate))  ").foregroundStyle(UI.secondary)
+                        + Text(next.title).foregroundStyle(UI.text))
+                        .font(.system(size: 12, weight: .semibold))
+                        .lineLimit(1)
+                }
+
+                HStack(spacing: 12) {
+                    if !player.stats.resolutionLabel.isEmpty {
+                        Label(player.stats.resolutionLabel, systemImage: "tv")
+                    }
+                    if !player.stats.bitrateLabel.isEmpty {
+                        Label(player.stats.bitrateLabel, systemImage: "speedometer")
+                    }
+                    Label(player.stats.lossLabel,
+                          systemImage: player.stats.lostPictures > 0 ? "exclamationmark.triangle" : "checkmark.shield")
+                        .foregroundStyle(player.stats.lostPictures > 0 ? Color.orange : UI.secondary)
+                }
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(UI.secondary)
+                .lineLimit(1)
+            }
+            .foregroundStyle(UI.text)
+        }
+    }
+
+    private func compactPill(_ pill: AppModel.InfoPill, selected: Bool) -> some View {
+        Image(systemName: icon(for: pill))
+            .font(.system(size: 13, weight: .semibold))
+            .foregroundStyle(selected ? Color.black : UI.text)
+            .frame(width: 34, height: 28)
+            .background(selected ? UI.text : Color.white.opacity(0.14), in: Capsule())
+            .animation(.easeOut(duration: 0.15), value: selected)
+    }
+
+    private func icon(for pill: AppModel.InfoPill) -> String {
+        switch pill {
+        case .audio: return "speaker.wave.2"
+        case .subtitle: return "captions.bubble"
+        case .restartHLS: return "backward.end"
+        case .searchMediathek: return "magnifyingglass"
+        case .settings: return "gearshape"
+        }
+    }
+
+    private var fullBody: some View {
         TopPanel(onTapOutside: { model.overlay = .none }) {
             VStack(alignment: .leading, spacing: UI.s(28)) {
                 // Schalter oben
@@ -456,7 +605,7 @@ struct InfoPanel: View {
                 .foregroundStyle(UI.secondary)
                 .padding(.top, UI.s(4))
 
-                Text("\(UI.leftRight): auswählen · \(UI.select): Aktion ausführen · \(UI.back) oder nach oben wischen: schließen")
+                Text("\(UI.leftRight): auswählen · \(UI.select): Aktion ausführen · \(UI.back)\(UI.swipeHint(" oder nach oben wischen")): schließen")
                     .font(UI.font(22))
                     .foregroundStyle(UI.secondary)
             }
@@ -1109,7 +1258,7 @@ struct ChannelFooter: View {
                     .frame(height: UI.s(420))
                     .ignoresSafeArea(edges: .bottom)
                 VStack(alignment: .leading, spacing: UI.s(16)) {
-                    Text("\(UI.leftRight): Sender wählen · \(UI.select): umschalten · nach unten wischen: schließen")
+                    Text("\(UI.leftRight): Sender wählen · \(UI.select): umschalten · \(UI.swipeHint("nach unten wischen", mac: UI.back)): schließen")
                         .font(UI.font(23))
                         .foregroundStyle(UI.secondary)
                     GeometryReader { geo in
