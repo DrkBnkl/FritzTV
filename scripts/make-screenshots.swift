@@ -370,305 +370,370 @@ struct EPGScreenshotView: View {
     }
 }
 
-// MARK: - 2. Live-TV mit Senderliste & InfoBanner
+// MARK: - Maße wie in der App (tvOS, 1920 × 1080), auf 1600 × 900 umgerechnet
+let tvScale: CGFloat = width / 1920
+func s(_ value: CGFloat) -> CGFloat { value * tvScale }
+func tvFont(_ size: CGFloat, _ weight: Font.Weight = .regular) -> Font { .system(size: size * tvScale, weight: weight) }
+/// Sicherer Bereich des Apple TV (Ränder, die ein Fernseher nicht abschneidet).
+let safeHorizontal: CGFloat = s(80)
+let safeVertical: CGFloat = s(60)
+
+/// Plakette wie `Badge` in der App (Umriss).
+struct OutlineBadge: View {
+    let text: String
+    var dark = false
+    var body: some View {
+        Text(text)
+            .font(tvFont(22, .bold))
+            .foregroundStyle(dark ? Color.black : uiText)
+            .padding(.horizontal, s(14))
+            .padding(.vertical, s(4))
+            .overlay(RoundedRectangle(cornerRadius: s(8)).stroke(dark ? Color.black : uiText, lineWidth: s(2)))
+    }
+}
+
+/// Tafel wie `PanelBackground` (durchscheinend, heller Rand).
+struct TVPanel<Content: View>: View {
+    @ViewBuilder let content: Content
+    var body: some View {
+        content
+            .padding(.horizontal, s(48))
+            .padding(.vertical, s(36))
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(uiPanel, in: RoundedRectangle(cornerRadius: s(32), style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: s(32), style: .continuous).strokeBorder(Color.white.opacity(0.12), lineWidth: 1))
+    }
+}
+
+// MARK: - 2. Senderliste mit Programmdetails (Zurück-Taste)
 struct ChannelListScreenshotView: View {
     struct Entry {
         let num: Int
         let name: String
         let short: String
+        let hd: Bool
+        let time: String
         let prog: String
-        let ratio: CGFloat
-        let selected: Bool
     }
 
+    let recent = Entry(num: 2, name: "ZDF", short: "ZDF", hd: true, time: "20:15 – 21:45", prog: "Terra X: Wunder der Erde")
     let entries: [Entry] = [
-        Entry(num: 1, name: "Das Erste", short: "ARD", prog: "Tagesschau", ratio: 0.75, selected: true),
-        Entry(num: 2, name: "ZDF", short: "ZDF", prog: "Terra X: Wunder der Erde", ratio: 0.25, selected: false),
-        Entry(num: 3, name: "3sat", short: "3sat", prog: "Kulturzeit Spezial", ratio: 0.32, selected: false),
-        Entry(num: 4, name: "ARTE", short: "ARTE", prog: "Geheimnisse der Tiefsee", ratio: 0.22, selected: false),
-        Entry(num: 5, name: "NDR FS HH", short: "NDR", prog: "die nordstory: Küstenwache", ratio: 0.32, selected: false),
-        Entry(num: 6, name: "WDR Köln", short: "WDR", prog: "Abenteuer Erde", ratio: 0.40, selected: false),
-        Entry(num: 7, name: "SWR BW", short: "SWR", prog: "Marktcheck", ratio: 0.40, selected: false),
-        Entry(num: 8, name: "BR Fernsehen", short: "BR", prog: "Quer – durch die Woche", ratio: 0.40, selected: false),
-        Entry(num: 9, name: "hr-fernsehen", short: "HR", prog: "Alles Wissen", ratio: 0.40, selected: false),
-        Entry(num: 10, name: "phoenix", short: "PHX", prog: "phoenix runde", ratio: 0.40, selected: false)
+        Entry(num: 1, name: "Das Erste", short: "ARD", hd: true, time: "20:15 – 21:45", prog: "Das Gipfeltreffen – Naturdoku"),
+        Entry(num: 2, name: "ZDF", short: "ZDF", hd: true, time: "20:15 – 21:45", prog: "Terra X: Wunder der Erde"),
+        Entry(num: 3, name: "3sat", short: "3sat", hd: true, time: "20:15 – 21:15", prog: "Kulturzeit Spezial: Architektur"),
+        Entry(num: 4, name: "ARTE", short: "ARTE", hd: true, time: "20:15 – 21:50", prog: "Geheimnisse der Tiefsee (1/2)"),
+        Entry(num: 5, name: "NDR FS HH", short: "NDR", hd: true, time: "20:15 – 21:45", prog: "die nordstory: Küstenwache"),
+        Entry(num: 6, name: "WDR Köln", short: "WDR", hd: true, time: "20:15 – 21:45", prog: "Abenteuer Erde: Unsere Wälder"),
+        Entry(num: 7, name: "BR Fernsehen", short: "BR", hd: true, time: "20:15 – 21:45", prog: "Quer – durch die Woche"),
+        Entry(num: 8, name: "phoenix", short: "PHX", hd: true, time: "20:15 – 21:45", prog: "phoenix runde: Energiewende"),
+        Entry(num: 9, name: "tagesschau24", short: "TS24", hd: true, time: "20:15 – 21:30", prog: "Wirtschaft & Wissen")
     ]
+    let selectedNumber = 1
+    let runningNumber = 2
 
     var body: some View {
-        ZStack {
-            ScenicTVBackground(darken: 0.14)
-
-            HStack(alignment: .bottom, spacing: 28) {
-                // Linke Senderliste
-                VStack(alignment: .leading, spacing: 10) {
-                    HStack {
-                        Image(systemName: "sparkles.tv")
-                            .font(.system(size: 18, weight: .bold))
-                            .foregroundStyle(uiAccent)
-                        Text("Programmübersicht")
-                            .font(.system(size: 18, weight: .bold))
-                            .foregroundStyle(uiText)
-                        Spacer()
-                        Text("Zeitstrahl →")
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundStyle(uiAccent)
+        ZStack(alignment: .leading) {
+            ScenicTVBackground(darken: 0.10)
+            HStack(spacing: 0) {
+                VStack(alignment: .leading, spacing: s(14)) {
+                    VStack(alignment: .leading, spacing: s(6)) {
+                        specialRow
+                            .frame(height: s(58))
+                        sectionHeader("ZULETZT GESEHEN", top: s(8))
+                        row(recent, recentSection: true)
+                        sectionHeader("ALLE SENDER", top: s(10))
+                        ForEach(entries, id: \.num) { entry in
+                            row(entry, recentSection: false)
+                        }
                     }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 14)
-                    .background(epgTileSelected.opacity(0.85), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            .strokeBorder(uiAccent.opacity(0.5), lineWidth: 1)
-                    )
+                    .padding(.horizontal, s(20))
+                    .padding(.vertical, s(8))
+                    .frame(maxHeight: .infinity, alignment: .top)
+                    .clipped()
 
-                    Text("Senderliste · 84 Kabelsender")
-                        .font(.system(size: 13, weight: .semibold))
+                    Text("Klick: umschalten · Zurück: schließen")
+                        .font(tvFont(22))
                         .foregroundStyle(uiSecondary)
-                        .padding(.horizontal, 4)
-
-                    VStack(spacing: 6) {
-                        ForEach(entries, id: \.num) { item in
-                            HStack(spacing: 12) {
-                                Text("\(item.num)")
-                                    .font(.system(size: 16, weight: .bold, design: .monospaced))
-                                    .foregroundStyle(item.selected ? uiAccent : uiSecondary)
-                                    .frame(width: 26, alignment: .trailing)
-                                ChannelEmblem(short: item.short, width: 46, height: 34)
-                                VStack(alignment: .leading, spacing: 4) {
-                                    HStack {
-                                        Text(item.name)
-                                            .font(.system(size: 17, weight: .bold))
-                                            .foregroundStyle(uiText)
-                                        Spacer()
-                                        BadgePill(text: "HD", size: 11)
-                                    }
-                                    HStack(spacing: 10) {
-                                        Text(item.prog)
-                                            .font(.system(size: 14))
-                                            .foregroundStyle(uiSecondary)
-                                            .lineLimit(1)
-                                        Spacer()
-                                        ZStack(alignment: .leading) {
-                                            Capsule().fill(Color.white.opacity(0.16)).frame(width: 96, height: 4)
-                                            Capsule().fill(uiAccent).frame(width: 96 * item.ratio, height: 4)
-                                        }
-                                    }
-                                }
-                            }
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 9)
-                            .background(
-                                item.selected ? epgTileSelected : Color.white.opacity(0.04),
-                                in: RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            )
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                    .strokeBorder(item.selected ? uiAccent : Color.clear, lineWidth: 2)
-                            )
-                        }
-                    }
-                    Spacer(minLength: 0)
+                        .padding(.horizontal, s(20))
                 }
-                .padding(18)
-                .frame(width: 490, height: height - 56)
-                .background(uiPanel, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 20, style: .continuous)
-                        .strokeBorder(Color.white.opacity(0.14), lineWidth: 1)
-                )
+                .padding(.vertical, s(44))
+                .padding(.horizontal, s(20))
+                .frame(width: s(760))
+                .frame(maxHeight: .infinity)
+                .background(Color(red: 0.055, green: 0.063, blue: 0.086).opacity(0.97))
+                .overlay(alignment: .trailing) { Rectangle().fill(Color.white.opacity(0.10)).frame(width: 1) }
 
-                // Rechts unten: InfoBanner
-                VStack(alignment: .leading, spacing: 12) {
-                    HStack(spacing: 14) {
-                        Text("1")
-                            .font(.system(size: 34, weight: .heavy, design: .monospaced))
-                            .foregroundStyle(uiAccent)
-                        ChannelEmblem(short: "ARD", width: 56, height: 38)
-                        Text("Das Erste")
-                            .font(.system(size: 28, weight: .heavy))
-                            .foregroundStyle(uiText)
-                        BadgePill(text: "HD", size: 13)
-                        BadgePill(text: "LIVE", fg: Color(red: 0.04, green: 0.12, blue: 0.06), bg: liveGreen, size: 13)
-                        Spacer()
-                        Text("20:11 Uhr")
-                            .font(.system(size: 18, weight: .semibold, design: .monospaced))
-                            .foregroundStyle(uiSecondary)
-                    }
-
-                    HStack(spacing: 12) {
-                        Text("20:00 – 20:15")
-                            .font(.system(size: 16, weight: .semibold, design: .monospaced))
-                            .foregroundStyle(uiAccent)
-                        Text("Tagesschau")
-                            .font(.system(size: 21, weight: .bold))
-                            .foregroundStyle(uiText)
-                        Text("·  Die Nachrichten der ARD")
-                            .font(.system(size: 16))
-                            .foregroundStyle(uiSecondary)
-                    }
-
-                    GeometryReader { geo in
-                        ZStack(alignment: .leading) {
-                            Capsule().fill(Color.white.opacity(0.18)).frame(height: 6)
-                            Capsule().fill(uiAccent).frame(width: geo.size.width * 0.75, height: 6)
-                        }
-                    }
-                    .frame(height: 6)
-
-                    HStack(spacing: 12) {
-                        Text("Danach  20:15")
-                            .font(.system(size: 15, weight: .medium, design: .monospaced))
-                            .foregroundStyle(uiSecondary)
-                        Text("Das Gipfeltreffen – Naturdokumentation")
-                            .font(.system(size: 16, weight: .medium))
-                            .foregroundStyle(uiSecondary)
-                    }
+                ZStack(alignment: .topLeading) {
+                    Color.black.opacity(0.7)
+                    detailPane.padding(s(48))
                 }
-                .padding(24)
-                .frame(maxWidth: .infinity)
-                .background(uiPanel, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 20, style: .continuous)
-                        .strokeBorder(Color.white.opacity(0.14), lineWidth: 1)
-                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
-            .padding(28)
         }
         .frame(width: width, height: height)
+        .clipped()
+    }
+
+    private var specialRow: some View {
+        HStack(spacing: s(16)) {
+            Image(systemName: "calendar.day.timeline.left")
+                .font(tvFont(26, .semibold))
+                .foregroundStyle(uiAccent)
+            Text("Programmübersicht")
+                .font(tvFont(28, .semibold))
+                .foregroundStyle(uiText)
+            Spacer()
+            Image(systemName: "chevron.right")
+                .font(tvFont(20, .semibold))
+                .foregroundStyle(uiSecondary.opacity(0.6))
+        }
+        .padding(.horizontal, s(20))
+        .padding(.vertical, s(11))
+        .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: s(14)))
+        .overlay(RoundedRectangle(cornerRadius: s(14)).stroke(Color.white.opacity(0.2), lineWidth: s(1.5)))
+    }
+
+    private func sectionHeader(_ text: String, top: CGFloat) -> some View {
+        Text(text)
+            .font(tvFont(18, .bold))
+            .foregroundStyle(uiSecondary.opacity(0.85))
+            .padding(.top, top)
+            .padding(.bottom, s(2))
+            .padding(.horizontal, s(20))
+    }
+
+    private func row(_ entry: Entry, recentSection: Bool) -> some View {
+        let selected = !recentSection && entry.num == selectedNumber
+        let isCurrent = entry.num == runningNumber
+        let ink: Color = selected ? .black : uiText
+        let quiet: Color = selected ? Color(white: 0.3) : uiSecondary
+        return HStack(spacing: s(16)) {
+            Text("\(entry.num)")
+                .font(tvFont(28, .bold))
+                .foregroundStyle(quiet)
+                .frame(width: s(52), alignment: .leading)
+            ChannelEmblem(short: entry.short, width: s(68), height: s(34))
+                .background(selected ? Color(red: 0.12, green: 0.15, blue: 0.20) : .clear,
+                            in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+            VStack(alignment: .leading, spacing: s(3)) {
+                HStack(spacing: s(8)) {
+                    Text(entry.name)
+                        .font(tvFont(26, .semibold))
+                        .foregroundStyle(ink)
+                        .lineLimit(1)
+                    if entry.hd {
+                        Text("HD")
+                            .font(tvFont(15, .bold))
+                            .foregroundStyle(selected ? Color.black.opacity(0.8) : uiAccent)
+                            .padding(.horizontal, s(6))
+                            .padding(.vertical, s(2))
+                            .background(selected ? Color.black.opacity(0.12) : Color.white.opacity(0.12), in: RoundedRectangle(cornerRadius: s(4)))
+                    }
+                }
+                Text("\(entry.time) · \(entry.prog)")
+                    .font(tvFont(20))
+                    .foregroundStyle(quiet)
+                    .lineLimit(1)
+            }
+            Spacer(minLength: 0)
+            if recentSection {
+                OutlineBadge(text: "ZULETZT", dark: selected)
+            } else if isCurrent {
+                OutlineBadge(text: "LÄUFT", dark: selected)
+            }
+        }
+        .padding(.horizontal, s(20))
+        .padding(.vertical, s(9))
+        .frame(height: s(74))
+        .background(selected ? uiText : (isCurrent ? Color.white.opacity(0.08) : Color.clear),
+                    in: RoundedRectangle(cornerRadius: s(14)))
+        .scaleEffect(selected ? 1.03 : 1)
+        .shadow(color: .black.opacity(selected ? 0.45 : 0), radius: 12, y: 6)
+    }
+
+    private var detailPane: some View {
+        VStack(alignment: .leading, spacing: s(24)) {
+            HStack(spacing: s(18)) {
+                ChannelEmblem(short: "ARD", width: s(120), height: s(56))
+                VStack(alignment: .leading, spacing: s(4)) {
+                    Text("1 · Das Erste")
+                        .font(tvFont(36, .heavy))
+                        .foregroundStyle(uiText)
+                    HStack(spacing: s(10)) { OutlineBadge(text: "HD") }
+                }
+                Spacer()
+            }
+            Rectangle().fill(Color.white.opacity(0.18)).frame(height: 1)
+
+            VStack(alignment: .leading, spacing: s(12)) {
+                HStack {
+                    Text("JETZT").font(tvFont(22, .bold)).foregroundStyle(uiAccent)
+                    Text("· 20:15 – 21:45").font(tvFont(22, .medium)).foregroundStyle(uiSecondary)
+                }
+                Text("Das Gipfeltreffen – Naturdoku")
+                    .font(tvFont(34, .bold))
+                    .foregroundStyle(uiText)
+                GeometryReader { geo in
+                    ZStack(alignment: .leading) {
+                        Capsule().fill(Color.white.opacity(0.15))
+                        Capsule().fill(uiAccent).frame(width: geo.size.width * 0.31)
+                    }
+                }
+                .frame(height: s(6))
+                Text("Naturdokumentation, Deutschland 2026")
+                    .font(tvFont(22, .semibold))
+                    .foregroundStyle(uiText.opacity(0.9))
+                Text("Hoch über den Tälern der Ostalpen leben Steinböcke, Murmeltiere und Bartgeier. Ein Jahr lang hat ein Kamerateam die Bewohner der Gipfelregion begleitet – vom ersten Schnee bis zur Almsaison.")
+                    .font(tvFont(20))
+                    .foregroundStyle(uiSecondary)
+                    .lineLimit(4)
+            }
+            .padding(s(24))
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: s(20)))
+
+            VStack(alignment: .leading, spacing: s(8)) {
+                Text("DANACH · Ab 21:45").font(tvFont(20, .bold)).foregroundStyle(uiSecondary)
+                Text("Tagesthemen").font(tvFont(26, .bold)).foregroundStyle(uiText)
+                Text("Nachrichten und Berichte aus dem In- und Ausland")
+                    .font(tvFont(20))
+                    .foregroundStyle(uiSecondary)
+            }
+            .padding(s(20))
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.white.opacity(0.04), in: RoundedRectangle(cornerRadius: s(16)))
+
+            Spacer(minLength: 0)
+        }
     }
 }
 
 // MARK: - 3. Sendungsinfo (InfoPanel) + TimeshiftBar
 struct InfoPanelTimeshiftScreenshotView: View {
-    let pills: [(String, String, Bool)] = [
-        ("clock.arrow.circlepath", "Von Anfang an", true),
-        ("magnifyingglass", "In Mediathek suchen", false),
-        ("speaker.wave.2.fill", "Ton: Deutsch (Dolby Digital 5.1)", false),
-        ("captions.bubble", "Untertitel: DVB (Deutsch)", false),
-        ("gearshape", "Einstellungen…", false),
-        ("list.bullet", "Senderliste", false)
-    ]
+    /// Symbolschalter wie in der App; gewählt ist „Von Anfang an“.
+    let pills = ["speaker.wave.2", "captions.bubble", "backward.end", "magnifyingglass", "gearshape"]
+    let selected = 2
 
     var body: some View {
         ZStack {
             ScenicTVBackground(darken: 0.16)
 
             VStack {
-                // Oben: InfoPanel
-                VStack(alignment: .leading, spacing: 14) {
-                    HStack(spacing: 14) {
-                        Text("2")
-                            .font(.system(size: 34, weight: .heavy, design: .monospaced))
-                            .foregroundStyle(uiAccent)
-                        ChannelEmblem(short: "ZDF", width: 56, height: 38)
-                        Text("ZDF")
-                            .font(.system(size: 28, weight: .heavy))
-                            .foregroundStyle(uiText)
-                        BadgePill(text: "HD", size: 13)
-                        BadgePill(text: "TIMESHIFT · -12:40", fg: Color(red: 0.12, green: 0.06, blue: 0.0), bg: timeshiftOrange, size: 13)
-                        Spacer()
-                        Text("1080p50 · Dolby Digital 5.1")
-                            .font(.system(size: 15, weight: .semibold, design: .monospaced))
+                TVPanel {
+                    VStack(alignment: .leading, spacing: s(28)) {
+                        HStack(spacing: s(16)) {
+                            ForEach(0..<pills.count, id: \.self) { index in
+                                let isSelected = index == selected
+                                Image(systemName: pills[index])
+                                    .font(tvFont(26, .semibold))
+                                    .foregroundStyle(isSelected ? Color.black : uiText)
+                                    .frame(width: s(76), height: s(56))
+                                    .background(isSelected ? uiText : Color.white.opacity(0.14), in: Capsule())
+                                    .scaleEffect(isSelected ? 1.08 : 1)
+                                    .shadow(color: .black.opacity(isSelected ? 0.45 : 0), radius: 8, y: 4)
+                            }
+                            Text("Von Anfang an")
+                                .font(tvFont(24, .medium))
+                                .foregroundStyle(uiSecondary)
+                                .padding(.leading, s(8))
+                            Spacer()
+                        }
+
+                        HStack(alignment: .top, spacing: s(48)) {
+                            VStack(alignment: .leading, spacing: s(10)) {
+                                HStack(spacing: s(12)) {
+                                    ChannelEmblem(short: "ZDF", width: s(64), height: s(32))
+                                    Text("ZEITVERSETZT · 2 ZDF")
+                                        .font(tvFont(24, .semibold))
+                                        .foregroundStyle(uiSecondary)
+                                }
+                                HStack(spacing: s(16)) {
+                                    Text("20:15 – 21:45")
+                                        .font(tvFont(26, .bold))
+                                        .foregroundStyle(uiAccent)
+                                    Text("Terra X: Wunder der Erde")
+                                        .font(tvFont(38, .bold))
+                                        .lineLimit(1)
+                                }
+                                GeometryReader { geo in
+                                    ZStack(alignment: .leading) {
+                                        Capsule().fill(Color.white.opacity(0.15))
+                                        Capsule().fill(uiAccent).frame(width: geo.size.width * 0.34)
+                                    }
+                                }
+                                .frame(height: s(6))
+                                Text("Die Alpen von oben")
+                                    .font(tvFont(24, .medium))
+                                    .foregroundStyle(uiSecondary)
+                                Text("Spektakuläre Luftaufnahmen zeigen das empfindliche Ökosystem der Alpen im Wandel der Jahreszeiten. Gletscherforscher und Biologen berichten von den höchsten Gipfeln zwischen Mont Blanc und Zugspitze.")
+                                    .font(tvFont(22))
+                                    .foregroundStyle(uiSecondary)
+                                    .lineLimit(3)
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+
+                            VStack(alignment: .leading, spacing: s(8)) {
+                                Text("DANACH · Ab 21:45")
+                                    .font(tvFont(24, .semibold))
+                                    .foregroundStyle(uiSecondary)
+                                Text("heute journal")
+                                    .font(tvFont(32, .bold))
+                                Text("Nachrichten, Hintergründe und Wetter")
+                                    .font(tvFont(22))
+                                    .foregroundStyle(uiSecondary)
+                                    .lineLimit(3)
+                            }
+                            .frame(width: s(420), alignment: .leading)
+                            .padding(.leading, s(24))
+                            .overlay(alignment: .leading) { Rectangle().fill(Color.white.opacity(0.12)).frame(width: s(2)) }
+                        }
+
+                        HStack(spacing: s(20)) {
+                            Label("1920×1080 (1080i HD)", systemImage: "tv")
+                            Label("9.8 Mbit/s", systemImage: "speedometer")
+                            Label("0 Bildfehler", systemImage: "checkmark.shield")
+                            Label("Signal: 9 dB · SNR: 36 dB", systemImage: "antenna.radiowaves.left.and.right")
+                            Label("Tuner 1/4", systemImage: "cpu")
+                        }
+                        .font(tvFont(20, .medium))
+                        .foregroundStyle(uiSecondary)
+                        .padding(.top, s(4))
+
+                        Text("Links/Rechts: auswählen · Klick: Aktion ausführen · Zurück oder nach oben wischen: schließen")
+                            .font(tvFont(22))
                             .foregroundStyle(uiSecondary)
                     }
-
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("Terra X: Wunder der Erde – Die Alpen von oben")
-                            .font(.system(size: 26, weight: .heavy))
-                            .foregroundStyle(uiText)
-                        Text("20:15 – 21:45  ·  Dokumentationsreihe (Deutschland 2026)")
-                            .font(.system(size: 16, weight: .semibold))
-                            .foregroundStyle(uiAccent)
-                    }
-
-                    GeometryReader { geo in
-                        ZStack(alignment: .leading) {
-                            Capsule().fill(Color.white.opacity(0.18)).frame(height: 6)
-                            Capsule().fill(uiAccent).frame(width: geo.size.width * 0.34, height: 6)
-                        }
-                    }
-                    .frame(height: 6)
-
-                    Text("Spektakuläre Luftaufnahmen zeigen das empfindliche Ökosystem der Alpen im Wandel der Jahreszeiten. Gletscherforscher und Biologen berichten von den höchsten Gipfeln zwischen Mont Blanc und Zugspitze.")
-                        .font(.system(size: 16))
-                        .foregroundStyle(uiSecondary)
-                        .lineSpacing(3)
-
-                    HStack(spacing: 12) {
-                        ForEach(Array(pills.enumerated()), id: \.offset) { _, pill in
-                            HStack(spacing: 8) {
-                                Image(systemName: pill.0)
-                                    .font(.system(size: 14, weight: .bold))
-                                Text(pill.1)
-                                    .font(.system(size: 15, weight: pill.2 ? .bold : .semibold))
-                            }
-                            .foregroundStyle(pill.2 ? Color(red: 0.04, green: 0.08, blue: 0.14) : uiText)
-                            .padding(.horizontal, 16)
-                            .padding(.vertical, 10)
-                            .background(
-                                pill.2 ? uiAccent : Color.white.opacity(0.10),
-                                in: RoundedRectangle(cornerRadius: 10, style: .continuous)
-                            )
-                        }
-                    }
-                    .padding(.top, 4)
+                    .foregroundStyle(uiText)
                 }
-                .padding(26)
-                .background(uiPanel, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 22, style: .continuous)
-                        .strokeBorder(Color.white.opacity(0.14), lineWidth: 1)
-                )
 
                 Spacer()
 
-                // Unten: TimeshiftBar
-                VStack(alignment: .leading, spacing: 14) {
-                    HStack(spacing: 14) {
-                        BadgePill(text: "❚❚  PAUSE", fg: Color(red: 0.12, green: 0.06, blue: 0.0), bg: timeshiftOrange, size: 14)
-                        Text("2 · ZDF HD")
-                            .font(.system(size: 20, weight: .bold))
-                            .foregroundStyle(uiText)
-                        Text("·  Terra X: Wunder der Erde – Die Alpen von oben")
-                            .font(.system(size: 18, weight: .medium))
-                            .foregroundStyle(uiSecondary)
-                        Spacer()
-                        Text("-12:40 Min. hinter Live")
-                            .font(.system(size: 18, weight: .bold, design: .monospaced))
-                            .foregroundStyle(timeshiftOrange)
-                    }
-
-                    GeometryReader { geo in
-                        ZStack(alignment: .leading) {
-                            Capsule().fill(Color.white.opacity(0.14)).frame(height: 10)
-                            Capsule().fill(Color.white.opacity(0.32)).frame(width: geo.size.width * 0.72, height: 10)
-                            Capsule().fill(timeshiftOrange).frame(width: geo.size.width * 0.54, height: 10)
-                            Circle()
-                                .fill(uiText)
-                                .frame(width: 16, height: 16)
-                                .offset(x: geo.size.width * 0.54 - 8)
+                TVPanel {
+                    VStack(alignment: .leading, spacing: s(18)) {
+                        HStack {
+                            Text("2 ZDF").font(tvFont(32, .bold))
+                            Text("· Terra X: Wunder der Erde").font(tvFont(32)).lineLimit(1)
+                            Spacer()
+                            Text("Angehalten · 12:40 hinter Live")
+                                .font(tvFont(32, .bold))
+                                .foregroundStyle(uiAccent)
                         }
-                    }
-                    .frame(height: 16)
-
-                    HStack {
-                        Text("Play/Pause: Weiterlaufen  ·  Links/Rechts: Spulen (10 s → 30 s → 1 Min. → 3 Min. → 5 Min.)  ·  Hoch/Runter: Live & Senderwechsel")
-                            .font(.system(size: 14, weight: .medium))
+                        GeometryReader { geo in
+                            ZStack(alignment: .trailing) {
+                                Capsule().fill(Color.white.opacity(0.15))
+                                Capsule().fill(Color.white.opacity(0.5)).frame(width: geo.size.width * 0.14)
+                            }
+                        }
+                        .frame(height: s(12))
+                        Text("Play/Pause: weiter/anhalten · Links/Rechts: spulen (10 s, 30 s, 1 m, 3 m, 5 m) · rechts bis zum Ende: Live")
+                            .font(tvFont(24))
                             .foregroundStyle(uiSecondary)
-                        Spacer()
-                        Text("Puffer: 38 Min. / 90 Min.")
-                            .font(.system(size: 14, weight: .semibold, design: .monospaced))
-                            .foregroundStyle(uiSecondary)
                     }
+                    .foregroundStyle(uiText)
                 }
-                .padding(24)
-                .background(uiPanel, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 20, style: .continuous)
-                        .strokeBorder(Color.white.opacity(0.14), lineWidth: 1)
-                )
             }
-            .padding(36)
+            .padding(.horizontal, safeHorizontal)
+            .padding(.vertical, safeVertical)
         }
         .frame(width: width, height: height)
     }
@@ -796,7 +861,7 @@ func save<V: View>(_ view: V, to filename: String) {
 
 MainActor.assumeIsolated {
     save(EPGScreenshotView(), to: "epg-zeitstrahl.png")
-    save(ChannelListScreenshotView(), to: "senderliste-live.png")
+    save(ChannelListScreenshotView(), to: "senderliste.png")
     save(InfoPanelTimeshiftScreenshotView(), to: "sendungsinfo-timeshift.png")
     save(MediathekScreenshotView(), to: "mediathek-suche.png")
 }
