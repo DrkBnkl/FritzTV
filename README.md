@@ -103,7 +103,7 @@ Für die tvOS-Signatur genügt ein kostenloses „Personal Team“; das Team wir
 | – | `⌘↑` / `⌘↓`, `⌥⌘↓` | Lautstärke der App, Ton aus |
 | – | Ziffern / Mausklick | Direktwahl |
 
-Auf dem Mac erscheint bei Mausbewegung über dem Bild, nach dem Umschalten und während der Pause eine Steuerleiste: Sender, laufende Sendung, Timeshift-Zeitleiste mit „LIVE“-Knopf, Info-Knopf für die Sendungsinfo, Menü für Tonspur und Untertitel, eigene Lautstärke (unabhängig von der Systemlautstärke, gespeichert) und Vollbild. Nach 3 s ohne Mausbewegung blenden sich Leiste, Fensterknöpfe und Mauszeiger aus. Alle Befehle stehen zusätzlich in den Menüs „Wiedergabe“ und „Sender“. In kleinen Fenstern zeigt die Sendungsinfo eine kompakte Fassung mit Symbolschaltern.
+Auf dem Mac erscheint bei Mausbewegung über dem Bild, nach dem Umschalten und während der Pause eine Steuerleiste: Sender, laufende Sendung, Timeshift-Zeitleiste mit „LIVE“-Knopf, Info-Knopf für die Sendungsinfo, Menü für Tonspur und Untertitel, eigene Lautstärke (unabhängig von der Systemlautstärke, gespeichert) und Vollbild. Nach 3 s ohne Mausbewegung blenden sich Leiste, Fensterknöpfe und Mauszeiger aus. Alle Befehle stehen zusätzlich in den Menüs „Wiedergabe“ und „Sender“. Die Schalter der Sendungsinfo sind Symbole (Ton, Untertitel, Von Anfang an, Mediathek, Einstellungen), die Beschriftung des gewählten Schalters steht daneben; in kleinen Fenstern zeigt die Sendungsinfo eine kompakte Fassung.
 
 ### Programmübersicht (EPG-Zeitstrahl)
 

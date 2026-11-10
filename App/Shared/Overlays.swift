@@ -341,43 +341,7 @@ struct InfoPanel: View {
     private var compactBody: some View {
         TopPanel(onTapOutside: { model.overlay = .none }, compact: true) {
             VStack(alignment: .leading, spacing: 8) {
-                let pills = model.availableInfoPills
-                HStack(spacing: 8) {
-                    ForEach(0..<pills.count, id: \.self) { index in
-                        compactPill(pills[index], selected: selection == index)
-                            #if os(macOS)
-                            .contentShape(Capsule())
-                            .onHover { hovering in
-                                if hovering { model.overlay = .info(selection: index) }
-                            }
-                            .onTapGesture {
-                                model.executeInfoPill(at: index)
-                            }
-                            .help(title(for: pills[index]))
-                            #endif
-                    }
-                    if pills.indices.contains(selection) {
-                        Text(title(for: pills[selection]))
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundStyle(UI.secondary)
-                            .lineLimit(1)
-                            .truncationMode(.tail)
-                            .padding(.leading, 4)
-                    }
-                    Spacer(minLength: 8)
-                    #if os(macOS)
-                    Button(action: { model.overlay = .none }) {
-                        Image(systemName: "xmark")
-                            .font(.system(size: 12, weight: .bold))
-                            .foregroundStyle(UI.text)
-                            .frame(width: 28, height: 28)
-                            .background(Color.white.opacity(0.12), in: Circle())
-                    }
-                    .buttonStyle(.plain)
-                    .focusable(false)
-                    .help("Schließen")
-                    #endif
-                }
+                pillRow(compact: true)
 
                 HStack(spacing: 8) {
                     ChannelLogoView(channelName: model.currentEntry?.group.displayName ?? "", height: 16, maxWidth: 50)
@@ -446,12 +410,56 @@ struct InfoPanel: View {
         }
     }
 
-    private func compactPill(_ pill: AppModel.InfoPill, selected: Bool) -> some View {
+    /// Schalter als Symbole (Ton, Untertitel, Von Anfang an, Mediathek, Einstellungen); die
+    /// Beschriftung des gewählten Schalters steht daneben, auf dem Mac zusätzlich als Tooltip.
+    private func pillRow(compact: Bool) -> some View {
+        let pills = model.availableInfoPills
+        return HStack(spacing: compact ? 8 : UI.s(16)) {
+            ForEach(0..<pills.count, id: \.self) { index in
+                iconPill(pills[index], selected: selection == index, compact: compact)
+                    #if os(macOS)
+                    .contentShape(Capsule())
+                    .onHover { hovering in
+                        if hovering { model.overlay = .info(selection: index) }
+                    }
+                    .onTapGesture {
+                        model.executeInfoPill(at: index)
+                    }
+                    .help(title(for: pills[index]))
+                    #endif
+            }
+            if pills.indices.contains(selection) {
+                Text(title(for: pills[selection]))
+                    .font(compact ? .system(size: 12, weight: .medium) : UI.font(24, .medium))
+                    .foregroundStyle(UI.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .padding(.leading, compact ? 4 : UI.s(8))
+            }
+            Spacer(minLength: compact ? 8 : UI.s(16))
+            #if os(macOS)
+            Button(action: { model.overlay = .none }) {
+                Image(systemName: "xmark")
+                    .font(compact ? .system(size: 12, weight: .bold) : UI.font(24, .bold))
+                    .foregroundStyle(UI.text)
+                    .frame(width: compact ? 28 : UI.s(56), height: compact ? 28 : UI.s(56))
+                    .background(Color.white.opacity(0.12), in: Circle())
+            }
+            .buttonStyle(.plain)
+            .focusable(false)
+            .help("Schließen")
+            #endif
+        }
+    }
+
+    private func iconPill(_ pill: AppModel.InfoPill, selected: Bool, compact: Bool) -> some View {
         Image(systemName: icon(for: pill))
-            .font(.system(size: 13, weight: .semibold))
+            .font(compact ? .system(size: 13, weight: .semibold) : UI.font(26, .semibold))
             .foregroundStyle(selected ? Color.black : UI.text)
-            .frame(width: 34, height: 28)
+            .frame(width: compact ? 34 : UI.s(76), height: compact ? 28 : UI.s(56))
             .background(selected ? UI.text : Color.white.opacity(0.14), in: Capsule())
+            .scaleEffect(selected && !compact ? 1.08 : 1)
+            .shadow(color: .black.opacity(selected && !compact ? 0.45 : 0), radius: 8, y: 4)
             .animation(.easeOut(duration: 0.15), value: selected)
     }
 
@@ -468,38 +476,7 @@ struct InfoPanel: View {
     private var fullBody: some View {
         TopPanel(onTapOutside: { model.overlay = .none }) {
             VStack(alignment: .leading, spacing: UI.s(28)) {
-                // Schalter oben
-                let pills = model.availableInfoPills
-                HStack(spacing: UI.s(16)) {
-                    ForEach(0..<pills.count, id: \.self) { index in
-                        pill(title(for: pills[index]), selected: selection == index)
-                            #if os(macOS)
-                            .contentShape(Capsule())
-                            .onHover { hovering in
-                                if hovering { model.overlay = .info(selection: index) }
-                            }
-                            .onTapGesture {
-                                model.executeInfoPill(at: index)
-                            }
-                            #endif
-                    }
-                    #if os(macOS)
-                    Spacer()
-                    Button(action: { model.overlay = .none }) {
-                        HStack(spacing: UI.s(8)) {
-                            Image(systemName: "xmark")
-                            Text("Schließen")
-                        }
-                        .font(UI.font(24, .semibold))
-                        .foregroundStyle(UI.text)
-                        .padding(.horizontal, UI.s(22))
-                        .padding(.vertical, UI.s(12))
-                        .background(Color.white.opacity(0.12), in: Capsule())
-                    }
-                    .buttonStyle(.plain)
-                    .focusable(false)
-                    #endif
-                }
+                pillRow(compact: false)
 
                 // Sendungsinformationen (Jetzt & Danach)
                 HStack(alignment: .top, spacing: UI.s(48)) {
@@ -621,19 +598,6 @@ struct InfoPanel: View {
         case .searchMediathek: return "In Mediathek suchen"
         case .settings: return "Einstellungen"
         }
-    }
-
-    private func pill(_ title: String, selected: Bool) -> some View {
-        Text(title)
-            .font(UI.font(26, .semibold))
-            .lineLimit(1)
-            .foregroundStyle(selected ? Color.black : UI.text)
-            .padding(.horizontal, UI.s(28))
-            .padding(.vertical, UI.s(14))
-            .background(selected ? UI.text : Color.white.opacity(0.14), in: Capsule())
-            .scaleEffect(selected ? 1.08 : 1)
-            .shadow(color: .black.opacity(selected ? 0.45 : 0), radius: 8, y: 4)
-            .animation(.easeOut(duration: 0.15), value: selected)
     }
 
     static func formatTime(_ date: Date) -> String {
