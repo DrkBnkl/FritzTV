@@ -92,7 +92,7 @@ Für die tvOS-Signatur genügt ein kostenloses „Personal Team“; das Team wir
 | --- | --- | --- |
 | Hoch / Runter (Ring-Klick) | ↑ / ↓, `⌘→` / `⌘←` | Nächster / vorheriger Sender |
 | Nach oben wischen | – | Senderleiste am unteren Rand |
-| Klick oder nach unten wischen | Return / `⌘I` / Rechtsklick | Sendungsinfo: Tonspur, Untertitel, „Von Anfang an“, „In Mediathek suchen“, Einstellungen |
+| Klick oder nach unten wischen | Return / `⌘I` / Info-Knopf in der Steuerleiste / Rechtsklick | Sendungsinfo: Tonspur, Untertitel, „Von Anfang an“, „In Mediathek suchen“, Einstellungen |
 | Zurück | Esc / `⌃⌘S` / Klick ins Bild | Senderliste (Mausrad-Scrollen, Hover-Vorschau) |
 | – | `⌘E` / Rechtsklick | Programmübersicht |
 | – | Doppelklick ins Bild / `⌃⌘F` | Vollbild umschalten |
@@ -103,7 +103,7 @@ Für die tvOS-Signatur genügt ein kostenloses „Personal Team“; das Team wir
 | – | `⌘↑` / `⌘↓`, `⌥⌘↓` | Lautstärke der App, Ton aus |
 | – | Ziffern / Mausklick | Direktwahl |
 
-Auf dem Mac erscheint bei Mausbewegung über dem Bild, nach dem Umschalten und während der Pause eine Steuerleiste: Sender, laufende Sendung, Timeshift-Zeitleiste mit „LIVE“-Knopf, Menü für Tonspur und Untertitel, eigene Lautstärke (unabhängig von der Systemlautstärke, gespeichert) und Vollbild. Nach 3 s ohne Mausbewegung blenden sich Leiste, Fensterknöpfe und Mauszeiger aus. Alle Befehle stehen zusätzlich in den Menüs „Wiedergabe“ und „Sender“.
+Auf dem Mac erscheint bei Mausbewegung über dem Bild, nach dem Umschalten und während der Pause eine Steuerleiste: Sender, laufende Sendung, Timeshift-Zeitleiste mit „LIVE“-Knopf, Info-Knopf für die Sendungsinfo, Menü für Tonspur und Untertitel, eigene Lautstärke (unabhängig von der Systemlautstärke, gespeichert) und Vollbild. Nach 3 s ohne Mausbewegung blenden sich Leiste, Fensterknöpfe und Mauszeiger aus. Alle Befehle stehen zusätzlich in den Menüs „Wiedergabe“ und „Sender“.
 
 ### Programmübersicht (EPG-Zeitstrahl)
 

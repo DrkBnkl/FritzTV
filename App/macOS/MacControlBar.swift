@@ -149,6 +149,11 @@ struct MacControlBar: View {
                 HStack(spacing: 14) {
                     transport
                     TimeshiftTimeline(model: model, player: player)
+                    Button { model.openInfoPanel() } label: {
+                        Image(systemName: "info.circle")
+                            .frame(width: 20, height: 20)
+                    }
+                    .help("Sendungsinfo: Von Anfang an, Mediathek, Einstellungen (⌘I, Return)")
                     trackMenu
                     VolumeControl(model: model)
                     Button {
