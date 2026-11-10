@@ -204,11 +204,15 @@ private struct StationList: View {
                                     .padding(.horizontal, 12)
                                     .padding(.vertical, 4)
                                     .frame(maxWidth: .infinity, alignment: .leading)
-                                    .background(.bar)
+                                    // Kein helles Band: derselbe Grund wie das Panel. Die angeheftete
+                                    // Überschrift verdeckt darunter laufende Zeilen; eine feine Linie trennt.
+                                    .background(PanelMaterial())
+                                    .overlay(alignment: .bottom) { Divider() }
                             }
                         }
                     }
                 }
+                .background(OverlayScrollers())
                 // Beim Öffnen steht der laufende Sender im Blick, wenn er nicht oben in Favoriten/Zuletzt steht.
                 .onAppear {
                     guard let current = model.current, model.searchText.isEmpty,
@@ -219,6 +223,78 @@ private struct StationList: View {
                 }
             }
         }
+    }
+}
+
+/// Hintergrund wie das Popover selbst (Material `.popover`), damit angeheftete Überschriften
+/// nicht als helles Band auffallen.
+private struct PanelMaterial: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSVisualEffectView {
+        let view = NSVisualEffectView()
+        view.material = .popover
+        view.blendingMode = .withinWindow
+        view.state = .followsWindowActiveState
+        return view
+    }
+
+    func updateNSView(_ nsView: NSVisualEffectView, context: Context) {}
+}
+
+/// Schmale, nur beim Scrollen sichtbare Scrollleiste ohne helle Bahn – auch wenn macOS bei
+/// angeschlossener Maus sonst die breite Leiste zeigt.
+private struct OverlayScrollers: NSViewRepresentable {
+    final class ProbeView: NSView {
+        private var observer: NSObjectProtocol?
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            apply()
+            // macOS setzt den Stil zurück, wenn sich die Systemeinstellung oder das Zeigegerät ändert.
+            if observer == nil {
+                observer = NotificationCenter.default.addObserver(
+                    forName: NSScroller.preferredScrollerStyleDidChangeNotification, object: nil, queue: .main
+                ) { [weak self] _ in
+                    MainActor.assumeIsolated { self?.apply() }
+                }
+            }
+        }
+
+        func apply() {
+            guard let scrollView = enclosingScrollView ?? Self.findScrollView(near: self) else { return }
+            scrollView.scrollerStyle = .overlay
+            scrollView.autohidesScrollers = true
+            scrollView.scrollerKnobStyle = .default
+        }
+
+        /// Liegt die Ansicht als Hintergrund neben (nicht in) der Scrollansicht: in den Geschwistern suchen.
+        private static func findScrollView(near view: NSView) -> NSScrollView? {
+            var current: NSView? = view.superview
+            while let container = current {
+                if let found = container.subviews.lazy.compactMap({ $0 as? NSScrollView ?? Self.descendantScrollView(in: $0) }).first {
+                    return found
+                }
+                current = container.superview
+            }
+            return nil
+        }
+
+        private static func descendantScrollView(in view: NSView) -> NSScrollView? {
+            for sub in view.subviews {
+                if let scroll = sub as? NSScrollView { return scroll }
+                if let found = descendantScrollView(in: sub) { return found }
+            }
+            return nil
+        }
+
+        deinit {
+            if let observer { NotificationCenter.default.removeObserver(observer) }
+        }
+    }
+
+    func makeNSView(context: Context) -> ProbeView { ProbeView() }
+
+    func updateNSView(_ nsView: ProbeView, context: Context) {
+        DispatchQueue.main.async { nsView.apply() }
     }
 }
 
