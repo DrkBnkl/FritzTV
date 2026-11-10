@@ -13,9 +13,13 @@ struct ListRowButtonStyle: ButtonStyle {
 
 extension View {
     /// Fokus wie im System (Apple-Richtlinien): das gewählte Element hebt sich leicht an –
-    /// etwas größer, mit Schatten, kurz animiert.
+    /// etwas größer, mit Schatten, kurz animiert. Auf dem Mac ohne Vergrößerung: In breiten
+    /// Fenstern wanderten Nummer und Plaketten der gewählten Zeile sonst aus der Flucht.
     func focusLift(_ focused: Bool, scale: CGFloat = 1.03) -> some View {
-        self
+        #if os(macOS)
+        let scale: CGFloat = 1
+        #endif
+        return self
             .scaleEffect(focused ? scale : 1)
             .shadow(color: .black.opacity(focused ? 0.45 : 0), radius: focused ? 12 : 0, y: focused ? 6 : 0)
             .zIndex(focused ? 1 : 0)
@@ -644,7 +648,8 @@ struct ChannelListOverlay: View {
                     .foregroundStyle(UI.secondary)
                     .padding(.horizontal, UI.s(20))
             }
-            .padding(.vertical, isCompact ? 16 : UI.s(44))
+            .padding(.top, isCompact ? compactTopPadding : UI.s(44))
+            .padding(.bottom, isCompact ? 16 : UI.s(44))
             .padding(.horizontal, isCompact ? 12 : UI.s(20))
             .frame(width: isCompact ? windowSize.width : UI.s(760))
             .frame(maxHeight: .infinity)
@@ -940,6 +945,16 @@ struct ChannelListOverlay: View {
         // Die Fernbedienung steuert die Liste über AppModel.handle; auf dem Apple TV dürfen die
         // Knöpfe den Fokus nicht übernehmen (sonst wirken Klick und Pfeile auf eine andere Zeile).
         .focusable(false)
+    }
+
+    /// Oberer Abstand im schmalen Fenster: Auf dem Mac liegen die Fensterknöpfe (keine
+    /// Titelleiste) über dem Inhalt.
+    private var compactTopPadding: CGFloat {
+        #if os(macOS)
+        return 36
+        #else
+        return 16
+        #endif
     }
 
     private func row(_ entry: LineupEntry, isRecentSection: Bool, selected: Bool) -> some View {
