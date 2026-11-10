@@ -311,6 +311,7 @@ final class PlayerController: ObservableObject {
         } else {
             discardBuffer()
         }
+        resetCrop(for: mediaPlayer, media: media, isSD: !channel.isHD)
         mediaPlayer.media = media
         mediaPlayer.setDeinterlaceFilter(Self.deinterlaceFilter(options: options, isSD: !channel.isHD))
         mediaPlayer.audio?.isMuted = true
@@ -343,6 +344,51 @@ final class PlayerController: ObservableObject {
     }
 
     private var lastLoggedState: Int = -1
+    /// Gesetzter Bildbeschnitt je Player (`nil` = keiner).
+    private var appliedCrop: [ObjectIdentifier: String] = [:]
+
+    /// Prüft die Videospur und setzt bei SD-Sendern den Beschnitt auf 16:9 bzw. 4:3 (`PictureCrop`),
+    /// auch wenn das Format mitten in der Sendung wechselt.
+    private func updateCrop(for player: VLCMediaPlayer, isSD: Bool) {
+        guard isSD, let tracks = player.media?.tracksInformation as? [[String: Any]],
+              let video = tracks.first(where: { ($0[VLCMediaTracksInformationType] as? String) == VLCMediaTracksInformationTypeVideo })
+        else { return }
+        func value(_ key: String) -> Double { (video[key] as? NSNumber)?.doubleValue ?? 0 }
+        let width = value(VLCMediaTracksInformationVideoWidth)
+        let height = value(VLCMediaTracksInformationVideoHeight)
+        let den = value(VLCMediaTracksInformationSourceAspectRatioDenominator)
+        // Spur noch ohne Format: beim Öffnen gesetzten Beschnitt beibehalten.
+        guard width > 0, height > 0, den > 0 else { return }
+        let crop = PictureCrop.standardRatio(width: width, height: height,
+                                             sampleAspect: value(VLCMediaTracksInformationSourceAspectRatio) / den)
+        let key = ObjectIdentifier(player)
+        guard appliedCrop[key] != crop else { return }
+        appliedCrop[key] = crop
+        Self.setCrop(crop, on: player)
+        DebugLog.log("Bildbeschnitt: \(crop ?? "aus") (\(Int(width))×\(Int(height)))")
+    }
+
+    private static func setCrop(_ crop: String?, on player: VLCMediaPlayer) {
+        if let crop {
+            crop.withCString { player.videoCropGeometry = UnsafeMutablePointer(mutating: $0) }
+        } else {
+            player.videoCropGeometry = nil
+        }
+    }
+
+    /// Vor dem Öffnen eines Mediums: Der Beschnitt am Player gälte sonst weiter. SD-Sender bekommen
+    /// 16:9 gleich als Medienoption, denn die macOS-Videoausgabe von VLC übernimmt einen erst später
+    /// gesetzten Beschnitt nicht sofort, sondern erst bei der nächsten Größenänderung des Fensters.
+    /// Weicht die Videospur ab (4:3, HD-Format), korrigiert `updateCrop` den Wert.
+    private func resetCrop(for player: VLCMediaPlayer, media: VLCMedia, isSD: Bool) {
+        Self.setCrop(nil, on: player)
+        if isSD {
+            media.addOption(":crop=16:9")
+            appliedCrop[ObjectIdentifier(player)] = "16:9"
+        } else {
+            appliedCrop[ObjectIdentifier(player)] = nil
+        }
+    }
 
     private func poll() {
         let state = mediaPlayer.state
@@ -401,6 +447,7 @@ final class PlayerController: ObservableObject {
             }
             setStatus((isReplaying && replayAnchor.paused) ? .paused : .playing)
             updateFirstPicture()
+            updateCrop(for: mediaPlayer, isSD: channel?.isHD == false)
             if collectStats { updatePlaybackStats() }
             refreshTrackNames()
             checkStreamHealth()
@@ -1020,6 +1067,7 @@ final class PlayerController: ObservableObject {
         media.addOption(":input-fast-seek")
         media.addOption(":vbi-opaque=0")
         Self.addPictureOptions(to: media, options: options, isSD: channel?.isHD == false)
+        resetCrop(for: replayPlayer, media: media, isSD: channel?.isHD == false)
         replayPlayer.media = media
         replayPlayer.setDeinterlaceFilter(Self.deinterlaceFilter(options: options, isSD: channel?.isHD == false))
         mediaPlayer.audio?.isMuted = true
@@ -1078,6 +1126,7 @@ final class PlayerController: ObservableObject {
             let hasReplayMedia = hasReplayVideo || replayPlayer.numberOfAudioTracks > 0
 
             if replayPlayer.isPlaying && hasReplayMedia {
+                updateCrop(for: replayPlayer, isSD: channel?.isHD == false)
                 if !replayTracksSynced {
                     replayTracksSynced = true
                     if mediaPlayer.currentAudioTrackIndex >= 0 {
