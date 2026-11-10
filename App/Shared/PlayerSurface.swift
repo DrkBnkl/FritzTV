@@ -442,10 +442,16 @@ final class VideoHostView: UIView {
            preview.minX.isFinite, preview.minY.isFinite, window != nil {
             target = convert(preview, from: nil)
         }
-        if videoView.transform != .identity { videoView.transform = .identity }
         if clipView.frame != target { clipView.frame = target }
-        let videoFrame = zoom.frame(in: clipView.bounds)
-        if videoView.frame != videoFrame { videoView.frame = videoFrame }
+        // Overscan per Skalierung statt größerem Rahmen: Bei 4K-Ausgabe wäre die vergrößerte Fläche
+        // über 4096 Pixel breit, mehr erlaubt OpenGL ES nicht – VLC könnte keine Videoausgabe anlegen
+        // („Failed to make complete framebuffer object“, Ton ohne Bild).
+        let size = clipView.bounds.size
+        if videoView.bounds.size != size { videoView.bounds = CGRect(origin: .zero, size: size) }
+        let center = CGPoint(x: size.width / 2, y: size.height / 2)
+        if videoView.center != center { videoView.center = center }
+        let transform = CGAffineTransform(scaleX: zoom.x, y: zoom.y)
+        if videoView.transform != transform { videoView.transform = transform }
     }
 
     override func didMoveToWindow() {
