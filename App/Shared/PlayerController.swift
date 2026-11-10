@@ -347,8 +347,8 @@ final class PlayerController: ObservableObject {
     /// Gesetzter Bildbeschnitt je Player (`nil` = keiner).
     private var appliedCrop: [ObjectIdentifier: String] = [:]
 
-    /// Prüft die Videospur und setzt bei SD-Sendern den Beschnitt auf 16:9 bzw. 4:3 (`PictureCrop`),
-    /// auch wenn das Format mitten in der Sendung wechselt.
+    /// Prüft die Videospur und setzt bei SD-Sendern den Bildausschnitt (Overscan, Standardformat;
+    /// `PictureCrop`), auch wenn das Format mitten in der Sendung wechselt.
     private func updateCrop(for player: VLCMediaPlayer, isSD: Bool) {
         guard isSD, let tracks = player.media?.tracksInformation as? [[String: Any]],
               let video = tracks.first(where: { ($0[VLCMediaTracksInformationType] as? String) == VLCMediaTracksInformationTypeVideo })
@@ -359,8 +359,8 @@ final class PlayerController: ObservableObject {
         let den = value(VLCMediaTracksInformationSourceAspectRatioDenominator)
         // Spur noch ohne Format: beim Öffnen gesetzten Beschnitt beibehalten.
         guard width > 0, height > 0, den > 0 else { return }
-        let crop = PictureCrop.standardRatio(width: width, height: height,
-                                             sampleAspect: value(VLCMediaTracksInformationSourceAspectRatio) / den)
+        let crop = PictureCrop.geometry(width: Int(width), height: Int(height),
+                                        sampleAspect: value(VLCMediaTracksInformationSourceAspectRatio) / den)
         let key = ObjectIdentifier(player)
         guard appliedCrop[key] != crop else { return }
         appliedCrop[key] = crop
@@ -377,14 +377,13 @@ final class PlayerController: ObservableObject {
     }
 
     /// Vor dem Öffnen eines Mediums: Der Beschnitt am Player gälte sonst weiter. SD-Sender bekommen
-    /// 16:9 gleich als Medienoption, denn die macOS-Videoausgabe von VLC übernimmt einen erst später
-    /// gesetzten Beschnitt nicht sofort, sondern erst bei der nächsten Größenänderung des Fensters.
-    /// Weicht die Videospur ab (4:3, HD-Format), korrigiert `updateCrop` den Wert.
+    /// den Ausschnitt für 720 × 576 (16:9) gleich als Medienoption, damit er ab dem ersten Bild gilt.
+    /// Weicht die Videospur ab (4:3, andere Breite), korrigiert `updateCrop` den Wert.
     private func resetCrop(for player: VLCMediaPlayer, media: VLCMedia, isSD: Bool) {
         Self.setCrop(nil, on: player)
         if isSD {
-            media.addOption(":crop=16:9")
-            appliedCrop[ObjectIdentifier(player)] = "16:9"
+            media.addOption(":crop=\(PictureCrop.defaultSDGeometry)")
+            appliedCrop[ObjectIdentifier(player)] = PictureCrop.defaultSDGeometry
         } else {
             appliedCrop[ObjectIdentifier(player)] = nil
         }
