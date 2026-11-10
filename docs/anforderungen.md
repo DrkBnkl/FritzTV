@@ -35,6 +35,7 @@ Die FRITZ!Box liefert pro Client-IP nur einen RTSP-Stream. Ein zweiter Stream zu
 
 - **Deinterlacing:** Für SD-Sender setzt `PlayerController` den Filter `yadif2x` (Einstellung `deinterlaceSD`, Standard an). Jedes Halbbild wird zu einem Vollbild, die Ausgabe hat 50 Bilder/s und passt zur 50-Hz-Anzeige (`DisplayCriteria.request50Hz()`). HD-Sender bleiben ungefiltert.
 - **Nachschärfen (nur macOS):** Einstellung `sharpenSD` (Standard aus) hängt an das `VLCMedia` die Optionen `:video-filter=sharpen` und `:sharpen-sigma=0.1`. Das Modul ist nur in VLCKit für macOS enthalten, in TVVLCKit fehlt es (ebenso `postproc`).
+- **Beschnitt auf das Standardformat (`PictureCrop`):** PAL-SD mit 720 Pixeln und SAR 16:11 bzw. 12:11 ist knapp breiter als 16:9 bzw. 4:3 (Randspalten der Austastung). Im 16:9-Fenster bzw. auf dem Fernseher entstünden schmale Balken oben und unten. SD-Sender öffnen deshalb mit der Medienoption `:crop=16:9`; die macOS-Videoausgabe von VLC übernimmt einen nachträglich gesetzten Beschnitt erst bei der nächsten Fenstergrößenänderung. Sobald die Videospur Größe und SAR meldet, setzt `PlayerController.updateCrop` den passenden Wert (`16:9`, `4:3` oder keinen), auch für den Timeshift-Player.
 - **Skalierung:** Die Vergrößerung auf die Fenster- bzw. Bildschirmauflösung übernimmt die OpenGL-Videoausgabe von VLCKit 3 (bilinear). Ein hochwertigerer Skalierer (z. B. libplacebo in VLC 4 oder MetalFX) ist mit VLCKit 3 nicht ohne eigene Videoausgabe möglich.
 
 ## Timeshift, „Von Anfang an“, Mediathek
