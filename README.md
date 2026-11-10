@@ -41,13 +41,13 @@ Einschränkungen:
 
 ## Ansichten
 
-| Programmübersicht (EPG-Zeitstrahl) | Live-TV mit Senderliste und Infotafel |
+| Programmübersicht (EPG-Zeitstrahl) | Senderliste mit Programmdetails |
 | :---: | :---: |
-| ![Programmübersicht](docs/screenshots/epg-zeitstrahl.png) | ![Senderliste und Infotafel](docs/screenshots/senderliste-live.png) |
+| ![Programmübersicht](docs/screenshots/epg-zeitstrahl.png) | ![Senderliste mit Programmdetails](docs/screenshots/senderliste.png) |
 | **Sendungsinfo, „Von Anfang an“, Timeshift** | **Mediathek-Suche** |
 | ![Sendungsinfo und Timeshift](docs/screenshots/sendungsinfo-timeshift.png) | ![Mediathek-Suche](docs/screenshots/mediathek-suche.png) |
 
-Die Screenshots werden mit `scripts/make-screenshots.swift` aus Beispieldaten erzeugt.
+Die Screenshots zeigen die Apple-TV-Oberfläche; sie werden mit `scripts/make-screenshots.swift` aus Beispieldaten erzeugt (kein Fernsehbild).
 
 ## Installation
 
